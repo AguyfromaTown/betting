@@ -426,7 +426,7 @@ def call_ai(prompt: str, api_key: str) -> str:
 
     log("Calling Gemini API (free)...")
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",
         contents=prompt,
         config={
             "max_output_tokens": 8192,
