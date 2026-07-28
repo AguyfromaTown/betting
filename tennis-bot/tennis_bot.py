@@ -1,6 +1,6 @@
 """
 Tennis Betting Bot — Automated daily picks pipeline.
-Runs the 3-stage analysis via Claude API and logs results.
+Runs the 3-stage analysis via Google Gemini API and logs results.
 Designed for GitHub Actions execution.
 """
 
