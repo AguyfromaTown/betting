@@ -55,7 +55,7 @@ def parse_args():
     parser.add_argument("--odds-min", type=float, default=1.5, help="Min decimal odds")
     parser.add_argument("--odds-max", type=float, default=1.6, help="Max decimal odds")
     parser.add_argument("--bankroll", type=float, default=None, help="Override bankroll")
-
+    parser.add_argument("--force", action="store_true", help="Run even if bets already logged for this date")
     return parser.parse_args()
 
 
@@ -615,6 +615,19 @@ def save_report(date_str: str, report: str):
 
 # ─── Main ────────────────────────────────────────────────────────────
 
+def already_logged_today(date_str: str) -> bool:
+    """Check if bets for this date already exist in the log."""
+    if not LOG_FILE.exists() or LOG_FILE.stat().st_size == 0:
+        return False
+    with open(LOG_FILE, newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        next(reader, None)  # skip header
+        for row in reader:
+            if row and row[0].strip() == date_str:
+                return True
+    return False
+
+
 def main():
     args = parse_args()
     date_str = resolve_date(args.date)
@@ -623,6 +636,12 @@ def main():
 
     log(f"=== Tennis Bot — {date_str} ===")
     log(f"Odds range: {odds_min}-{odds_max}")
+
+    # Skip if already logged today (prevents double-logging when running locally)
+    if not args.force and already_logged_today(date_str):
+        log(f"Bets already logged for {date_str}. Skipping to avoid duplicates.")
+        log("(Use --force to override.)")
+        return
 
     bankroll = load_bankroll(args.bankroll)
     if bankroll is None:
