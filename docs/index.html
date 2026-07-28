@@ -3,164 +3,440 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Betting Log</title>
+<title>Betting Log — Dashboard</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg-primary: #0a0c10;
+    --bg-secondary: #12151c;
+    --bg-card: #181c27;
+    --bg-card-hover: #1f2433;
+    --border: #232837;
+    --border-light: #2a2f42;
+    --text-primary: #e8eaed;
+    --text-secondary: #8b95a8;
+    --text-muted: #545d70;
+    --green: #22c55e;
+    --green-bg: rgba(34, 197, 94, 0.1);
+    --red: #ef4444;
+    --red-bg: rgba(239, 68, 68, 0.1);
+    --blue: #3b82f6;
+    --yellow: #eab308;
+    --accent: #6366f1;
+    --accent-glow: rgba(99, 102, 241, 0.15);
+    --radius: 10px;
+    --radius-sm: 6px;
+  }
+
+  html { font-size: 15px; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #0f1117;
-    color: #e1e4e8;
-    padding: 24px;
-  }
-  .container { max-width: 1100px; margin: 0 auto; }
-
-  h1 {
-    font-size: 24px;
-    margin-bottom: 4px;
-  }
-  .subtitle {
-    color: #8b949e;
-    font-size: 14px;
-    margin-bottom: 24px;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    line-height: 1.5;
   }
 
-  .stats {
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px;
+  }
+
+  /* ─── Header ─── */
+  .header {
     display: flex;
-    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 36px;
     flex-wrap: wrap;
-    margin-bottom: 24px;
+    gap: 16px;
+  }
+  .header-left { display: flex; align-items: center; gap: 16px; }
+  .logo {
+    width: 42px;
+    height: 42px;
+    background: linear-gradient(135deg, var(--accent), #818cf8);
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    font-weight: 700;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .header h1 {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+  }
+  .header h1 span { color: var(--text-secondary); font-weight: 400; font-size: 18px; }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    background: var(--accent-glow);
+    color: #a5b4fc;
+    border: 1px solid rgba(99, 102, 241, 0.25);
+  }
+  .badge .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .last-updated {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  /* ─── Stats Grid ─── */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 28px;
   }
   .stat-card {
-    background: #1c1f2b;
-    border-radius: 8px;
-    padding: 16px 24px;
-    flex: 1;
-    min-width: 120px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s, background 0.2s;
   }
-  .stat-card .label {
-    font-size: 12px;
+  .stat-card:hover {
+    border-color: var(--border-light);
+    background: var(--bg-card-hover);
+  }
+  .stat-card .stat-icon {
+    font-size: 18px;
+    margin-bottom: 8px;
+    opacity: 0.6;
+  }
+  .stat-card .stat-label {
+    font-size: 11px;
+    font-weight: 600;
     text-transform: uppercase;
-    color: #8b949e;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.8px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
   }
-  .stat-card .value {
+  .stat-card .stat-value {
     font-size: 28px;
     font-weight: 700;
+    letter-spacing: -0.5px;
+    line-height: 1.2;
+  }
+  .stat-card .stat-sub {
+    font-size: 12px;
+    color: var(--text-muted);
     margin-top: 4px;
   }
-  .stat-card .value.green { color: #3fb950; }
-  .stat-card .value.red { color: #f85149; }
-  .stat-card .value.white { color: #e1e4e8; }
-  .stat-card .value.yellow { color: #d29922; }
+  .stat-value.green { color: var(--green); }
+  .stat-value.red { color: var(--red); }
+  .stat-value.blue { color: var(--blue); }
+  .stat-value.accent { color: var(--accent); }
 
+  /* ─── Charts ─── */
+  .chart-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-bottom: 28px;
+  }
+  .chart-section .chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .chart-section .chart-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .chart-section .chart-header span {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  canvas#bankrollChart {
+    width: 100%;
+    height: 160px;
+    display: block;
+  }
+
+  /* ─── Table ─── */
+  .table-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .table-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .table-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .table-header .count {
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--bg-primary);
+    padding: 2px 10px;
+    border-radius: 12px;
+  }
   .table-wrap {
-    background: #1c1f2b;
-    border-radius: 8px;
     overflow-x: auto;
-    padding: 4px;
   }
   table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 14px;
+    font-size: 13.5px;
   }
   th {
     text-align: left;
-    padding: 12px 16px;
-    color: #8b949e;
+    padding: 10px 20px;
+    font-size: 11px;
     font-weight: 600;
-    font-size: 12px;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    border-bottom: 1px solid #30363d;
+    letter-spacing: 0.6px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,255,255,0.015);
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
   }
   td {
-    padding: 10px 16px;
-    border-bottom: 1px solid #21262d;
+    padding: 11px 20px;
+    border-bottom: 1px solid rgba(35, 40, 55, 0.5);
+    color: var(--text-primary);
+    vertical-align: middle;
   }
   tr:last-child td { border-bottom: none; }
-  tr:hover td { background: #252836; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
 
-  .result-win { color: #3fb950; font-weight: 600; }
-  .result-loss { color: #f85149; font-weight: 600; }
-  .result-pending { color: #8b949e; }
-  .grade-top { color: #3fb950; font-weight: 600; }
-  .grade-value { color: #58a6ff; font-weight: 600; }
-  .grade-moderate { color: #d29922; }
+  .result-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .result-badge.win {
+    background: var(--green-bg);
+    color: var(--green);
+  }
+  .result-badge.loss {
+    background: var(--red-bg);
+    color: var(--red);
+  }
+  .result-badge.pending {
+    background: rgba(139, 149, 168, 0.1);
+    color: var(--text-muted);
+  }
+
+  .grade-tag {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .grade-tag.top { background: rgba(34, 197, 94, 0.12); color: var(--green); }
+  .grade-tag.value { background: rgba(59, 130, 246, 0.12); color: var(--blue); }
+
+  .match-cell {
+    font-weight: 500;
+  }
+  .match-cell .tournament {
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--text-muted);
+    display: block;
+    margin-top: 1px;
+  }
+
+  .odds-cell {
+    font-family: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
 
   .empty-state {
     text-align: center;
-    padding: 60px 20px;
-    color: #8b949e;
+    padding: 80px 20px;
+    color: var(--text-muted);
   }
-  .empty-state h2 { font-size: 20px; margin-bottom: 8px; color: #e1e4e8; }
+  .empty-state .empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.4; }
+  .empty-state h2 { font-size: 18px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+  .empty-state p { font-size: 14px; }
 
+  /* ─── Footer ─── */
   .footer {
     margin-top: 24px;
     text-align: center;
     font-size: 12px;
-    color: #484f58;
+    color: var(--text-muted);
+    padding: 16px 0;
+    border-top: 1px solid var(--border);
+  }
+  .footer code {
+    background: var(--bg-card);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11px;
   }
 
-  @media (max-width: 600px) {
-    body { padding: 12px; }
-    .stat-card { min-width: calc(50% - 6px); }
-    th, td { padding: 8px 10px; font-size: 13px; }
+  /* ─── Responsive ─── */
+  @media (max-width: 768px) {
+    .container { padding: 16px 12px; }
+    .header { margin-bottom: 24px; }
+    .header h1 { font-size: 18px; }
+    .header h1 span { font-size: 14px; }
+    .stats { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .stat-card { padding: 14px; }
+    .stat-card .stat-value { font-size: 22px; }
+    th, td { padding: 10px 14px; font-size: 12.5px; }
+    .table-header { padding: 12px 14px; flex-direction: column; align-items: flex-start; gap: 6px; }
+  }
+  @media (max-width: 480px) {
+    .stats { grid-template-columns: 1fr 1fr; }
+    .stat-card .stat-value { font-size: 20px; }
+    .logo { width: 34px; height: 34px; font-size: 16px; }
   }
 </style>
 </head>
 <body>
 <div class="container">
-  <h1>📊 Betting Log</h1>
-  <p class="subtitle" id="last-updated">Loading...</p>
 
-  <div class="stats" id="stats">
-    <div class="stat-card"><div class="label">Total Bets</div><div class="value white" id="total-bets">-</div></div>
-    <div class="stat-card"><div class="label">Win Rate</div><div class="value white" id="win-rate">-</div></div>
-    <div class="stat-card"><div class="label">Net P&amp;L</div><div class="value white" id="pnl">-</div></div>
-    <div class="stat-card"><div class="label">Bankroll</div><div class="value white" id="last-balance">-</div></div>
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">B</div>
+      <div>
+        <h1>Betting Log <span>— Dashboard</span></h1>
+        <div class="last-updated" id="last-updated">Loading...</div>
+      </div>
+    </div>
+    <div class="badge">
+      <span class="dot"></span>
+      Live
+    </div>
   </div>
 
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Match</th>
-          <th>Bet</th>
-          <th>Odds</th>
-          <th>Stake</th>
-          <th>Result</th>
-          <th>Return</th>
-        </tr>
-      </thead>
-      <tbody id="log-body"></tbody>
-    </table>
-    <div class="empty-state" id="empty-state">
-      <h2>No bets logged yet</h2>
-      <p>Run the tennis bot or /tennis-picks to get started.</p>
+  <!-- Stats -->
+  <div class="stats" id="stats">
+    <div class="stat-card">
+      <div class="stat-icon">🎾</div>
+      <div class="stat-label">Total Bets</div>
+      <div class="stat-value blue" id="total-bets">—</div>
+      <div class="stat-sub" id="total-stake-sub"></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">📈</div>
+      <div class="stat-label">Win Rate</div>
+      <div class="stat-value" id="win-rate">—</div>
+      <div class="stat-sub" id="win-loss-sub"></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">💰</div>
+      <div class="stat-label">Profit &amp; Loss</div>
+      <div class="stat-value" id="pnl">—</div>
+      <div class="stat-sub" id="pnl-sub"></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">🏦</div>
+      <div class="stat-label">Current Bankroll</div>
+      <div class="stat-value accent" id="last-balance">—</div>
+      <div class="stat-sub" id="balance-sub"></div>
+    </div>
+  </div>
+
+  <!-- Bankroll Chart -->
+  <div class="chart-section" id="chart-section">
+    <div class="chart-header">
+      <h3>Bankroll History</h3>
+      <span>over time</span>
+    </div>
+    <canvas id="bankrollChart"></canvas>
+  </div>
+
+  <!-- Table -->
+  <div class="table-section">
+    <div class="table-header">
+      <h3>Bet Log</h3>
+      <span class="count" id="row-count">0 entries</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Match</th>
+            <th>Pick</th>
+            <th>Odds</th>
+            <th>Stake</th>
+            <th>Result</th>
+            <th>Return</th>
+          </tr>
+        </thead>
+        <tbody id="log-body"></tbody>
+      </table>
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon">📋</div>
+        <h2>No bets logged yet</h2>
+        <p>Run the tennis bot or <code>/tennis-picks</code> to get started.</p>
+      </div>
     </div>
   </div>
 
   <div class="footer">
-    Data from <code>bets-log.csv</code> &middot; Updated automatically
+    Data from <code>bets-log.csv</code> · Refreshed on each page load
   </div>
 </div>
 
 <script>
 async function loadLog() {
   const resp = await fetch('https://raw.githubusercontent.com/AguyfromaTown/betting/main/bets-log.csv');
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const text = await resp.text();
   const lines = text.trim().split('\n');
 
   if (lines.length <= 1) {
     document.getElementById('empty-state').style.display = 'block';
-    document.getElementById('last-updated').textContent = 'No entries yet';
+    document.getElementById('chart-section').style.display = 'none';
+    document.getElementById('last-updated').textContent = 'No entries yet — run the bot to get started';
     return;
   }
 
   document.getElementById('empty-state').style.display = 'none';
 
+  // Parse CSV
   const rows = lines.slice(1).map(line => {
     const cols = line.split(',');
     return {
@@ -168,67 +444,218 @@ async function loadLog() {
       match: cols[1] || '',
       bet: cols[2] || '',
       odds: cols[3] || '',
-      stake: cols[4] || '',
-      result: cols[5] || '',
-      ret: cols[6] || '',
-      balance: cols[7] || ''
+      stake: parseFloat(cols[4]) || 0,
+      result: (cols[5] || '').trim(),
+      ret: parseFloat(cols[6]) || 0,
+      balance: parseFloat(cols[7]) || null,
     };
-  });
+  }).filter(r => r.date);
 
-  rows.reverse(); // newest first
+  // Display order: newest first
+  const displayRows = [...rows].reverse();
 
+  // Compute stats
   const settled = rows.filter(r => r.result.toLowerCase() === 'win' || r.result.toLowerCase() === 'loss');
   const wins = settled.filter(r => r.result.toLowerCase() === 'win');
-  const winRate = settled.length ? ((wins.length / settled.length) * 100).toFixed(1) : '-';
-  const totalStake = rows.reduce((s, r) => s + (parseFloat(r.stake) || 0), 0);
-  const totalReturn = rows.reduce((s, r) => s + (parseFloat(r.ret) || 0), 0);
-  const pnl = (totalReturn - totalStake).toFixed(2);
-  const lastBalance = rows.find(r => r.balance)?.balance || '-';
+  const losses = settled.filter(r => r.result.toLowerCase() === 'loss');
+  const winRate = settled.length ? ((wins.length / settled.length) * 100) : null;
+  const totalStake = rows.reduce((s, r) => s + r.stake, 0);
+  const totalReturn = rows.reduce((s, r) => s + r.ret, 0);
+  const pnl = totalReturn - totalStake;
+  const roi = totalStake > 0 ? ((pnl / totalStake) * 100) : null;
 
+  // Latest bankroll
+  const lastWithBalance = [...rows].reverse().find(r => r.balance !== null);
+  const lastBalance = lastWithBalance ? lastWithBalance.balance : null;
+
+  // Populate stats
   document.getElementById('total-bets').textContent = rows.length;
-  document.getElementById('win-rate').textContent = settled.length ? winRate + '%' : '-';
+  document.getElementById('total-stake-sub').textContent = '€' + totalStake.toFixed(2) + ' total staked';
+
+  const wrEl = document.getElementById('win-rate');
+  if (winRate !== null) {
+    wrEl.textContent = winRate.toFixed(1) + '%';
+    wrEl.className = 'stat-value ' + (winRate >= 50 ? 'green' : 'red');
+  } else {
+    wrEl.textContent = '—';
+    wrEl.className = 'stat-value';
+  }
+  document.getElementById('win-loss-sub').textContent = wins.length + 'W / ' + losses.length + 'L';
 
   const pnlEl = document.getElementById('pnl');
-  pnlEl.textContent = (pnl >= 0 ? '+' : '') + pnl;
-  pnlEl.className = 'value ' + (pnl > 0 ? 'green' : pnl < 0 ? 'red' : 'white');
+  pnlEl.textContent = (pnl >= 0 ? '+' : '') + pnl.toFixed(2);
+  pnlEl.className = 'stat-value ' + (pnl > 0 ? 'green' : pnl < 0 ? 'red' : 'blue');
+  document.getElementById('pnl-sub').textContent =
+    (roi !== null ? (roi >= 0 ? '+' : '') + roi.toFixed(1) + '% ROI' : '');
 
   const balEl = document.getElementById('last-balance');
-  balEl.textContent = lastBalance !== '-' ? '€' + lastBalance : '-';
+  balEl.textContent = lastBalance !== null ? '€' + lastBalance.toFixed(2) : '—';
+
+  // Find first and latest bankroll entry
+  const withBalance = rows.filter(r => r.balance !== null);
+  const firstBal = withBalance.length > 0 ? withBalance[0].balance : 0;
+  const latestBal = lastBalance || 0;
+  const balDiff = latestBal - firstBal;
+  document.getElementById('balance-sub').textContent =
+    (balDiff !== 0 ? (balDiff > 0 ? '▲' : '▼') + ' ' + (balDiff >= 0 ? '+' : '') + balDiff.toFixed(2) : '') +
+    (withBalance.length > 0 ? ' since first entry' : '');
 
   document.getElementById('last-updated').textContent =
-    `Last updated: ${rows[0].date || 'unknown'} · ${rows.length} entries`;
+    'Last entry: ' + displayRows[0].date + ' · ' + rows.length + ' total bets';
 
+  document.getElementById('row-count').textContent = rows.length + ' entries';
+
+  // Draw bankroll chart
+  drawChart(rows);
+
+  // Populate table
   const tbody = document.getElementById('log-body');
   tbody.innerHTML = '';
 
-  for (const r of rows) {
+  for (const r of displayRows) {
     const tr = document.createElement('tr');
 
-    const resultClass = r.result.toLowerCase() === 'win' ? 'result-win'
-      : r.result.toLowerCase() === 'loss' ? 'result-loss'
-      : 'result-pending';
+    const isWin = r.result.toLowerCase() === 'win';
+    const isLoss = r.result.toLowerCase() === 'loss';
+    const isPending = !r.result;
 
-    const resultDisplay = r.result || '—';
+    let resultBadge = '<span class="result-badge pending">—</span>';
+    if (isWin) resultBadge = '<span class="result-badge win">● Won</span>';
+    else if (isLoss) resultBadge = '<span class="result-badge loss">● Lost</span>';
 
-    const returnDisplay = r.ret || '—';
+    // Try to extract grade from bet (it might say "to win" or have a grade tag)
+    // We'll look for "Top Pick" or "Value Pick" in the bet text
+    const betText = r.bet || '';
+    const hasTop = betText.includes('Top Pick') || betText.includes('TOP');
+    const hasValue = betText.includes('Value Pick') || betText.includes('VALUE');
+    let gradeTag = '';
+    if (hasTop) gradeTag = '<span class="grade-tag top">TOP</span> ';
+    else if (hasValue) gradeTag = '<span class="grade-tag value">VALUE</span> ';
+
+    // Format the match cell — try to split on "(" to show tournament separately
+    let matchDisplay = r.match;
+    let tourneyDisplay = '';
+    const parenIdx = r.match.lastIndexOf('(');
+    if (parenIdx > 0) {
+      matchDisplay = r.match.substring(0, parenIdx).trim();
+      tourneyDisplay = r.match.substring(parenIdx);
+    }
+
+    const returnDisplay = r.ret ? '€' + r.ret.toFixed(2) : '—';
+    const oddsDisplay = r.odds ? r.odds : '—';
+    const stakeDisplay = r.stake ? '€' + r.stake.toFixed(2) : '—';
 
     tr.innerHTML = `
       <td>${r.date}</td>
-      <td>${r.match}</td>
-      <td>${r.bet}</td>
-      <td>${r.odds}</td>
-      <td>${r.stake}</td>
-      <td class="${resultClass}">${resultDisplay}</td>
+      <td><div class="match-cell">${matchDisplay}${tourneyDisplay ? '<span class="tournament">' + tourneyDisplay + '</span>' : ''}</div></td>
+      <td>${gradeTag}${betText}</td>
+      <td class="odds-cell">${oddsDisplay}</td>
+      <td>${stakeDisplay}</td>
+      <td>${resultBadge}</td>
       <td>${returnDisplay}</td>
     `;
     tbody.appendChild(tr);
   }
 }
 
+function drawChart(rows) {
+  const withBalance = rows.filter(r => r.balance !== null);
+  if (withBalance.length < 2) {
+    document.getElementById('chart-section').style.display = 'none';
+    return;
+  }
+  document.getElementById('chart-section').style.display = 'block';
+
+  const canvas = document.getElementById('bankrollChart');
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth || rect.width || 800;
+  const h = canvas.clientHeight || 160;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const pad = { top: 16, bottom: 24, left: 50, right: 20 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+
+  const values = withBalance.map(r => r.balance);
+  const min = Math.min(...values) * 0.97;
+  const max = Math.max(...values) * 1.03;
+  const range = max - min || 1;
+
+  // Line
+  ctx.beginPath();
+  ctx.strokeStyle = '#6366f1';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  for (let i = 0; i < values.length; i++) {
+    const x = pad.left + (i / (values.length - 1)) * plotW;
+    const y = pad.top + (1 - (values[i] - min) / range) * plotH;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Fill area under line
+  const lastIdx = values.length - 1;
+  ctx.lineTo(pad.left + plotW, pad.top + plotH);
+  ctx.lineTo(pad.left, pad.top + plotH);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + plotH);
+  grad.addColorStop(0, 'rgba(99, 102, 241, 0.2)');
+  grad.addColorStop(1, 'rgba(99, 102, 241, 0.01)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Dots on endpoints
+  for (const idx of [0, lastIdx]) {
+    const x = pad.left + (idx / (values.length - 1)) * plotW;
+    const y = pad.top + (1 - (values[idx] - min) / range) * plotH;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#6366f1';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(99, 102, 241, 0.25)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  // Y-axis labels
+  ctx.fillStyle = '#545d70';
+  ctx.font = '10px Inter, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i <= 4; i++) {
+    const val = min + (i / 4) * range;
+    const y = pad.top + (1 - i / 4) * plotH;
+    ctx.fillText('€' + val.toFixed(0), pad.left - 6, y);
+  }
+
+  // X-axis labels (first and last date)
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  if (withBalance.length > 0) {
+    ctx.fillText(withBalance[0].date, pad.left, h - pad.bottom + 6);
+    if (withBalance.length > 1) {
+      ctx.fillText(withBalance[lastIdx].date, pad.left + plotW, h - pad.bottom + 6);
+    }
+  }
+}
+
 loadLog().catch(err => {
-  document.getElementById('last-updated').textContent = 'Failed to load: ' + err.message;
+  document.getElementById('last-updated').textContent = 'Error: ' + err.message;
   document.getElementById('empty-state').style.display = 'block';
-  document.getElementById('empty-state').innerHTML = '<h2>Error loading data</h2><p>Make sure bets-log.csv exists in the repo.</p>';
+  document.getElementById('empty-state').innerHTML =
+    '<div class="empty-icon">⚠️</div><h2>Failed to load data</h2><p>' + err.message + '</p>';
 });
 </script>
 </body>
