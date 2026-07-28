@@ -282,7 +282,7 @@
   </main>
 
   <script>
-    const DATA_URL = "https://raw.githubusercontent.com/AguyfromaTown/betting/main/bets-log.csv";
+    const DATA_URL = "https://api.github.com/repos/AguyfromaTown/betting/contents/bets-log.csv";
     let allRows = [];
 
     const el = id => document.getElementById(id);
@@ -420,9 +420,11 @@
 
     async function loadLog() {
       try {
-        const response = await fetch(DATA_URL, { cache: "no-store" });
-        if (!response.ok) throw new Error(`Data request returned ${response.status}`);
-        allRows = normalizeRows(await response.text());
+        const response = await fetch(DATA_URL);
+        if (!response.ok) throw new Error(`GitHub API returned ${response.status}`);
+        const json = await response.json();
+        const text = atob(json.content.replace(/\s/g, ""));
+        allRows = normalizeRows(text);
         renderStats(allRows); renderTable([...allRows].reverse()); drawChart(allRows);
         el("status-text").textContent = "Data synced";
         el("last-updated").textContent = allRows.length ? `${allRows.at(-1).date} · ${allRows.length} total bets` : "Waiting for your first bet";
