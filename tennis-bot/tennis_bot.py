@@ -55,7 +55,7 @@ def parse_args():
     parser.add_argument("--odds-min", type=float, default=1.5, help="Min decimal odds")
     parser.add_argument("--odds-max", type=float, default=1.6, help="Max decimal odds")
     parser.add_argument("--bankroll", type=float, default=None, help="Override bankroll")
-    parser.add_argument("--claude-api-key", default=None, help="Anthropic API key")
+
     return parser.parse_args()
 
 
@@ -418,22 +418,24 @@ Direct and analytical. Quantify confidence. No marketing language. Aim for 500-8
     return prompt
 
 
-def call_claude(prompt: str, api_key: str) -> str:
-    """Call Claude API with the constructed prompt."""
-    import anthropic
+def call_ai(prompt: str, api_key: str) -> str:
+    """Call Google Gemini API (free tier) with the constructed prompt."""
+    import google.genai as genai
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = genai.Client(api_key=api_key)
 
-    log("Calling Claude API...")
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=8192,
-        temperature=0.3,
-        messages=[{"role": "user", "content": prompt}],
+    log("Calling Gemini API (free)...")
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt,
+        config={
+            "max_output_tokens": 8192,
+            "temperature": 0.3,
+        },
     )
 
-    content = response.content[0].text if response.content else ""
-    log(f"Claude response: {len(content)} chars")
+    content = response.text if response.text else ""
+    log(f"Gemini response: {len(content)} chars")
     return content
 
 
@@ -603,7 +605,7 @@ def log_bets(
 # ─── Report ──────────────────────────────────────────────────────────
 
 def save_report(date_str: str, report: str):
-    """Save the Claude report to a dated file."""
+    """Save the AI report to a dated file."""
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     filename = f"picks-{date_str}.md"
     path = REPORTS_DIR / filename
@@ -638,12 +640,13 @@ def main():
     log("Building analysis prompt...")
     prompt = build_prompt(date_str, qualified, bankroll, odds_min, odds_max)
 
-    api_key = args.claude_api_key or os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        log("ERROR: No Claude API key. Set ANTHROPIC_API_KEY env var or pass --claude-api-key")
+        log("ERROR: No API key. Set GOOGLE_API_KEY env var.")
+        log("Get a free key at https://aistudio.google.com/apikey")
         sys.exit(1)
 
-    report = call_claude(prompt, api_key)
+    report = call_ai(prompt, api_key)
 
     # Stage 4: Log bets
     recommendations = parse_recommendations(report)
