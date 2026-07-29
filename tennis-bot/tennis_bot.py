@@ -25,11 +25,7 @@ REPORTS_DIR = REPO_ROOT / "reports"
 
 REQUEST_TIMEOUT = 30
 MAX_COMPLETION_TOKENS = 2048
-GROQ_MODELS = (
-    "llama-3.3-70b-versatile",
-    "openai/gpt-oss-120b",
-    "llama-3.1-8b-instant",
-)
+GROQ_MODEL = "llama-3.3-70b-versatile"
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -598,17 +594,23 @@ Direct and analytical. Quantify confidence. No marketing language. Aim for 500-8
     return prompt
 
 
-def call_ai(prompt: str, api_key: str) -> str:
-    """Call Groq's OpenAI-compatible API with the constructed prompt."""
+def call_ai(prompt: str, api_keys: list[str]) -> str:
+    """Call Groq, rotating API keys while keeping the model fixed."""
+    if not api_keys:
+        raise ValueError("No Groq API keys configured")
+
     last_response = None
-    for model_index, model in enumerate(GROQ_MODELS):
+    for key_index, api_key in enumerate(api_keys):
         payload = {
-            "model": model,
+            "model": GROQ_MODEL,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": MAX_COMPLETION_TOKENS,
             "temperature": 0.3,
         }
-        log(f"Calling Groq API ({model})...")
+        log(
+            f"Calling Groq API ({GROQ_MODEL}, "
+            f"key {key_index + 1}/{len(api_keys)})..."
+        )
         response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={
@@ -619,16 +621,16 @@ def call_ai(prompt: str, api_key: str) -> str:
             timeout=120,
         )
         last_response = response
-        if response.status_code in {403, 404, 429} and model_index < len(GROQ_MODELS) - 1:
+        if response.status_code in {401, 403, 429} and key_index < len(api_keys) - 1:
             log(
-                f"  Groq model unavailable ({response.status_code}); "
-                "trying fallback model"
+                f"  Groq key unavailable ({response.status_code}); "
+                "rotating to next key"
             )
             continue
         try:
             response.raise_for_status()
             content = response.json()["choices"][0]["message"]["content"]
-            log(f"Groq response from {model}: {len(content)} chars")
+            log(f"Groq response: {len(content)} chars")
             return content
         except (requests.RequestException, KeyError, IndexError, ValueError) as exc:
             log(f"Groq API error: {exc}")
@@ -951,13 +953,23 @@ def main():
     log("Building analysis prompt...")
     prompt = build_prompt(date_str, qualified, bankroll, odds_min, odds_max)
 
-    api_key = os.environ.get("GROQ_API_KEY")
-    if not api_key:
-        log("ERROR: No API key. Set GROQ_API_KEY env var.")
+    groq_api_keys = [
+        value for value in (
+            os.environ.get("GROQ_API_KEY"),
+            os.environ.get("GROQ_API_KEY_2"),
+            os.environ.get("GROQ_API_KEY_3"),
+            os.environ.get("GROQ_API_KEY_4"),
+            os.environ.get("GROQ_API_KEY_5"),
+        )
+        if value
+    ]
+    if not groq_api_keys:
+        log("ERROR: No Groq API keys configured.")
         log("Get a key at https://console.groq.com/keys")
         sys.exit(1)
+    log(f"Loaded {len(groq_api_keys)} Groq API key(s)")
 
-    report = call_ai(prompt, api_key)
+    report = call_ai(prompt, groq_api_keys)
 
     # Stage 4: Log bets
     parsed_recommendations = parse_recommendations(report)
