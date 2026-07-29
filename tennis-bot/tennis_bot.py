@@ -51,6 +51,33 @@ def fetch(url: str) -> str | None:
         return None
 
 
+def fetch_reader(target_url: str) -> str | None:
+    """Fetch a page through Jina Reader using API headers, not browser headers."""
+    reader_headers = {
+        "Accept": "text/plain",
+        "User-Agent": "tennis-betting-bot/1.0",
+        "X-Return-Format": "markdown",
+    }
+    targets = [target_url]
+    if target_url.startswith("https://"):
+        targets.append("http://" + target_url.removeprefix("https://"))
+
+    for target in targets:
+        reader_url = f"https://r.jina.ai/{target}"
+        try:
+            response = requests.get(
+                reader_url,
+                headers=reader_headers,
+                timeout=REQUEST_TIMEOUT,
+            )
+            response.raise_for_status()
+            if response.text.strip():
+                return response.text
+        except requests.RequestException as exc:
+            log(f"  Reader request failed for {target}: {exc}")
+    return None
+
+
 def fetch_json(url: str, params: dict | None = None):
     """Fetch JSON while keeping API keys out of log output."""
     try:
@@ -496,8 +523,7 @@ def fetch_tennis_abstract_profiles(matches: list[dict]) -> dict[str, dict]:
         tour_profiles = parse_tennis_abstract_elo(html) if html else {}
         if not tour_profiles:
             log(f"  Direct Tennis Abstract {tour} access unavailable; trying reader")
-            reader_url = f"https://r.jina.ai/{url}"
-            reader_text = fetch(reader_url)
+            reader_text = fetch_reader(url)
             tour_profiles = (
                 parse_tennis_abstract_reader(reader_text)
                 if reader_text
