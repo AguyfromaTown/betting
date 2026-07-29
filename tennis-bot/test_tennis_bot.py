@@ -50,8 +50,8 @@ class TennisBotTests(unittest.TestCase):
             (1.55, 2.5, "Bet365"),
         )
 
-    @patch.object(bot, "fetch_json")
-    def test_odds_api_uses_batches_of_ten(self, fetch_json):
+    @patch.object(bot, "fetch_odds_json")
+    def test_odds_api_uses_batches_of_ten(self, fetch_odds_json):
         events = [
             {
                 "id": event_id,
@@ -76,16 +76,20 @@ class TennisBotTests(unittest.TestCase):
             }
             for event in events
         ]
-        fetch_json.side_effect = [events, odds[:10], odds[10:]]
+        fetch_odds_json.side_effect = [
+            (events, 0),
+            (odds[:10], 0),
+            (odds[10:], 0),
+        ]
 
         matches = bot.fetch_matches_from_odds_api(
             "2026-07-30",
-            "secret-key",
+            ["secret-key"],
         )
 
         self.assertEqual(len(matches), 11)
-        self.assertEqual(fetch_json.call_count, 3)
-        bulk_calls = fetch_json.call_args_list[1:]
+        self.assertEqual(fetch_odds_json.call_count, 3)
+        bulk_calls = fetch_odds_json.call_args_list[1:]
         self.assertTrue(
             all(call.args[0].endswith("/odds/multi") for call in bulk_calls)
         )
@@ -93,6 +97,27 @@ class TennisBotTests(unittest.TestCase):
             bulk_calls[0].args[1]["eventIds"],
             "0,1,2,3,4,5,6,7,8,9",
         )
+
+    @patch.object(bot.requests, "get")
+    def test_odds_api_rotates_key_after_429(self, get):
+        exhausted = unittest.mock.Mock(status_code=429)
+        working = unittest.mock.Mock(status_code=200)
+        working.raise_for_status.return_value = None
+        working.json.return_value = [{"id": 1}]
+        get.side_effect = [exhausted, working]
+
+        payload, key_index = bot.fetch_odds_json(
+            "https://api.odds-api.io/v3/events",
+            {"sport": "tennis"},
+            ["first-key", "second-key"],
+            0,
+        )
+
+        self.assertEqual(payload, [{"id": 1}])
+        self.assertEqual(key_index, 1)
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(get.call_args_list[0].kwargs["params"]["apiKey"], "first-key")
+        self.assertEqual(get.call_args_list[1].kwargs["params"]["apiKey"], "second-key")
 
     @patch.object(bot.requests, "post")
     def test_call_ai_uses_groq_contract(self, post):

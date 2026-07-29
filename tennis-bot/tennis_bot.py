@@ -66,6 +66,44 @@ def fetch_json(url: str, params: dict | None = None):
         return None
 
 
+def fetch_odds_json(
+    url: str,
+    params: dict,
+    api_keys: list[str],
+    key_index: int,
+) -> tuple[object | None, int]:
+    """Fetch Odds-API.io JSON, rotating keys on quota or authentication errors."""
+    if not api_keys:
+        return None, key_index
+
+    for offset in range(len(api_keys)):
+        candidate_index = (key_index + offset) % len(api_keys)
+        request_params = {**params, "apiKey": api_keys[candidate_index]}
+        try:
+            response = requests.get(
+                url,
+                params=request_params,
+                headers=REQUEST_HEADERS,
+                timeout=REQUEST_TIMEOUT,
+            )
+            if response.status_code in {401, 403, 429}:
+                log(
+                    f"  Odds API key {candidate_index + 1}/{len(api_keys)} "
+                    f"unavailable ({response.status_code}); rotating"
+                )
+                continue
+            response.raise_for_status()
+            return response.json(), candidate_index
+        except (requests.RequestException, ValueError) as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            detail = f"HTTP {status}" if status else type(exc).__name__
+            log(f"  Odds API request failed for {url}: {detail}")
+            return None, candidate_index
+
+    log("  All configured Odds API keys are unavailable or out of quota")
+    return None, key_index
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Tennis betting bot")
     parser.add_argument("--date", default=None, help="Match date (YYYY-MM-DD)")
@@ -227,11 +265,13 @@ def extract_moneyline_odds(payload: dict) -> tuple[float | None, float | None, s
     return None, None, None
 
 
-def fetch_matches_from_odds_api(date_str: str, api_key: str) -> list[dict]:
+def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict]:
     """Fetch verified tennis fixtures and match-winner odds from Odds-API.io."""
-    events_payload = fetch_json(
+    events_payload, key_index = fetch_odds_json(
         "https://api.odds-api.io/v3/events",
-        {"apiKey": api_key, "sport": "tennis"},
+        {"sport": "tennis"},
+        api_keys,
+        0,
     )
     if events_payload is None:
         return []
@@ -253,13 +293,14 @@ def fetch_matches_from_odds_api(date_str: str, api_key: str) -> list[dict]:
     matches = []
     for start in range(0, len(dated_events), 10):
         batch = dated_events[start:start + 10]
-        payload = fetch_json(
+        payload, key_index = fetch_odds_json(
             "https://api.odds-api.io/v3/odds/multi",
             {
-                "apiKey": api_key,
                 "eventIds": ",".join(str(event.get("id")) for event in batch),
                 "bookmakers": "Bet365,Unibet",
             },
+            api_keys,
+            key_index,
         )
         if isinstance(payload, list):
             odds_events = payload
@@ -757,14 +798,24 @@ def main():
     if bankroll is None:
         log("WARNING: No bankroll set. Run with --bankroll <amount>")
 
-    odds_api_key = os.environ.get("ODDS_API_KEY")
-    if not odds_api_key:
-        log("ERROR: No odds key. Set ODDS_API_KEY env var.")
+    odds_api_keys = [
+        value for value in (
+            os.environ.get("ODDS_API_KEY"),
+            os.environ.get("ODDS_API_KEY_2"),
+            os.environ.get("ODDS_API_KEY_3"),
+            os.environ.get("ODDS_API_KEY_4"),
+            os.environ.get("ODDS_API_KEY_5"),
+        )
+        if value
+    ]
+    if not odds_api_keys:
+        log("ERROR: No odds keys configured.")
         sys.exit(1)
+    log(f"Loaded {len(odds_api_keys)} Odds API key(s)")
 
     # Stage 1: Collect verified matches and odds
     log("Fetching tennis fixtures and odds...")
-    all_matches = fetch_matches_from_odds_api(date_str, odds_api_key)
+    all_matches = fetch_matches_from_odds_api(date_str, odds_api_keys)
     if not all_matches:
         log("No verified matches with moneyline odds were found.")
 
