@@ -24,7 +24,12 @@ LOG_FILE = REPO_ROOT / "bets-log.csv"
 REPORTS_DIR = REPO_ROOT / "reports"
 
 REQUEST_TIMEOUT = 30
-MAX_COMPLETION_TOKENS = 4096
+MAX_COMPLETION_TOKENS = 2048
+GROQ_MODELS = (
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-120b",
+    "llama-3.1-8b-instant",
+)
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -595,15 +600,15 @@ Direct and analytical. Quantify confidence. No marketing language. Aim for 500-8
 
 def call_ai(prompt: str, api_key: str) -> str:
     """Call Groq's OpenAI-compatible API with the constructed prompt."""
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": MAX_COMPLETION_TOKENS,
-        "temperature": 0.3,
-    }
-
-    log("Calling Groq API (Llama 3)...")
-    try:
+    last_response = None
+    for model_index, model in enumerate(GROQ_MODELS):
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": MAX_COMPLETION_TOKENS,
+            "temperature": 0.3,
+        }
+        log(f"Calling Groq API ({model})...")
         response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={
@@ -613,15 +618,27 @@ def call_ai(prompt: str, api_key: str) -> str:
             json=payload,
             timeout=120,
         )
-        response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
-        log(f"Groq response: {len(content)} chars")
-        return content
-    except (requests.RequestException, KeyError, IndexError, ValueError) as exc:
-        log(f"Groq API error: {exc}")
-        if isinstance(exc, requests.RequestException) and exc.response is not None:
-            log(f"Response body: {exc.response.text[:500]}")
-        raise
+        last_response = response
+        if response.status_code in {403, 404, 429} and model_index < len(GROQ_MODELS) - 1:
+            log(
+                f"  Groq model unavailable ({response.status_code}); "
+                "trying fallback model"
+            )
+            continue
+        try:
+            response.raise_for_status()
+            content = response.json()["choices"][0]["message"]["content"]
+            log(f"Groq response from {model}: {len(content)} chars")
+            return content
+        except (requests.RequestException, KeyError, IndexError, ValueError) as exc:
+            log(f"Groq API error: {exc}")
+            if isinstance(exc, requests.RequestException) and exc.response is not None:
+                log(f"Response body: {exc.response.text[:500]}")
+            raise
+
+    if last_response is not None:
+        last_response.raise_for_status()
+    raise RuntimeError("No Groq models were available")
 
 
 # ─── Stage 4: Logging ───────────────────────────────────────────────

@@ -12,7 +12,7 @@ SPEC.loader.exec_module(bot)
 
 class TennisBotTests(unittest.TestCase):
     def test_completion_limit_fits_groq_tpm_budget(self):
-        self.assertLessEqual(bot.MAX_COMPLETION_TOKENS, 4096)
+        self.assertLessEqual(bot.MAX_COMPLETION_TOKENS, 2048)
 
     def test_parser_accepts_named_odds_and_complex_names(self):
         report = """## TOP PICKS
@@ -190,7 +190,26 @@ class TennisBotTests(unittest.TestCase):
             "Bearer secret-key",
         )
         self.assertEqual(kwargs["json"]["model"], "llama-3.3-70b-versatile")
-        self.assertEqual(kwargs["json"]["max_tokens"], 4096)
+        self.assertEqual(kwargs["json"]["max_tokens"], 2048)
+
+    @patch.object(bot.requests, "post")
+    def test_call_ai_falls_back_after_rate_limit(self, post):
+        limited = unittest.mock.Mock(status_code=429)
+        fallback = unittest.mock.Mock(status_code=200)
+        fallback.raise_for_status.return_value = None
+        fallback.json.return_value = {
+            "choices": [{"message": {"content": "fallback report"}}]
+        }
+        post.side_effect = [limited, fallback]
+
+        result = bot.call_ai("test prompt", "secret-key")
+
+        self.assertEqual(result, "fallback report")
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(
+            post.call_args_list[1].kwargs["json"]["model"],
+            "openai/gpt-oss-120b",
+        )
 
 
 if __name__ == "__main__":
