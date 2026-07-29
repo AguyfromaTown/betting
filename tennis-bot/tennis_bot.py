@@ -22,6 +22,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 BANKROLL_FILE = REPO_ROOT / "bankroll.txt"
 LOG_FILE = REPO_ROOT / "bets-log.csv"
 REPORTS_DIR = REPO_ROOT / "reports"
+DEFAULT_AGENT_SNAPSHOT = REPO_ROOT / "tennis-bot" / "agent-run.json"
+DEFAULT_AGENT_REPORT = REPO_ROOT / "tennis-bot" / "agent-report.md"
 
 REQUEST_TIMEOUT = 30
 MAX_COMPLETION_TOKENS = 2048
@@ -139,6 +141,24 @@ def parse_args():
     parser.add_argument("--odds-max", type=float, default=1.6, help="Max decimal odds")
     parser.add_argument("--bankroll", type=float, default=None, help="Override bankroll")
     parser.add_argument("--force", action="store_true", help="Run even if bets already logged for this date")
+    parser.add_argument(
+        "--mode",
+        choices=("github", "opencode-prepare", "opencode-finalize"),
+        default="github",
+        help="Analysis engine; GitHub/Groq remains the default",
+    )
+    parser.add_argument(
+        "--snapshot",
+        type=Path,
+        default=DEFAULT_AGENT_SNAPSHOT,
+        help="Verified OpenCode run snapshot",
+    )
+    parser.add_argument(
+        "--analysis-file",
+        type=Path,
+        default=DEFAULT_AGENT_REPORT,
+        help="OpenCode research report to validate",
+    )
     return parser.parse_args()
 
 
@@ -936,9 +956,23 @@ def log_bets(
     rows_to_append = []
     current_balance = bankroll
     total_stake = 0.0
+    existing_bets = set()
+    if file_exists and LOG_FILE.stat().st_size > 0:
+        with open(LOG_FILE, newline="", encoding="utf-8") as existing_file:
+            for row in csv.DictReader(existing_file):
+                existing_bets.add((
+                    row.get("DATE", "").strip(),
+                    normalize_player_name(
+                        re.sub(r"\s+to win\s*$", "", row.get("BET", ""), flags=re.I)
+                    ),
+                ))
 
     for rec in recommendations:
         if rec["grade"] not in ("Top Pick", "Value Pick"):
+            continue
+        bet_key = (date_str, normalize_player_name(rec["player"]))
+        if bet_key in existing_bets:
+            log(f"  Skipped duplicate logged bet: {rec['player']} on {date_str}")
             continue
 
         # Find match info
@@ -979,6 +1013,7 @@ def log_bets(
             "return": "",
             "starting_balance": balance_str,
         })
+        existing_bets.add(bet_key)
 
         if current_balance is not None:
             current_balance -= stake
@@ -1029,8 +1064,125 @@ def already_logged_today(date_str: str) -> bool:
     return False
 
 
+def save_agent_snapshot(
+    path: Path,
+    date_str: str,
+    odds_min: float,
+    odds_max: float,
+    bankroll: float | None,
+    matches: list[dict],
+    prompt: str,
+):
+    """Persist the verified inputs OpenCode must use for its research pass."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "date": date_str,
+        "odds_min": odds_min,
+        "odds_max": odds_max,
+        "bankroll": bankroll,
+        "matches": matches,
+        "analysis_prompt": prompt,
+    }
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    log(f"OpenCode snapshot saved: {path}")
+
+
+def load_agent_snapshot(path: Path) -> dict:
+    """Load and minimally validate an OpenCode handoff snapshot."""
+    if not path.exists():
+        raise FileNotFoundError(
+            f"OpenCode snapshot not found: {path}. Run opencode-prepare first."
+        )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    required = {"date", "odds_min", "odds_max", "matches", "analysis_prompt"}
+    missing = required.difference(payload)
+    if payload.get("schema_version") != 1 or missing:
+        detail = f"; missing: {', '.join(sorted(missing))}" if missing else ""
+        raise ValueError(f"Invalid OpenCode snapshot{detail}")
+    if not isinstance(payload["matches"], list):
+        raise ValueError("Invalid OpenCode snapshot: matches must be a list")
+    return payload
+
+
+def add_validation_summary(
+    report: str,
+    candidate_count: int,
+    recommendations: list[dict],
+) -> str:
+    """Make the saved report agree with Python's authoritative decision."""
+    lines = [
+        "",
+        "## PYTHON VALIDATION RESULT",
+        "",
+        (
+            f"The analysis produced {candidate_count} candidate(s). "
+            f"Python accepted {len(recommendations)} bet(s) after matching "
+            "verified odds and recalculating expected value."
+        ),
+    ]
+    if recommendations:
+        for rec in recommendations:
+            lines.append(
+                f"- **{rec['player']}** — {rec['grade']}, odds "
+                f"{rec['odds']:.2f}, assessed probability "
+                f"{rec['assessed_probability']:.1%}, verified EV {rec['ev']:.2%}."
+            )
+    else:
+        lines.extend([
+            "",
+            "**Final betting decision: NO BETS.** Any narrative picks above were "
+            "rejected and must not be treated as recommendations.",
+        ])
+    return report.rstrip() + "\n" + "\n".join(lines) + "\n"
+
+
+def finalize_analysis(
+    date_str: str,
+    report: str,
+    matches: list[dict],
+    bankroll: float | None,
+):
+    """Run the shared safety, staking, logging, and reporting pipeline."""
+    parsed = parse_recommendations(report)
+    log(f"Parsed {len(parsed)} recommendation candidates from report")
+    recommendations = validate_recommendations(parsed, matches)
+    log(f"Validated {len(recommendations)} recommendations")
+    total_stake = log_bets(date_str, recommendations, matches, bankroll)
+    save_bankroll(bankroll, total_stake)
+
+    final_report = add_validation_summary(report, len(parsed), recommendations)
+    save_report(date_str, final_report)
+    log("=== Done ===")
+    print("\n" + final_report)
+
+
 def main():
     args = parse_args()
+
+    if args.mode == "opencode-finalize":
+        snapshot = load_agent_snapshot(args.snapshot)
+        date_str = snapshot["date"]
+        log(f"=== Tennis Bot (OpenCode finalize) — {date_str} ===")
+        if not args.analysis_file.exists():
+            raise FileNotFoundError(
+                f"OpenCode report not found: {args.analysis_file}"
+            )
+        report = args.analysis_file.read_text(encoding="utf-8").strip()
+        if not report:
+            raise ValueError("OpenCode report is empty")
+        finalize_analysis(
+            date_str,
+            report,
+            snapshot["matches"],
+            snapshot.get("bankroll"),
+        )
+        return
+
     date_str = resolve_date(args.date)
     odds_min = args.odds_min
     odds_max = args.odds_max
@@ -1039,7 +1191,11 @@ def main():
     log(f"Odds range: {odds_min}-{odds_max}")
 
     # Skip if already logged today (prevents double-logging when running locally)
-    if not args.force and already_logged_today(date_str):
+    if (
+        args.mode == "github"
+        and not args.force
+        and already_logged_today(date_str)
+    ):
         log(f"Bets already logged for {date_str}. Skipping to avoid duplicates.")
         log("(Use --force to override.)")
         return
@@ -1076,6 +1232,19 @@ def main():
     log("Building analysis prompt...")
     prompt = build_prompt(date_str, qualified, bankroll, odds_min, odds_max)
 
+    if args.mode == "opencode-prepare":
+        save_agent_snapshot(
+            args.snapshot,
+            date_str,
+            odds_min,
+            odds_max,
+            bankroll,
+            qualified,
+            prompt,
+        )
+        log("=== Preparation complete; OpenCode research can begin ===")
+        return
+
     groq_api_keys = [
         value for value in (
             os.environ.get("GROQ_API_KEY"),
@@ -1093,22 +1262,7 @@ def main():
     log(f"Loaded {len(groq_api_keys)} Groq API key(s)")
 
     report = call_ai(prompt, groq_api_keys)
-
-    # Stage 4: Log bets
-    parsed_recommendations = parse_recommendations(report)
-    log(f"Parsed {len(parsed_recommendations)} recommendation candidates from report")
-    recommendations = validate_recommendations(parsed_recommendations, qualified)
-    log(f"Validated {len(recommendations)} recommendations")
-    total_stake = log_bets(date_str, recommendations, qualified, bankroll)
-
-    # Update bankroll
-    save_bankroll(bankroll, total_stake)
-
-    # Save report
-    save_report(date_str, report)
-
-    log("=== Done ===")
-    print("\n" + report)
+    finalize_analysis(date_str, report, qualified, bankroll)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +12,72 @@ SPEC.loader.exec_module(bot)
 
 
 class TennisBotTests(unittest.TestCase):
+    def test_opencode_snapshot_round_trip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "agent-run.json"
+            matches = [{
+                "player1": "Player One",
+                "player2": "Player Two",
+                "home_odds": 1.55,
+                "away_odds": 2.4,
+            }]
+            bot.save_agent_snapshot(
+                path,
+                "2026-07-30",
+                1.5,
+                1.6,
+                57.0,
+                matches,
+                "verified prompt",
+            )
+
+            snapshot = bot.load_agent_snapshot(path)
+
+        self.assertEqual(snapshot["schema_version"], 1)
+        self.assertEqual(snapshot["date"], "2026-07-30")
+        self.assertEqual(snapshot["matches"], matches)
+        self.assertEqual(snapshot["analysis_prompt"], "verified prompt")
+
+    def test_validation_summary_overrides_rejected_narrative_picks(self):
+        report = "## TOP PICKS\nA speculative candidate."
+        result = bot.add_validation_summary(report, 1, [])
+
+        self.assertIn("Python accepted 0 bet(s)", result)
+        self.assertIn("Final betting decision: NO BETS", result)
+        self.assertIn("must not be treated as recommendations", result)
+
+    def test_log_bets_deduplicates_same_player_and_date(self):
+        recommendation = {
+            "player": "Darderi, Luciano",
+            "grade": "Value Pick",
+            "odds": 1.6,
+        }
+        match = {
+            "player1": "Svrcina, Dalibor",
+            "player2": "Darderi, Luciano",
+            "tournament": "ATP Test",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "bets-log.csv"
+            with patch.object(bot, "LOG_FILE", log_path):
+                first_stake = bot.log_bets(
+                    "2026-07-30",
+                    [recommendation],
+                    [match],
+                    100.0,
+                )
+                second_stake = bot.log_bets(
+                    "2026-07-30",
+                    [recommendation],
+                    [match],
+                    98.0,
+                )
+            rows = log_path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(first_stake, 2.0)
+        self.assertEqual(second_stake, 0.0)
+        self.assertEqual(len(rows), 2)
+
     def test_tennis_abstract_elo_is_parsed_and_compacted(self):
         html = """
         <table><tr><td>navigation</td></tr></table>
