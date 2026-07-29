@@ -32,6 +32,22 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("Elo=1843.4 (Elo rank #31)", line)
         self.assertIn("clay Elo=1843.6", line)
 
+    def test_tennis_abstract_reader_fallback(self):
+        row = (
+            "31\tLuciano Darderi\t24.4\t1843.4\t\t85\t1682.7\t19\t"
+            "1843.6\t92\t1625.8\t\t1858.1\t2026-05\t\t23\t0.30"
+        )
+        matches = [{
+            "player1": "Darderi, Luciano",
+            "player2": "Unknown Player",
+        }]
+        with patch.object(bot, "fetch", side_effect=[None, row, None, None]):
+            profiles = bot.fetch_tennis_abstract_profiles(matches)
+
+        line = bot.compact_profile_line("Darderi, Luciano", profiles)
+        self.assertIn("official rank=23", line)
+        self.assertIn("hard Elo=1682.7", line)
+
     def test_completion_limit_fits_groq_tpm_budget(self):
         self.assertLessEqual(bot.MAX_COMPLETION_TOKENS, 2048)
 
