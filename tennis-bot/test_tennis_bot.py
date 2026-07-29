@@ -181,7 +181,7 @@ class TennisBotTests(unittest.TestCase):
             "choices": [{"message": {"content": "## TOP PICKS\nNo picks."}}]
         }
 
-        result = bot.call_ai("test prompt", "secret-key")
+        result = bot.call_ai("test prompt", ["secret-key"])
 
         self.assertEqual(result, "## TOP PICKS\nNo picks.")
         _, kwargs = post.call_args
@@ -193,7 +193,7 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(kwargs["json"]["max_tokens"], 2048)
 
     @patch.object(bot.requests, "post")
-    def test_call_ai_falls_back_after_rate_limit(self, post):
+    def test_call_ai_rotates_key_after_rate_limit(self, post):
         limited = unittest.mock.Mock(status_code=429)
         fallback = unittest.mock.Mock(status_code=200)
         fallback.raise_for_status.return_value = None
@@ -202,13 +202,21 @@ class TennisBotTests(unittest.TestCase):
         }
         post.side_effect = [limited, fallback]
 
-        result = bot.call_ai("test prompt", "secret-key")
+        result = bot.call_ai("test prompt", ["first-key", "second-key"])
 
         self.assertEqual(result, "fallback report")
         self.assertEqual(post.call_count, 2)
         self.assertEqual(
             post.call_args_list[1].kwargs["json"]["model"],
-            "openai/gpt-oss-120b",
+            "llama-3.3-70b-versatile",
+        )
+        self.assertEqual(
+            post.call_args_list[0].kwargs["headers"]["Authorization"],
+            "Bearer first-key",
+        )
+        self.assertEqual(
+            post.call_args_list[1].kwargs["headers"]["Authorization"],
+            "Bearer second-key",
         )
 
 
