@@ -249,40 +249,46 @@ def fetch_matches_from_odds_api(date_str: str, api_key: str) -> list[dict]:
     ]
     log(f"  Found {len(dated_events)} tennis events from Odds-API.io")
 
-    def fetch_event(event: dict) -> dict | None:
+    events_by_id = {str(event.get("id")): event for event in dated_events}
+    matches = []
+    for start in range(0, len(dated_events), 10):
+        batch = dated_events[start:start + 10]
         payload = fetch_json(
-            "https://api.odds-api.io/v3/odds",
+            "https://api.odds-api.io/v3/odds/multi",
             {
                 "apiKey": api_key,
-                "eventId": event.get("id"),
+                "eventIds": ",".join(str(event.get("id")) for event in batch),
                 "bookmakers": "Bet365,Unibet",
             },
         )
-        if not isinstance(payload, dict):
-            return None
-        home_odds, away_odds, bookmaker = extract_moneyline_odds(payload)
-        if home_odds is None or away_odds is None:
-            return None
-        league = event.get("league") or payload.get("league") or {}
-        tournament = league.get("name") or "Tennis"
-        return {
-            "player1": event["home"],
-            "player2": event["away"],
-            "tournament": tournament,
-            "level": parse_tournament_level("", tournament),
-            "source": "https://api.odds-api.io",
-            "home_odds": home_odds,
-            "away_odds": away_odds,
-            "odds_source": bookmaker or "Odds-API.io",
-        }
+        if isinstance(payload, list):
+            odds_events = payload
+        elif isinstance(payload, dict):
+            odds_events = payload.get("events") or payload.get("data") or []
+        else:
+            odds_events = []
 
-    matches = []
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = [executor.submit(fetch_event, event) for event in dated_events]
-        for future in as_completed(futures):
-            match = future.result()
-            if match:
-                matches.append(match)
+        for odds_event in odds_events:
+            event = events_by_id.get(str(odds_event.get("id")), odds_event)
+            home = event.get("home") or odds_event.get("home")
+            away = event.get("away") or odds_event.get("away")
+            if not home or not away:
+                continue
+            home_odds, away_odds, bookmaker = extract_moneyline_odds(odds_event)
+            if home_odds is None or away_odds is None:
+                continue
+            league = event.get("league") or odds_event.get("league") or {}
+            tournament = league.get("name") or "Tennis"
+            matches.append({
+                "player1": home,
+                "player2": away,
+                "tournament": tournament,
+                "level": parse_tournament_level("", tournament),
+                "source": "https://api.odds-api.io",
+                "home_odds": home_odds,
+                "away_odds": away_odds,
+                "odds_source": bookmaker or "Odds-API.io",
+            })
     log(f"  Found verified moneyline odds for {len(matches)} matches")
     return matches
 
