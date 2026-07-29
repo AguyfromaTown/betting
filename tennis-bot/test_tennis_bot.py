@@ -11,6 +11,27 @@ SPEC.loader.exec_module(bot)
 
 
 class TennisBotTests(unittest.TestCase):
+    def test_tennis_abstract_elo_is_parsed_and_compacted(self):
+        html = """
+        <table><tr><td>navigation</td></tr></table>
+        <table>
+          <tr><th>Elo Rank</th><th>Player</th><th>Age</th><th>Elo</th>
+              <th>x</th><th>hRank</th><th>hElo</th><th>cRank</th>
+              <th>cElo</th><th>gRank</th><th>gElo</th><th>x</th>
+              <th>Peak</th><th>Peak Month</th><th>x</th><th>ATP Rank</th></tr>
+          <tr><td>31</td><td>Luciano Darderi</td><td>24.4</td><td>1843.4</td>
+              <td></td><td>42</td><td>1760.2</td><td>24</td>
+              <td>1843.6</td><td>55</td><td>1701.1</td><td></td>
+              <td>1880.5</td><td>2026-05</td><td></td><td>23</td></tr>
+        </table>
+        """
+        profiles = bot.parse_tennis_abstract_elo(html)
+        line = bot.compact_profile_line("Darderi, Luciano", profiles)
+
+        self.assertIn("official rank=23", line)
+        self.assertIn("Elo=1843.4 (Elo rank #31)", line)
+        self.assertIn("clay Elo=1843.6", line)
+
     def test_completion_limit_fits_groq_tpm_budget(self):
         self.assertLessEqual(bot.MAX_COMPLETION_TOKENS, 2048)
 

@@ -422,29 +422,80 @@ def attach_odds(matches: list[dict], odds_min: float, odds_max: float) -> list[d
     return enriched
 
 
-def fetch_player_profile(player_name: str) -> str:
-    """Fetch tennisabstract profile page for a player."""
-    name_part = player_name.lower().replace(" ", "-").replace("'", "")
-    url = f"https://www.tennisabstract.com/cgi-bin/player.cgi?p={name_part}"
-    html = fetch(url)
-    if html:
-        soup = BeautifulSoup(html, "html.parser")
-        # Extract key stats tables
-        tables = soup.select("table")
-        stats_text = []
-        for table in tables[:5]:  # First 5 tables are most relevant
-            rows = table.select("tr")
-            table_data = []
-            for row in rows:
-                cells = row.select("td, th")
-                row_text = " | ".join(c.get_text(strip=True) for c in cells)
-                if row_text:
-                    table_data.append(row_text)
-            if table_data:
-                stats_text.append("\n".join(table_data))
-        result = "\n\n".join(stats_text) if stats_text else html[:3000]
-        return result[:4000]  # Truncate to fit context
-    return "Profile not available"
+def parse_tennis_abstract_elo(html: str) -> dict[str, dict]:
+    """Parse Tennis Abstract's weekly Elo leaderboard into compact profiles."""
+    soup = BeautifulSoup(html, "html.parser")
+    tables = soup.select("table")
+    if not tables:
+        return {}
+
+    profiles = {}
+    for row in tables[-1].select("tr")[1:]:
+        cells = [cell.get_text(" ", strip=True) for cell in row.select("th, td")]
+        if len(cells) < 16:
+            continue
+        try:
+            profile = {
+                "name": cells[1],
+                "age": float(cells[2]) if cells[2] else None,
+                "elo_rank": int(cells[0]),
+                "elo": float(cells[3]),
+                "hard_elo": float(cells[6]) if cells[6] else None,
+                "clay_elo": float(cells[8]) if cells[8] else None,
+                "grass_elo": float(cells[10]) if cells[10] else None,
+                "peak_elo": float(cells[12]) if cells[12] else None,
+                "peak_month": cells[13] or None,
+                "official_rank": int(cells[15]) if cells[15] else None,
+            }
+        except (TypeError, ValueError):
+            continue
+        profiles[normalize_player_name(profile["name"])] = profile
+    return profiles
+
+
+def fetch_tennis_abstract_profiles(matches: list[dict]) -> dict[str, dict]:
+    """Download each tour leaderboard once and retain only relevant singles players."""
+    wanted = {
+        normalize_player_name(player)
+        for match in matches
+        for player in (match["player1"], match["player2"])
+        if "/" not in player
+    }
+    profiles = {}
+    for tour, url in (
+        ("ATP", "https://tennisabstract.com/reports/atp_elo_ratings.html"),
+        ("WTA", "https://tennisabstract.com/reports/wta_elo_ratings.html"),
+    ):
+        html = fetch(url)
+        if not html:
+            log(f"  Tennis Abstract {tour} leaderboard unavailable")
+            continue
+        profiles.update(parse_tennis_abstract_elo(html))
+
+    selected = {key: profiles[key] for key in wanted if key in profiles}
+    log(f"  Tennis Abstract profiles matched: {len(selected)}/{len(wanted)}")
+    return selected
+
+
+def compact_profile_line(player: str, profiles: dict[str, dict]) -> str:
+    """Render verified profile data without sending page HTML to the model."""
+    profile = profiles.get(normalize_player_name(player))
+    if not profile:
+        return f"- {player}: profile unavailable"
+
+    def shown(value):
+        return "N/A" if value is None else f"{value:g}"
+
+    return (
+        f"- {player}: official rank={shown(profile['official_rank'])}; "
+        f"age={shown(profile['age'])}; Elo={shown(profile['elo'])} "
+        f"(Elo rank #{shown(profile['elo_rank'])}); "
+        f"hard Elo={shown(profile['hard_elo'])}; "
+        f"clay Elo={shown(profile['clay_elo'])}; "
+        f"grass Elo={shown(profile['grass_elo'])}; "
+        f"peak Elo={shown(profile['peak_elo'])}"
+        f"{' (' + profile['peak_month'] + ')' if profile['peak_month'] else ''}"
+    )
 
 
 # ─── Stage 2 & 3: AI Analysis ───────────────────────────────────────
@@ -457,6 +508,7 @@ def build_prompt(
     odds_max: float,
 ) -> str:
     """Construct the full 3-stage prompt with embedded data."""
+    profiles = fetch_tennis_abstract_profiles(matches)
 
     # Build match data section
     match_lines = []
@@ -486,10 +538,18 @@ Matches in odds range [{odds_min}-{odds_max}]:
 
 """
 
+    seen_players = set()
+    for match in matches:
+        for player in (match["player1"], match["player2"]):
+            key = normalize_player_name(player)
+            if key not in seen_players:
+                prompt += compact_profile_line(player, profiles) + "\n"
+                seen_players.add(key)
     prompt += (
-        "No independently verified current player profiles were supplied. "
-        "Treat missing form, injury, surface, and schedule information as "
-        "uncertainty; do not manufacture it.\n"
+        "\nSource: Tennis Abstract weekly Elo leaderboards. Fields not shown "
+        "above, including current form, head-to-head, serve/return splits, "
+        "physical status, and Match Charting Project tactics, are unavailable "
+        "for this run and MUST NOT be invented.\n"
     )
 
     # Add the analysis instructions
