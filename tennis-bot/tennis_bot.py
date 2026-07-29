@@ -453,6 +453,32 @@ def parse_tennis_abstract_elo(html: str) -> dict[str, dict]:
     return profiles
 
 
+def parse_tennis_abstract_reader(text: str) -> dict[str, dict]:
+    """Parse the tab-separated leaderboard returned by Jina Reader."""
+    profiles = {}
+    for line in text.splitlines():
+        cells = [cell.strip() for cell in line.split("\t")]
+        if len(cells) < 16 or not cells[0].isdigit():
+            continue
+        try:
+            profile = {
+                "name": cells[1],
+                "age": float(cells[2]) if cells[2] else None,
+                "elo_rank": int(cells[0]),
+                "elo": float(cells[3]),
+                "hard_elo": float(cells[6]) if cells[6] else None,
+                "clay_elo": float(cells[8]) if cells[8] else None,
+                "grass_elo": float(cells[10]) if cells[10] else None,
+                "peak_elo": float(cells[12]) if cells[12] else None,
+                "peak_month": cells[13] or None,
+                "official_rank": int(cells[15]) if cells[15] else None,
+            }
+        except (TypeError, ValueError):
+            continue
+        profiles[normalize_player_name(profile["name"])] = profile
+    return profiles
+
+
 def fetch_tennis_abstract_profiles(matches: list[dict]) -> dict[str, dict]:
     """Download each tour leaderboard once and retain only relevant singles players."""
     wanted = {
@@ -467,10 +493,21 @@ def fetch_tennis_abstract_profiles(matches: list[dict]) -> dict[str, dict]:
         ("WTA", "https://tennisabstract.com/reports/wta_elo_ratings.html"),
     ):
         html = fetch(url)
-        if not html:
-            log(f"  Tennis Abstract {tour} leaderboard unavailable")
-            continue
-        profiles.update(parse_tennis_abstract_elo(html))
+        tour_profiles = parse_tennis_abstract_elo(html) if html else {}
+        if not tour_profiles:
+            log(f"  Direct Tennis Abstract {tour} access unavailable; trying reader")
+            reader_url = f"https://r.jina.ai/{url}"
+            reader_text = fetch(reader_url)
+            tour_profiles = (
+                parse_tennis_abstract_reader(reader_text)
+                if reader_text
+                else {}
+            )
+        if tour_profiles:
+            profiles.update(tour_profiles)
+            log(f"  Loaded {len(tour_profiles)} Tennis Abstract {tour} profiles")
+        else:
+            log(f"  Tennis Abstract {tour} leaderboard unavailable from all sources")
 
     selected = {key: profiles[key] for key in wanted if key in profiles}
     log(f"  Tennis Abstract profiles matched: {len(selected)}/{len(wanted)}")
