@@ -50,6 +50,50 @@ class TennisBotTests(unittest.TestCase):
             (1.55, 2.5, "Bet365"),
         )
 
+    @patch.object(bot, "fetch_json")
+    def test_odds_api_uses_batches_of_ten(self, fetch_json):
+        events = [
+            {
+                "id": event_id,
+                "date": "2026-07-30T12:00:00Z",
+                "home": f"Home {event_id}",
+                "away": f"Away {event_id}",
+                "league": {"name": "ATP Test"},
+            }
+            for event_id in range(11)
+        ]
+        odds = [
+            {
+                **event,
+                "bookmakers": {
+                    "Bet365": [
+                        {
+                            "name": "ML",
+                            "odds": [{"home": "1.55", "away": "2.50"}],
+                        }
+                    ]
+                },
+            }
+            for event in events
+        ]
+        fetch_json.side_effect = [events, odds[:10], odds[10:]]
+
+        matches = bot.fetch_matches_from_odds_api(
+            "2026-07-30",
+            "secret-key",
+        )
+
+        self.assertEqual(len(matches), 11)
+        self.assertEqual(fetch_json.call_count, 3)
+        bulk_calls = fetch_json.call_args_list[1:]
+        self.assertTrue(
+            all(call.args[0].endswith("/odds/multi") for call in bulk_calls)
+        )
+        self.assertEqual(
+            bulk_calls[0].args[1]["eventIds"],
+            "0,1,2,3,4,5,6,7,8,9",
+        )
+
     @patch.object(bot.requests, "post")
     def test_call_ai_uses_groq_contract(self, post):
         response = post.return_value
