@@ -579,6 +579,14 @@ Players whose odds look appealing but the numbers don't support it.
 ## DISCLAIMER
 Odds change, no guarantees, bet responsibly.
 
+## MACHINE READABLE PICKS
+End the report with exactly one JSON array in a fenced `json` block. Include only
+players you recommend. Every object must contain:
+`player`, `opponent`, `score`, and `assessed_probability`.
+Use a 1-10 score and a probability from 0 to 1. Do not include odds, EV, grade,
+or stake in this JSON because the application calculates those from verified
+bookmaker data. Use an empty array when there are no justified recommendations.
+
 ### Tone
 Direct and analytical. Quantify confidence. No marketing language. Aim for 500-800 words of dense analysis.
 """
@@ -620,6 +628,31 @@ def call_ai(prompt: str, api_key: str) -> str:
 
 def parse_recommendations(report: str) -> list[dict]:
     """Parse recommended bets from the AI's Markdown report."""
+    json_blocks = re.findall(r"```json\s*(.*?)```", report, re.IGNORECASE | re.DOTALL)
+    for block in reversed(json_blocks):
+        try:
+            items = json.loads(block)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(items, list):
+            continue
+        recommendations = []
+        for item in items:
+            if not isinstance(item, dict) or not item.get("player"):
+                continue
+            try:
+                score = float(item["score"])
+                probability = float(item["assessed_probability"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            recommendations.append({
+                "player": str(item["player"]).strip(),
+                "opponent": str(item.get("opponent", "")).strip(),
+                "score": score,
+                "assessed_probability": probability,
+            })
+        return recommendations
+
     recommendations = []
     current_type = None
     last_player = None
@@ -673,6 +706,81 @@ def parse_recommendations(report: str) -> list[dict]:
                 pass
 
     return recommendations
+
+
+def normalize_player_name(name: str) -> str:
+    """Normalize bookmaker/model name order and punctuation for comparisons."""
+    name = re.sub(r"\s*\(\d{4}\)\s*$", "", name)
+    if "," in name:
+        parts = [part.strip() for part in name.split(",", 1)]
+        name = f"{parts[1]} {parts[0]}"
+    return re.sub(r"[^a-z0-9]+", "", name.casefold())
+
+
+def validate_recommendations(
+    recommendations: list[dict],
+    matches: list[dict],
+) -> list[dict]:
+    """Recompute odds, EV, and grades; reject unsupported AI recommendations."""
+    validated = []
+    for recommendation in recommendations:
+        player_key = normalize_player_name(recommendation.get("player", ""))
+        try:
+            score = float(recommendation["score"])
+            probability = float(recommendation["assessed_probability"])
+        except (KeyError, TypeError, ValueError):
+            log(f"  Rejected {recommendation.get('player', 'unknown')}: missing score/probability")
+            continue
+        if probability > 1:
+            probability /= 100
+        if not 0 < probability < 1 or not 0 <= score <= 10:
+            log(f"  Rejected {recommendation.get('player', 'unknown')}: invalid score/probability")
+            continue
+
+        match_info = None
+        verified_odds = None
+        verified_player = None
+        for match in matches:
+            if player_key == normalize_player_name(match["player1"]):
+                match_info = match
+                verified_player = match["player1"]
+                verified_odds = match.get("home_odds") or match.get("odds")
+                break
+            if player_key == normalize_player_name(match["player2"]):
+                match_info = match
+                verified_player = match["player2"]
+                verified_odds = match.get("away_odds") or match.get("odds")
+                break
+        if not match_info or verified_odds is None:
+            log(f"  Rejected {recommendation.get('player', 'unknown')}: no verified odds")
+            continue
+
+        ev = probability * float(verified_odds) - 1
+        if score > 8 and ev > 0.08:
+            grade = "Top Pick"
+        elif score > 7 and ev > 0.05:
+            grade = "Value Pick"
+        elif score > 5.5 and ev > 0:
+            grade = "Moderate Pick"
+        else:
+            log(
+                f"  Rejected {recommendation['player']}: score {score:.2f}, "
+                f"recalculated EV {ev:.2%}"
+            )
+            continue
+
+        validated.append({
+            **recommendation,
+            "player": verified_player,
+            "odds": float(verified_odds),
+            "ev": ev,
+            "grade": grade,
+        })
+        log(
+            f"  Validated {recommendation['player']}: {grade}, "
+            f"score {score:.2f}, EV {ev:.2%}"
+        )
+    return validated
 
 
 def log_bets(
@@ -835,8 +943,10 @@ def main():
     report = call_ai(prompt, api_key)
 
     # Stage 4: Log bets
-    recommendations = parse_recommendations(report)
-    log(f"Parsed {len(recommendations)} recommendations from report")
+    parsed_recommendations = parse_recommendations(report)
+    log(f"Parsed {len(parsed_recommendations)} recommendation candidates from report")
+    recommendations = validate_recommendations(parsed_recommendations, qualified)
+    log(f"Validated {len(recommendations)} recommendations")
     total_stake = log_bets(date_str, recommendations, qualified, bankroll)
 
     # Update bankroll

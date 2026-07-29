@@ -34,6 +34,60 @@ class TennisBotTests(unittest.TestCase):
             ],
         )
 
+    def test_structured_picks_are_parsed(self):
+        report = """## MACHINE READABLE PICKS
+```json
+[
+  {
+    "player": "Luciano Darderi",
+    "opponent": "Dalibor Svrcina",
+    "score": 7.5,
+    "assessed_probability": 0.72
+  }
+]
+```"""
+        self.assertEqual(
+            bot.parse_recommendations(report),
+            [{
+                "player": "Luciano Darderi",
+                "opponent": "Dalibor Svrcina",
+                "score": 7.5,
+                "assessed_probability": 0.72,
+            }],
+        )
+
+    def test_validation_rejects_groq_negative_ev_error(self):
+        candidates = [{
+            "player": "Maiko Uchijima",
+            "score": 8.5,
+            "assessed_probability": 0.65,
+        }]
+        matches = [{
+            "player1": "Maiko Uchijima",
+            "player2": "Laquisa Khan",
+            "home_odds": 1.5,
+            "away_odds": 2.5,
+        }]
+        self.assertEqual(bot.validate_recommendations(candidates, matches), [])
+
+    def test_validation_uses_verified_odds_and_computes_grade(self):
+        candidates = [{
+            "player": "Darderi, Luciano",
+            "score": 7.5,
+            "assessed_probability": 0.70,
+        }]
+        matches = [{
+            "player1": "Svrcina, Dalibor",
+            "player2": "Darderi, Luciano",
+            "home_odds": 2.5,
+            "away_odds": 1.6,
+        }]
+        validated = bot.validate_recommendations(candidates, matches)
+        self.assertEqual(len(validated), 1)
+        self.assertEqual(validated[0]["grade"], "Value Pick")
+        self.assertAlmostEqual(validated[0]["ev"], 0.12)
+        self.assertEqual(validated[0]["odds"], 1.6)
+
     def test_extract_moneyline_odds(self):
         payload = {
             "bookmakers": {
