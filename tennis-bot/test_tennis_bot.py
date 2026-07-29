@@ -41,12 +41,31 @@ class TennisBotTests(unittest.TestCase):
             "player1": "Darderi, Luciano",
             "player2": "Unknown Player",
         }]
-        with patch.object(bot, "fetch", side_effect=[None, row, None, None]):
+        with (
+            patch.object(bot, "fetch", side_effect=[None, None]),
+            patch.object(bot, "fetch_reader", side_effect=[row, None]),
+        ):
             profiles = bot.fetch_tennis_abstract_profiles(matches)
 
         line = bot.compact_profile_line("Darderi, Luciano", profiles)
         self.assertIn("official rank=23", line)
         self.assertIn("hard Elo=1682.7", line)
+
+    @patch.object(bot.requests, "get")
+    def test_reader_uses_api_headers_instead_of_blocked_browser_headers(self, get):
+        response = get.return_value
+        response.raise_for_status.return_value = None
+        response.text = "leaderboard"
+
+        result = bot.fetch_reader(
+            "https://tennisabstract.com/reports/atp_elo_ratings.html"
+        )
+
+        self.assertEqual(result, "leaderboard")
+        headers = get.call_args.kwargs["headers"]
+        self.assertEqual(headers["Accept"], "text/plain")
+        self.assertEqual(headers["User-Agent"], "tennis-betting-bot/1.0")
+        self.assertNotEqual(headers, bot.REQUEST_HEADERS)
 
     def test_completion_limit_fits_groq_tpm_budget(self):
         self.assertLessEqual(bot.MAX_COMPLETION_TOKENS, 2048)
