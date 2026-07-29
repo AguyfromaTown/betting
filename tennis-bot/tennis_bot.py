@@ -50,6 +50,22 @@ def fetch(url: str) -> str | None:
         return None
 
 
+def fetch_json(url: str, params: dict | None = None):
+    """Fetch JSON while keeping API keys out of log output."""
+    try:
+        response = requests.get(
+            url,
+            params=params,
+            headers=REQUEST_HEADERS,
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        return response.json()
+    except (requests.RequestException, ValueError) as exc:
+        log(f"  API request failed for {url}: {exc}")
+        return None
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Tennis betting bot")
     parser.add_argument("--date", default=None, help="Match date (YYYY-MM-DD)")
@@ -193,6 +209,84 @@ def fetch_matches_all(date_str: str) -> list[dict]:
     return unique
 
 
+def extract_moneyline_odds(payload: dict) -> tuple[float | None, float | None, str | None]:
+    """Return the first valid home/away match-winner market."""
+    for bookmaker, markets in (payload.get("bookmakers") or {}).items():
+        for market in markets or []:
+            name = str(market.get("name", "")).strip().lower()
+            if name not in {"ml", "moneyline", "match winner", "winner"}:
+                continue
+            for prices in market.get("odds") or []:
+                try:
+                    home = float(prices.get("home"))
+                    away = float(prices.get("away"))
+                except (TypeError, ValueError):
+                    continue
+                if home > 1 and away > 1:
+                    return home, away, bookmaker
+    return None, None, None
+
+
+def fetch_matches_from_odds_api(date_str: str, api_key: str) -> list[dict]:
+    """Fetch verified tennis fixtures and match-winner odds from Odds-API.io."""
+    events_payload = fetch_json(
+        "https://api.odds-api.io/v3/events",
+        {"apiKey": api_key, "sport": "tennis"},
+    )
+    if events_payload is None:
+        return []
+
+    if isinstance(events_payload, list):
+        events = events_payload
+    else:
+        events = events_payload.get("events") or events_payload.get("data") or []
+
+    dated_events = [
+        event for event in events
+        if str(event.get("date", "")).startswith(date_str)
+        and event.get("home")
+        and event.get("away")
+    ]
+    log(f"  Found {len(dated_events)} tennis events from Odds-API.io")
+
+    def fetch_event(event: dict) -> dict | None:
+        payload = fetch_json(
+            "https://api.odds-api.io/v3/odds",
+            {
+                "apiKey": api_key,
+                "eventId": event.get("id"),
+                "bookmakers": "Bet365,Unibet",
+            },
+        )
+        if not isinstance(payload, dict):
+            return None
+        home_odds, away_odds, bookmaker = extract_moneyline_odds(payload)
+        if home_odds is None or away_odds is None:
+            return None
+        league = event.get("league") or payload.get("league") or {}
+        tournament = league.get("name") or "Tennis"
+        return {
+            "player1": event["home"],
+            "player2": event["away"],
+            "tournament": tournament,
+            "level": parse_tournament_level("", tournament),
+            "source": "https://api.odds-api.io",
+            "home_odds": home_odds,
+            "away_odds": away_odds,
+            "odds_source": bookmaker or "Odds-API.io",
+        }
+
+    matches = []
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(fetch_event, event) for event in dated_events]
+        for future in as_completed(futures):
+            match = future.result()
+            if match:
+                matches.append(match)
+    log(f"  Found verified moneyline odds for {len(matches)} matches")
+    return matches
+
+
 def fetch_odds_for_match(player1: str, player2: str) -> tuple[float | None, str | None, str | None]:
     """Try to find odds for a match. Returns (odds, player_name, source_url)."""
     # Try Oddspedia search
@@ -232,9 +326,29 @@ def attach_odds(matches: list[dict], odds_min: float, odds_max: float) -> list[d
     """Fetch odds for each match and filter by range."""
     log("Fetching odds for matches...")
     enriched = []
+    needs_lookup = []
+    for match in matches:
+        available = [
+            odd for odd in (match.get("home_odds"), match.get("away_odds"))
+            if odd is not None and odds_min <= odd <= odds_max
+        ]
+        if available:
+            match["odds"] = available[0]
+            enriched.append(match)
+            log(
+                f"  {match['player1']} {match.get('home_odds')} vs "
+                f"{match['player2']} {match.get('away_odds')} ✓"
+            )
+        elif match.get("home_odds") is None and match.get("away_odds") is None:
+            needs_lookup.append(match)
+
+    if not needs_lookup:
+        log(f"Qualifying matches in odds range [{odds_min}-{odds_max}]: {len(enriched)}")
+        return enriched
+
     with ThreadPoolExecutor(max_workers=5) as executor:
         future_map = {}
-        for m in matches:
+        for m in needs_lookup:
             future = executor.submit(
                 fetch_odds_for_match, m["player1"], m["player2"]
             )
@@ -299,10 +413,15 @@ def build_prompt(
     # Build match data section
     match_lines = []
     for i, m in enumerate(matches, 1):
+        market_odds = (
+            f"{m['player1']} {m['home_odds']:.2f}, {m['player2']} {m['away_odds']:.2f}"
+            if m.get("home_odds") is not None and m.get("away_odds") is not None
+            else str(m.get("odds", "N/A"))
+        )
         match_lines.append(
             f"Match {i}: {m['player1']} vs {m['player2']}\n"
             f"  Tournament: {m['tournament']} ({m['level']})\n"
-            f"  Odds: {m.get('odds', 'N/A')} (source: {m.get('odds_source', 'N/A')})\n"
+            f"  Moneyline odds: {market_odds} (source: {m.get('odds_source', 'N/A')})\n"
         )
 
     matches_text = "\n".join(match_lines) if match_lines else "No matches found in odds range."
@@ -632,10 +751,16 @@ def main():
     if bankroll is None:
         log("WARNING: No bankroll set. Run with --bankroll <amount>")
 
-    # Stage 1: Collect matches
-    all_matches = fetch_matches_all(date_str)
+    odds_api_key = os.environ.get("ODDS_API_KEY")
+    if not odds_api_key:
+        log("ERROR: No odds key. Set ODDS_API_KEY env var.")
+        sys.exit(1)
+
+    # Stage 1: Collect verified matches and odds
+    log("Fetching tennis fixtures and odds...")
+    all_matches = fetch_matches_from_odds_api(date_str, odds_api_key)
     if not all_matches:
-        log("No matches found from web sources. Will use AI knowledge only.")
+        log("No verified matches with moneyline odds were found.")
 
     # Attach odds
     qualified = attach_odds(all_matches, odds_min, odds_max)
