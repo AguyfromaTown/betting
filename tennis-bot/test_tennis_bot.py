@@ -34,6 +34,22 @@ class TennisBotTests(unittest.TestCase):
             ],
         )
 
+    def test_extract_moneyline_odds(self):
+        payload = {
+            "bookmakers": {
+                "Bet365": [
+                    {
+                        "name": "ML",
+                        "odds": [{"home": "1.55", "away": "2.50"}],
+                    }
+                ]
+            }
+        }
+        self.assertEqual(
+            bot.extract_moneyline_odds(payload),
+            (1.55, 2.5, "Bet365"),
+        )
+
     @patch.object(bot.requests, "post")
     def test_call_ai_uses_groq_contract(self, post):
         response = post.return_value
