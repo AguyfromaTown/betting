@@ -1,6 +1,6 @@
 """
 Tennis Betting Bot — Automated daily picks pipeline.
-Runs the 3-stage analysis via Google Gemini API and logs results.
+Runs the 3-stage analysis via Groq API and logs results.
 Designed for GitHub Actions execution.
 """
 
@@ -24,6 +24,7 @@ LOG_FILE = REPO_ROOT / "bets-log.csv"
 REPORTS_DIR = REPO_ROOT / "reports"
 
 REQUEST_TIMEOUT = 30
+MAX_COMPLETION_TOKENS = 4096
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -314,25 +315,25 @@ Matches in odds range [{odds_min}-{odds_max}]:
 
 {matches_text}
 
-## Player Profile Data (from TennisAbstract)
+## Player Profile Data
 
 """
 
-    # Add player profile data
-    seen_players = set()
-    for m in matches:
-        for player in [m["player1"], m["player2"]]:
-            if player.lower() not in seen_players:
-                seen_players.add(player.lower())
-                profile = fetch_player_profile(player)
-                prompt += f"\n--- {player} Profile ---\n{profile}\n"
+    prompt += (
+        "No independently verified current player profiles were supplied. "
+        "Treat missing form, injury, surface, and schedule information as "
+        "uncertainty; do not manufacture it.\n"
+    )
 
     # Add the analysis instructions
     prompt += f"""
 
 ## ANALYSIS INSTRUCTIONS
 
-You MUST now perform the full 3-stage pipeline using ONLY the data above and your own tennis knowledge.
+You MUST now perform the full 3-stage pipeline using only the verified matches
+and odds above. Historical knowledge may provide context, but do not present it
+as current form, injury news, or confirmed availability. If no verified matches
+are supplied, return no picks and explain that live data was unavailable.
 
 ### STAGE 1 — Verification & Refinement
 Review the match data above. Verify the tournament levels and identify any issues. Cross-reference with your knowledge of tennis schedules.
@@ -419,107 +420,91 @@ Direct and analytical. Quantify confidence. No marketing language. Aim for 500-8
 
 
 def call_ai(prompt: str, api_key: str) -> str:
-    """Call Google Gemini API (free tier) with the constructed prompt."""
-    import google.genai as genai
+    """Call Groq's OpenAI-compatible API with the constructed prompt."""
+    payload = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": MAX_COMPLETION_TOKENS,
+        "temperature": 0.3,
+    }
 
-    client = genai.Client(api_key=api_key)
-
-    log("Calling Gemini API (free)...")
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config={
-            "max_output_tokens": 8192,
-            "temperature": 0.3,
-        },
-    )
-
-    content = response.text if response.text else ""
-    log(f"Gemini response: {len(content)} chars")
-    return content
+    log("Calling Groq API (Llama 3)...")
+    try:
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=120,
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"]
+        log(f"Groq response: {len(content)} chars")
+        return content
+    except (requests.RequestException, KeyError, IndexError, ValueError) as exc:
+        log(f"Groq API error: {exc}")
+        if isinstance(exc, requests.RequestException) and exc.response is not None:
+            log(f"Response body: {exc.response.text[:500]}")
+        raise
 
 
 # ─── Stage 4: Logging ───────────────────────────────────────────────
 
 def parse_recommendations(report: str) -> list[dict]:
-    """Parse the Claude report to extract recommended bets."""
+    """Parse recommended bets from the AI's Markdown report."""
     recommendations = []
     current_type = None
-    current_match = None
+    last_player = None
 
     for line in report.split("\n"):
-        line_stripped = line.strip().lower()
+        line_lower = line.strip().lower()
+        line_clean = re.sub(r"\*+", "", line.strip().lstrip("-# ")).strip()
+        line_clean = re.sub(r"^\d+[.)]\s*", "", line_clean)
 
-        if "## top picks" in line_stripped:
+        if "## top picks" in line_lower or "## top pick" in line_lower:
             current_type = "Top Pick"
-            current_match = None
+            last_player = None
             continue
-        elif "## value picks" in line_stripped:
+        if "## value picks" in line_lower or "## value pick" in line_lower:
             current_type = "Value Pick"
-            current_match = None
+            last_player = None
             continue
-        elif "## picks to avoid" in line_stripped:
+        if "## picks to avoid" in line_lower or "## avoid" in line_lower:
             current_type = None
+            last_player = None
+            continue
+        if line_lower.startswith("## "):
+            current_type = None
+            last_player = None
             continue
 
         if not current_type:
             continue
 
-        # Look for player names and odds in the line
-        odds_match = re.search(r'(?:odds?|at)\s+([1-9]\.[0-9]+)', line_stripped)
         player_match = re.search(
-            r'^\*{0,2}\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]*)*)\s+vs\s+', line
+            r'^(.+?)\s+v(?:s)?\.?\s+(.+)$',
+            line_clean,
+            flags=re.IGNORECASE,
         )
-
         if player_match:
-            current_match = player_match.group(1).strip()
+            last_player = player_match.group(1).strip()
 
-        if odds_match and current_match:
+        odds_match = None
+        if re.match(r'^odds?\s*:', line_clean, re.IGNORECASE):
+            odds_match = re.search(r'\b([1-9]\d*\.\d+)\b', line_clean)
+        if odds_match and last_player:
             try:
                 odds_val = float(odds_match.group(1))
                 recommendations.append({
-                    "player": current_match,
+                    "player": last_player,
                     "odds": odds_val,
                     "grade": current_type,
                 })
-                current_match = None
+                last_player = None
             except ValueError:
                 pass
-
-    # Fallback: scan for structured pick patterns
-    if not recommendations:
-        for line in report.split("\n"):
-            line_stripped = line.strip()
-            if not line_stripped:
-                continue
-
-            grade = None
-            if "**Top Pick**" in line_stripped:
-                grade = "Top Pick"
-            elif "**Value Pick**" in line_stripped:
-                grade = "Value Pick"
-
-            if grade:
-                player = None
-                odds = None
-
-                p_match = re.search(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:vs|v\.)\s+', line_stripped)
-                if p_match:
-                    player = p_match.group(1).strip()
-
-                o_match = re.search(r'(?:odds?|at|@)\s*([1-9]\.[0-9]+)', line_stripped)
-                if o_match:
-                    try:
-                        odds = float(o_match.group(1))
-                    except ValueError:
-                        pass
-
-                if player:
-                    recommendations.append({
-                        "player": player,
-                        "odds": odds,
-                        "grade": grade,
-                    })
 
     return recommendations
 
@@ -659,10 +644,10 @@ def main():
     log("Building analysis prompt...")
     prompt = build_prompt(date_str, qualified, bankroll, odds_min, odds_max)
 
-    api_key = os.environ.get("GOOGLE_API_KEY")
+    api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        log("ERROR: No API key. Set GOOGLE_API_KEY env var.")
-        log("Get a free key at https://aistudio.google.com/apikey")
+        log("ERROR: No API key. Set GROQ_API_KEY env var.")
+        log("Get a key at https://console.groq.com/keys")
         sys.exit(1)
 
     report = call_ai(prompt, api_key)
