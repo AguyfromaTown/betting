@@ -10,5 +10,9 @@ venv/
 random-forest/
 *.zip
 
+# OpenCode's temporary handoff files (never commit generated research)
+tennis-bot/agent-run.json
+tennis-bot/agent-report.md
+
 random-forest/
 *.zip
