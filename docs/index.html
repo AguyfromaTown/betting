@@ -68,25 +68,6 @@
     .status-dot.warning { background: var(--amber); box-shadow: 0 0 0 4px var(--amber-soft); }
     .status.error .status-dot { background: var(--red); box-shadow: 0 0 0 4px var(--red-soft); }
 
-    /* ─── Banner ─── */
-    .banner {
-      display: none; align-items: center; justify-content: space-between; gap: 16px;
-      margin-top: 18px; padding: 12px 18px; border: 1px solid var(--amber-soft);
-      background: var(--amber-soft); border-radius: var(--radius-sm); font-size: 13px;
-    }
-    .banner.show { display: flex; flex-wrap: wrap; }
-    .banner .banner-text { color: var(--amber); }
-    .banner-actions { display: flex; gap: 8px; }
-    .banner-btn {
-      padding: 6px 14px; border: 1px solid rgba(255,196,107,.25); border-radius: 7px;
-      background: transparent; cursor: pointer; font-size: 12px; font-weight: 600; transition: background .15s;
-    }
-    .banner-btn:hover { background: rgba(255,196,107,.1); }
-    .banner-btn.primary {
-      background: var(--amber); color: #10150d; border-color: var(--amber);
-    }
-    .banner-btn.primary:hover { background: #ffd082; }
-
     /* ─── Hero ─── */
     .hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 30px; padding: 48px 0 30px; }
     .eyebrow { color: var(--lime); font-size: 11px; font-weight: 700; letter-spacing: 1.7px; text-transform: uppercase; }
@@ -172,33 +153,7 @@
     .badge::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
     .badge.win { color: var(--lime); background: var(--lime-soft); }
     .badge.loss { color: var(--red); background: var(--red-soft); }
-    .badge.pending {
-      color: var(--amber); background: var(--amber-soft); cursor: pointer;
-      transition: filter .15s, border-color .15s; border: 1px solid transparent;
-    }
-    .badge.pending:hover { filter: brightness(1.25); border-color: rgba(255,196,107,.25); }
-    .result-picker {
-      display: inline-flex; gap: 4px; white-space: nowrap;
-    }
-    .result-picker button {
-      padding: 4px 12px; border: 1px solid var(--line); border-radius: 6px;
-      background: var(--surface-2); cursor: pointer; font-size: 11px; font-weight: 700;
-      transition: background .15s, border-color .15s;
-    }
-    .result-picker button:hover { border-color: var(--muted-2); }
-    .result-picker button.pick-win { color: var(--lime); }
-    .result-picker button.pick-win:hover { background: var(--lime-soft); border-color: rgba(184,243,75,.3); }
-    .result-picker button.pick-loss { color: var(--red); }
-    .result-picker button.pick-loss:hover { background: var(--red-soft); border-color: rgba(255,113,108,.3); }
-
-    .toast {
-      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px);
-      padding: 10px 20px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line);
-      font-size: 13px; opacity: 0; transition: transform .3s, opacity .3s; pointer-events: none; z-index: 100;
-    }
-    .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
-
-    .toast.success { border-color: rgba(184,243,75,.25); color: var(--lime); }
+    .badge.pending { color: var(--amber); background: var(--amber-soft); }
 
     .empty { display: none; padding: 64px 20px; border-top: 1px solid var(--line); text-align: center; }
     .empty-icon { display: grid; place-items: center; width: 48px; height: 48px; margin: 0 auto 15px; color: var(--lime); background: var(--lime-soft); border: 1px solid rgba(184,243,75,.15); border-radius: 14px; }
@@ -215,8 +170,6 @@
       .stats { grid-template-columns: repeat(2,1fr); }
       .dashboard { grid-template-columns: 1fr; }
       h1 { letter-spacing: -1.5px; }
-      .banner { flex-direction: column; align-items: stretch; }
-      .banner-actions { justify-content: flex-end; }
     }
     @media (max-width: 620px) {
       .shell { width: min(100% - 28px,1240px); padding-top: 18px; }
@@ -255,19 +208,11 @@
       <div class="status" id="status"><span class="status-dot"></span><span id="status-text">Syncing data</span></div>
     </header>
 
-    <div class="banner" id="banner">
-      <span class="banner-text" id="banner-text">Results saved locally.</span>
-      <div class="banner-actions">
-        <button class="banner-btn" id="clear-local-btn">Clear</button>
-        <button class="banner-btn primary" id="copy-csv-btn">Copy updated CSV</button>
-      </div>
-    </div>
-
     <section class="hero">
       <div>
         <div class="eyebrow">Performance dashboard</div>
         <h1>Your betting edge,<br>made visible.</h1>
-        <p>Click any <b style="color:var(--amber)">Open</b> badge to mark a result. Returns update instantly.</p>
+        <p>Automated results, bankroll, surface-aware Elo, calibration and closing-line value in one view.</p>
       </div>
       <div class="updated">Latest activity<strong id="last-updated">Loading your log…</strong></div>
     </section>
@@ -298,7 +243,7 @@
     <section class="dashboard">
       <article class="card panel">
         <div class="panel-head">
-          <div><h2 class="panel-title">Bankroll trajectory</h2><div class="panel-kicker">Balance after each recorded bet</div></div>
+          <div><h2 class="panel-title">Bankroll trajectory</h2><div class="panel-kicker">Starting balance recorded for each bet</div></div>
           <span class="period" id="chart-period">All time</span>
         </div>
         <div class="chart-wrap">
@@ -319,12 +264,15 @@
           </div>
         </div>
         <div class="record-row"><span>Average odds</span><b id="avg-odds">—</b></div>
+        <div class="record-row"><span>Brier score</span><b id="brier-score">—</b></div>
+        <div class="record-row"><span>Average CLV</span><b id="average-clv">—</b></div>
+        <div class="record-row"><span>Audited predictions</span><b id="audit-count">0</b></div>
       </article>
     </section>
 
     <section class="card table-card">
       <div class="table-toolbar">
-        <div><h2 class="panel-title">Bet history</h2><div class="panel-kicker">Click <b style="color:var(--amber)">Open</b> to mark a result</div></div>
+        <div><h2 class="panel-title">Bet history</h2><div class="panel-kicker">Automatically settled by the tennis workflow</div></div>
         <div class="table-tools">
           <span class="count" id="row-count">0 entries</span>
           <label class="search">
@@ -346,42 +294,41 @@
       </div>
     </section>
 
-    <footer class="footer"><span>Edgebook performance dashboard</span><span>Results marked here are saved in your browser · <a href="#" id="clear-all-link" style="color:var(--muted-2)">Clear all local results</a></span></footer>
+    <section class="card table-card" style="margin-top:12px">
+      <div class="table-toolbar">
+        <div><h2 class="panel-title">Prediction audit</h2><div class="panel-kicker">Model probability, EV, decision reason and closing-line value</div></div>
+        <span class="count" id="audit-row-count">0 predictions</span>
+      </div>
+      <div class="table-scroll">
+        <table id="audit-table">
+          <thead><tr><th>Date</th><th>Player</th><th>Opening odds</th><th>Model probability</th><th>EV</th><th>Decision</th><th>Reason</th><th>Result</th><th>CLV</th></tr></thead>
+          <tbody id="audit-body"></tbody>
+        </table>
+      </div>
+    </section>
 
-    <div class="toast" id="toast"></div>
+    <footer class="footer"><span>Edgebook performance dashboard</span><span>Synced from bets-log.csv, predictions-log.csv and bankroll.txt</span></footer>
+
   </main>
 
   <script>
-    const DATA_URL = "https://api.github.com/repos/AguyfromaTown/betting/contents/bets-log.csv";
-    const STORAGE_KEY = "edgebook_results";
+    const RAW_ROOT = "https://raw.githubusercontent.com/AguyfromaTown/betting/main/";
+    const DATA_URL = RAW_ROOT + "bets-log.csv";
+    const AUDIT_URL = RAW_ROOT + "predictions-log.csv";
+    const BANKROLL_URL = RAW_ROOT + "bankroll.txt";
+    const PERFORMANCE_URL = RAW_ROOT + "performance-summary.md";
     let allRows = [];
-    let localResults = {};
+    let auditRows = [];
+    let currentBankroll = null;
+    let performanceText = "";
 
     const el = id => document.getElementById(id);
     const money = value => new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR" }).format(value || 0);
     const safe = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;" })[char]);
-
-    // ─── localStorage results ───
-    function loadLocalResults() {
-      try { localResults = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch {}
-    }
-    function saveLocalResults() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(localResults));
-      updateBanner();
-    }
-    function rowKey(r) {
-      return `${r.date}|${r.match}|${r.odds}`;
-    }
-    function hasLocal() {
-      return Object.keys(localResults).length > 0;
-    }
-    function updateBanner() {
-      const count = Object.keys(localResults).length;
-      el("banner").classList.toggle("show", count > 0);
-      el("banner-text").textContent = count + " result" + (count > 1 ? "s" : "") + " saved in browser.";
-      if (count > 0) el("status-dot").classList.add("warning");
-      else el("status-dot").classList.remove("warning");
-    }
+    const percent = value => {
+      const number = Number.parseFloat(value);
+      return Number.isFinite(number) ? (number * 100).toFixed(1) + "%" : "—";
+    };
 
     // ─── CSV parsing ───
     function parseCSV(text) {
@@ -408,7 +355,8 @@
       return parseCSV(text).map(row => {
         const odds = Number.parseFloat(row.odds) || 0;
         const stake = Number.parseFloat(row.stake) || 0;
-        const rawResult = (row.result || "").toLowerCase();
+        const value = (row.result || "").trim().toLowerCase();
+        const rawResult = ["w","win","won"].includes(value) ? "win" : ["l","loss","lost"].includes(value) ? "loss" : "";
         return {
           date: row.date || "",
           match: row.match || "",
@@ -422,20 +370,6 @@
       }).filter(row => row.date || row.match || row.bet);
     }
 
-    // ─── Apply local results on top of CSV data ───
-    function applyLocal(rows) {
-      return rows.map(r => {
-        const key = rowKey(r);
-        const lr = localResults[key];
-        if (lr) {
-          const won = lr === "win";
-          const stake = r.stake || 0;
-          return { ...r, result: won ? "win" : "loss", ret: won ? Math.round(stake * r.odds * 100) / 100 : 0 };
-        }
-        return { ...r };
-      });
-    }
-
     // ─── Render functions ───
     function renderStats(rows) {
       const settled = rows.filter(r => ["win","loss","won","lost"].includes(r.result));
@@ -443,12 +377,13 @@
       const losses = settled.filter(r => ["loss","lost"].includes(r.result));
       const pending = rows.length - settled.length;
       const totalStake = rows.reduce((sum,r) => sum + r.stake, 0);
-      const totalReturn = rows.reduce((sum,r) => sum + r.ret, 0);
-      const pnl = totalReturn - totalStake;
-      const roi = totalStake ? pnl / totalStake * 100 : 0;
+      const settledStake = settled.reduce((sum,r) => sum + r.stake, 0);
+      const totalReturn = settled.reduce((sum,r) => sum + r.ret, 0);
+      const pnl = totalReturn - settledStake;
+      const roi = settledStake ? pnl / settledStake * 100 : 0;
       const winRate = settled.length ? wins.length / settled.length * 100 : 0;
       const balances = rows.filter(r => Number.isFinite(r.balance));
-      const latestBalance = balances.length ? balances.at(-1).balance : null;
+      const latestBalance = Number.isFinite(currentBankroll) ? currentBankroll : balances.length ? balances.at(-1).balance : null;
       const odds = rows.filter(r => r.odds > 0);
 
       setMetric("total-bets", rows.length.toLocaleString());
@@ -465,6 +400,11 @@
       el("ring-rate").textContent = settled.length ? Math.round(winRate) + "%" : "—";
       el("result-ring").style.setProperty("--p", winRate);
       el("avg-odds").textContent = odds.length ? (odds.reduce((s,r) => s + r.odds,0) / odds.length).toFixed(2) : "—";
+      const brier = performanceText.match(/Brier score:\s*([0-9.]+)/i);
+      const clv = performanceText.match(/Average CLV:\s*([+-]?[0-9.]+)%/i);
+      el("brier-score").textContent = brier ? brier[1] : "—";
+      el("average-clv").textContent = clv ? clv[1] + "%" : "—";
+      el("audit-count").textContent = auditRows.length.toLocaleString();
     }
 
     function setMetric(id, value, tone) {
@@ -487,8 +427,7 @@
         } else if (lost) {
           resultCell = `<span class="badge loss">Lost</span>`;
         } else {
-          const key = safe(rowKey(r));
-          resultCell = `<span class="badge pending" data-key="${key}">Open</span>`;
+          resultCell = `<span class="badge pending">Open</span>`;
         }
 
         return `<tr>
@@ -505,43 +444,43 @@
       el("empty-state").style.display = rows.length ? "none" : "block";
       el("row-count").textContent = `${rows.length} ${rows.length === 1 ? "entry" : "entries"}`;
 
-      // Attach click handlers to pending badges
-      document.querySelectorAll(".badge.pending[data-key]").forEach(el => {
-        el.addEventListener("click", function(e) {
-          e.stopPropagation();
-          const key = this.dataset.key;
-          showResultPicker(this, key);
-        });
-      });
-    }
-
-    // ─── Result picker ───
-    function showResultPicker(targetEl, key) {
-      const existing = targetEl.parentElement.querySelector(".result-picker");
-      if (existing) { existing.remove(); return; }
-      const picker = document.createElement("span");
-      picker.className = "result-picker";
-      picker.innerHTML = `<button class="pick-win" data-action="win">Won</button><button class="pick-loss" data-action="loss">Lost</button>`;
-      targetEl.replaceWith(picker);
-      picker.querySelectorAll("button").forEach(btn => {
-        btn.addEventListener("click", function(e) {
-          e.stopPropagation();
-          const result = this.dataset.action;
-          localResults[key] = result;
-          saveLocalResults();
-          refreshAll();
-          showToast(result === "win" ? "Marked as Won" : "Marked as Lost", "success");
-        });
-      });
     }
 
     // ─── Refresh ───
+    function renderAudit(rows) {
+      const body = el("audit-body");
+      const recent = rows.slice(-100).reverse();
+      body.innerHTML = recent.map(row => {
+        const result = String(row.result || "").trim().toLowerCase();
+        const resultCell = ["w", "win", "won"].includes(result)
+          ? `<span class="badge win">Won</span>`
+          : ["l", "loss", "lost"].includes(result)
+            ? `<span class="badge loss">Lost</span>`
+            : `<span class="badge pending">Open</span>`;
+        const decision = String(row.decision || "").trim();
+        return `<tr>
+          <td class="mono">${safe(row.date || "—")}</td>
+          <td>${safe(row.pick || row.player || "—")}</td>
+          <td class="mono">${safe(row.opening_odds || "—")}</td>
+          <td class="mono">${safe(percent(row.model_probability))}</td>
+          <td class="mono">${safe(percent(row.ev))}</td>
+          <td>${safe(decision || "—")}</td>
+          <td>${safe(row.reason || "—")}</td>
+          <td>${resultCell}</td>
+          <td class="mono">${safe(percent(row.clv))}</td>
+        </tr>`;
+      }).join("");
+      el("audit-table").style.display = recent.length ? "table" : "none";
+      el("audit-row-count").textContent = `${rows.length} audited ${rows.length === 1 ? "prediction" : "predictions"}`;
+    }
+
     function refreshAll() {
-      const withLocal = applyLocal(allRows);
-      renderStats(withLocal);
-      renderTable(withLocal.reverse());
-      drawChart(withLocal);
-      updateStatus(withLocal);
+      const rows = allRows.map(row => ({ ...row }));
+      renderStats(rows);
+      renderTable(rows.reverse());
+      renderAudit(auditRows);
+      drawChart(allRows);
+      updateStatus(allRows);
     }
 
     function updateStatus(rows) {
@@ -586,41 +525,23 @@
     // ─── Search ───
     function updateSearch() {
       const query = el("search").value.trim().toLowerCase();
-      const withLocal = applyLocal(allRows);
-      renderTable(query ? withLocal.reverse().filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(query))) : withLocal.reverse());
-    }
-
-    // ─── Toast ───
-    function showToast(msg, cls) {
-      const t = el("toast"); t.textContent = msg; t.className = "toast" + (cls ? " " + cls : "");
-      requestAnimationFrame(() => { t.classList.add("show");
-        setTimeout(() => t.classList.remove("show"), 2000);
-      });
-    }
-
-    // ─── Copy CSV ───
-    function generateUpdatedCSV() {
-      const withLocal = applyLocal(allRows);
-      const header = "DATE,MATCH,BET,ODDS,STAKE,RESULT,RETURN,STARTING BALANCE";
-      const rows = withLocal.map(r => {
-        const result = ["win","won"].includes(r.result) ? "win" : ["loss","lost"].includes(r.result) ? "loss" : "";
-        const ret = result === "win" ? (r.odds * r.stake).toFixed(2) : result === "loss" ? "0.00" : "";
-        return `${r.date},${r.match},${r.bet},${r.odds},${r.stake.toFixed(2)},${result},${ret},${r.balance !== null ? r.balance.toFixed(2) : ""}`;
-      }).join("\n");
-      return header + "\n" + rows;
+      const rows = [...allRows].reverse();
+      renderTable(query ? rows.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(query))) : rows);
     }
 
     // ─── Main ───
     async function loadLog() {
-      loadLocalResults();
       try {
-        const response = await fetch(DATA_URL);
-        if (!response.ok) throw new Error(`GitHub API returned ${response.status}`);
-        const json = await response.json();
-        const text = atob(json.content.replace(/\s/g, ""));
-        allRows = normalizeRows(text);
+        const required = await Promise.all([fetch(DATA_URL), fetch(BANKROLL_URL)]);
+        if (!required[0].ok) throw new Error(`bets-log.csv returned ${required[0].status}`);
+        if (!required[1].ok) throw new Error(`bankroll.txt returned ${required[1].status}`);
+        allRows = normalizeRows(await required[0].text());
+        currentBankroll = Number.parseFloat((await required[1].text()).trim());
+        const optional = await Promise.all([fetch(AUDIT_URL), fetch(PERFORMANCE_URL)]);
+        auditRows = optional[0].ok ? parseCSV(await optional[0].text()) : [];
+        performanceText = optional[1].ok ? await optional[1].text() : "";
         refreshAll();
-        el("status-text").textContent = hasLocal() ? "Data synced · results pending" : "Data synced";
+        el("status-text").textContent = "Automated data synced";
       } catch (error) {
         renderStats([]); renderTable([]); drawChart([]);
         el("status").classList.add("error"); el("status-text").textContent = "Sync failed";
@@ -632,26 +553,7 @@
 
     // ─── Event wiring ───
     el("search").addEventListener("input", updateSearch);
-    window.addEventListener("resize", () => { const wl = applyLocal(allRows); drawChart(wl); });
-
-    el("copy-csv-btn").addEventListener("click", () => {
-      const csv = generateUpdatedCSV();
-      navigator.clipboard.writeText(csv).then(() => {
-        showToast("CSV copied to clipboard — paste into bets-log.csv and push", "success");
-      }).catch(() => {
-        // fallback
-        const ta = document.createElement("textarea"); ta.value = csv; ta.style.position = "fixed"; ta.style.opacity = "0";
-        document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
-        showToast("CSV copied to clipboard", "success");
-      });
-    });
-
-    el("clear-local-btn").addEventListener("click", () => {
-      localResults = {}; saveLocalResults(); refreshAll(); showToast("Local results cleared", "success");
-    });
-    el("clear-all-link").addEventListener("click", (e) => {
-      e.preventDefault(); localResults = {}; saveLocalResults(); refreshAll(); showToast("All local results cleared", "success");
-    });
+    window.addEventListener("resize", () => drawChart(allRows));
 
     loadLog();
   </script>
