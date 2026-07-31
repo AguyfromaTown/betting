@@ -717,6 +717,74 @@ def calculate_recent_form(history: list[dict], player: str, surface: str | None,
     return {"sample": len(observations), "probability": max(0.35, min(0.65, 0.5 + residual)), "win_rate": win_rate, "residual": residual}
 
 
+def hold_probability(point_probability: float) -> float:
+    """Convert an independent service-point probability to game hold probability."""
+    p = max(0.01, min(0.99, point_probability)); q = 1 - p
+    before_deuce = p ** 4 * (1 + 4 * q + 10 * q ** 2)
+    reach_deuce = 20 * p ** 3 * q ** 3
+    win_from_deuce = p ** 2 / (1 - 2 * p * q)
+    return before_deuce + reach_deuce * win_from_deuce
+
+
+def calculate_serve_return_profile(history: list[dict], player: str, surface: str | None, as_of: str, limit: int = 30) -> dict | None:
+    """Aggregate verified service and return points with recency/surface weighting."""
+    player_key = normalize_player_name(player); cutoff = datetime.strptime(as_of, "%Y-%m-%d")
+    observations = []
+    for row in history:
+        winner_key, loser_key = normalize_player_name(row.get("winner_name", "")), normalize_player_name(row.get("loser_name", ""))
+        if player_key not in {winner_key, loser_key} or any(flag in (row.get("score") or "").upper() for flag in ("W/O", "RET", "DEF")):
+            continue
+        won = player_key == winner_key; own, opp = ("w_", "l_") if won else ("l_", "w_")
+        try:
+            played = datetime.strptime(str(row.get("tourney_date", "")), "%Y%m%d")
+            values = {name: float(row[own + name]) for name in ("svpt", "1stIn", "1stWon", "2ndWon")}
+            for name in ("ace", "df", "bpSaved", "bpFaced"):
+                try:
+                    values[name] = float(row.get(own + name) or 0)
+                except (TypeError, ValueError):
+                    values[name] = 0.0
+            opp_svpt = float(row[opp + "svpt"]); opp_won = float(row[opp + "1stWon"]) + float(row[opp + "2ndWon"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if played >= cutoff or values["svpt"] <= 0 or opp_svpt <= 0:
+            continue
+        weight = 0.5 ** (max(0, (cutoff - played).days) / 120)
+        if surface and str(row.get("surface", "")).casefold() == surface.casefold():
+            weight *= 1.35
+        observations.append((played, weight, values, opp_svpt, opp_won))
+    observations.sort(key=lambda item: item[0], reverse=True); observations = observations[:limit]
+    service_points = sum(weight * values["svpt"] for _, weight, values, _, _ in observations)
+    return_points = sum(weight * opp_svpt for _, weight, _, opp_svpt, _ in observations)
+    if len(observations) < 8 or service_points < 400 or return_points < 400:
+        return None
+    total = lambda field: sum(weight * values[field] for _, weight, values, _, _ in observations)
+    service_won = total("1stWon") + total("2ndWon")
+    return_won = sum(weight * (opp_svpt - opp_won) for _, weight, _, opp_svpt, opp_won in observations)
+    bp_faced = total("bpFaced")
+    service_probability = service_won / service_points
+    return_probability = return_won / return_points
+    return {
+        "sample": len(observations), "service_points": service_points, "return_points": return_points,
+        "ace_rate": total("ace") / service_points, "double_fault_rate": total("df") / service_points,
+        "first_serve_in": total("1stIn") / service_points,
+        "first_serve_won": total("1stWon") / total("1stIn") if total("1stIn") else None,
+        "second_serve_won": total("2ndWon") / max(1, service_points - total("1stIn")),
+        "service_points_won": service_probability, "return_points_won": return_probability,
+        "break_points_saved": total("bpSaved") / bp_faced if bp_faced else None,
+        "hold_probability": hold_probability(service_probability),
+    }
+
+
+def calculate_serve_return_matchup(player_profile: dict | None, opponent_profile: dict | None) -> dict | None:
+    if not player_profile or not opponent_profile:
+        return None
+    player_point = (player_profile["service_points_won"] + (1 - opponent_profile["return_points_won"])) / 2
+    opponent_point = (opponent_profile["service_points_won"] + (1 - player_profile["return_points_won"])) / 2
+    player_hold, opponent_hold = hold_probability(player_point), hold_probability(opponent_point)
+    probability = max(0.25, min(0.75, 0.5 + 0.9 * (player_hold - opponent_hold)))
+    return {"probability": probability, "player_hold": player_hold, "opponent_hold": opponent_hold, "sample": min(player_profile["sample"], opponent_profile["sample"])}
+
+
 def fetch_recent_match_history(matches: list[dict], date_str: str) -> list[dict]:
     """Download compact current/previous season histories without paid API calls."""
     year = int(date_str[:4])
@@ -741,6 +809,8 @@ def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
     for match in matches:
         match["player1_recent_form"] = calculate_recent_form(history, match["player1"], match.get("surface"), date_str)
         match["player2_recent_form"] = calculate_recent_form(history, match["player2"], match.get("surface"), date_str)
+        match["player1_serve_return"] = calculate_serve_return_profile(history, match["player1"], match.get("surface"), date_str)
+        match["player2_serve_return"] = calculate_serve_return_profile(history, match["player2"], match.get("surface"), date_str)
 
 
 def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
@@ -758,11 +828,13 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         player_profile = match.get("player1_profile")
         opponent_profile = match.get("player2_profile")
         recent_form = match.get("player1_recent_form")
+        serve_return = calculate_serve_return_matchup(match.get("player1_serve_return"), match.get("player2_serve_return"))
     elif player_key == normalize_player_name(match["player2"]):
         player_odds = float(away_odds)
         player_profile = match.get("player2_profile")
         opponent_profile = match.get("player1_profile")
         recent_form = match.get("player2_recent_form")
+        serve_return = calculate_serve_return_matchup(match.get("player2_serve_return"), match.get("player1_serve_return"))
     else:
         return None
 
@@ -779,10 +851,18 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
     except (KeyError, TypeError, ValueError):
         return None
     elo_probability = 1 / (1 + 10 ** ((opponent_elo - player_elo) / 400))
-    if recent_form and recent_form.get("sample", 0) >= 8:
+    if recent_form and serve_return:
+        assessed_probability = 0.40 * elo_probability + 0.30 * market_probability + 0.15 * recent_form["probability"] + 0.15 * serve_return["probability"]
+        component_weights = "elo=.40;market=.30;form=.15;serve_return=.15"
+    elif recent_form and recent_form.get("sample", 0) >= 8:
         assessed_probability = 0.50 * elo_probability + 0.35 * market_probability + 0.15 * recent_form["probability"]
+        component_weights = "elo=.50;market=.35;form=.15;serve_return=0"
+    elif serve_return:
+        assessed_probability = 0.50 * elo_probability + 0.35 * market_probability + 0.15 * serve_return["probability"]
+        component_weights = "elo=.50;market=.35;form=0;serve_return=.15"
     else:
         assessed_probability = 0.55 * elo_probability + 0.45 * market_probability
+        component_weights = "elo=.55;market=.45;form=0;serve_return=0"
     ev = assessed_probability * player_odds - 1
     score = max(0.0, min(10.0, 6.0 + max(0.0, ev) * 30))
     return {
@@ -791,6 +871,11 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "elo_probability": elo_probability,
         "form_probability": recent_form["probability"] if recent_form else None,
         "form_sample": recent_form["sample"] if recent_form else 0,
+        "serve_return_probability": serve_return["probability"] if serve_return else None,
+        "serve_return_sample": serve_return["sample"] if serve_return else 0,
+        "expected_hold": serve_return["player_hold"] if serve_return else None,
+        "opponent_expected_hold": serve_return["opponent_hold"] if serve_return else None,
+        "component_weights": component_weights,
         "assessed_probability": assessed_probability,
         "ev": ev,
         "score": score,
@@ -885,10 +970,14 @@ def build_prompt(
                     f"{baseline['form_probability']:.1%} (n={baseline['form_sample']})"
                     if baseline.get("form_probability") is not None else "unavailable"
                 )
+                serve_text = (
+                    f"{baseline['serve_return_probability']:.1%} (n={baseline['serve_return_sample']}, hold {baseline['expected_hold']:.1%} vs {baseline['opponent_expected_hold']:.1%})"
+                    if baseline.get("serve_return_probability") is not None else "unavailable"
+                )
                 baseline_lines.append(
                     f"  Python baseline for {player}: market fair "
                     f"{baseline['market_probability']:.1%}, Elo "
-                    f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, "
+                    f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, serve/return {serve_text}, "
                     f"blended assessed "
                     f"{baseline['assessed_probability']:.1%}, EV "
                     f"{baseline['ev']:.2%}, score {baseline['score']:.2f}"
@@ -1318,6 +1407,7 @@ def evidence_quality(match: dict, baseline: dict) -> tuple[int, str]:
     points += 1 if baseline.get("market_overround", 9) <= 1.08 else 0
     points += 1 if baseline.get("elo_market_gap", 9) <= 0.12 else 0
     points += 1 if baseline.get("form_sample", 0) >= 8 else 0
+    points += 1 if baseline.get("serve_return_sample", 0) >= 8 else 0
     grade = "A" if points >= 9 else "B" if points >= 7 else "C" if points >= 5 else "D"
     return points, grade
 
@@ -1327,7 +1417,9 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
     headers = [
         "DATE", "EVENT_ID", "MATCH", "PICK", "OPENING_ODDS",
         "MARKET_PROBABILITY", "ELO_PROBABILITY", "MODEL_PROBABILITY",
-        "FORM_PROBABILITY", "FORM_SAMPLE", "EV", "SCORE", "EVIDENCE", "QUALITY_SCORE", "QUALITY_GRADE",
+        "FORM_PROBABILITY", "FORM_SAMPLE", "SERVE_RETURN_PROBABILITY",
+        "SERVE_RETURN_SAMPLE", "EXPECTED_HOLD", "OPPONENT_EXPECTED_HOLD",
+        "COMPONENT_WEIGHTS", "EV", "SCORE", "EVIDENCE", "QUALITY_SCORE", "QUALITY_GRADE",
         "TOUR", "SURFACE", "BOOKMAKERS", "DECISION", "REASON", "RESULT",
         "CLOSING_ODDS", "CLV",
     ]
@@ -1381,6 +1473,11 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
                 f"{baseline['assessed_probability']:.6f}",
                 f"{baseline['form_probability']:.6f}" if baseline.get("form_probability") is not None else "",
                 baseline.get("form_sample", 0),
+                f"{baseline['serve_return_probability']:.6f}" if baseline.get("serve_return_probability") is not None else "",
+                baseline.get("serve_return_sample", 0),
+                f"{baseline['expected_hold']:.6f}" if baseline.get("expected_hold") is not None else "",
+                f"{baseline['opponent_expected_hold']:.6f}" if baseline.get("opponent_expected_hold") is not None else "",
+                baseline.get("component_weights", ""),
                 f"{baseline['ev']:.6f}", f"{baseline['score']:.3f}",
                 "reliable" if tennis_baseline_is_reliable(baseline) else "insufficient",
                 quality_score, quality_grade, match.get("level") or "Unknown",
