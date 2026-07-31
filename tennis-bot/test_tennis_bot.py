@@ -20,6 +20,36 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("Final betting decision: NO BETS", result)
         self.assertIn("must not be treated as recommendations", result)
 
+    def test_settlement_credits_full_winning_return(self):
+        event = {
+            "id": 7, "date": "2026-08-01T12:00:00Z", "status": "settled",
+            "home": "Player One", "away": "Player Two",
+            "scores": {"home": 2, "away": 0},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log_path, bankroll_path = root / "bets-log.csv", root / "bankroll.txt"
+            log_path.write_text(
+                "DATE,MATCH,BET,ODDS,STAKE,RESULT,RETURN,STARTING BALANCE\n"
+                "2026-08-01,Player One vs Player Two (ATP),Player One to win,2.00,3.00,,,100.00\n",
+                encoding="utf-8",
+            )
+            bankroll_path.write_text("97.00", encoding="utf-8")
+            with (
+                patch.object(bot, "LOG_FILE", log_path),
+                patch.object(bot, "BANKROLL_FILE", bankroll_path),
+                patch.object(bot, "fetch_odds_json", side_effect=[([event], 0), ([], 0)]),
+                patch.object(bot, "update_audit_result"),
+            ):
+                settled = bot.settle_pending_bets(["key"])
+
+            with log_path.open(encoding="utf-8") as handle:
+                rows = list(__import__("csv").DictReader(handle))
+            self.assertEqual(settled, 1)
+            self.assertEqual(rows[0]["RESULT"], "W")
+            self.assertEqual(rows[0]["RETURN"], "6.00")
+            self.assertEqual(bankroll_path.read_text(), "103.00")
+
     def test_log_bets_deduplicates_same_player_and_date(self):
         recommendation = {
             "player": "Darderi, Luciano",
