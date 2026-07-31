@@ -6,11 +6,14 @@ Designed for GitHub Actions execution.
 
 import argparse
 import csv
+import difflib
+import io
 import json
 import os
 import re
 import sys
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -24,6 +27,7 @@ LOG_FILE = REPO_ROOT / "bets-log.csv"
 AUDIT_FILE = REPO_ROOT / "predictions-log.csv"
 PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
+PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
 REPORTS_DIR = REPO_ROOT / "reports"
 REQUEST_TIMEOUT = 30
 MAX_COMPLETION_TOKENS = 2048
@@ -553,6 +557,51 @@ def parse_tennis_abstract_reader(text: str) -> dict[str, dict]:
     return profiles
 
 
+def load_player_aliases() -> dict[str, str]:
+    if not PLAYER_ALIASES_FILE.exists() or not PLAYER_ALIASES_FILE.stat().st_size:
+        return {}
+    with PLAYER_ALIASES_FILE.open(newline="", encoding="utf-8") as handle:
+        return {
+            normalize_player_name(row.get("PROVIDER_NAME", "")): normalize_player_name(row.get("CANONICAL_NAME", ""))
+            for row in csv.DictReader(handle)
+            if row.get("PROVIDER_NAME") and row.get("CANONICAL_NAME")
+        }
+
+
+def save_player_alias(provider_name: str, canonical_name: str, confidence: float):
+    aliases = load_player_aliases()
+    provider_key = normalize_player_name(provider_name)
+    if not provider_key or provider_key in aliases:
+        return
+    write_header = not PLAYER_ALIASES_FILE.exists() or not PLAYER_ALIASES_FILE.stat().st_size
+    with PLAYER_ALIASES_FILE.open("a", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        if write_header:
+            writer.writerow(["PROVIDER_NAME", "CANONICAL_NAME", "SOURCE", "CONFIDENCE"])
+        writer.writerow([provider_name, canonical_name, "auto_unique", f"{confidence:.3f}"])
+
+
+def resolve_profile_key(player: str, profiles: dict[str, dict], aliases: dict[str, str]) -> str | None:
+    """Resolve exact/approved aliases first; allow only unique high-confidence fuzzy matches."""
+    key = normalize_player_name(player)
+    if key in profiles:
+        return key
+    alias_key = aliases.get(key)
+    if alias_key in profiles:
+        return alias_key
+    candidates = []
+    for candidate, profile in profiles.items():
+        score = difflib.SequenceMatcher(None, key, candidate).ratio()
+        if score >= 0.92:
+            candidates.append((score, candidate, profile["name"]))
+    candidates.sort(reverse=True)
+    if len(candidates) == 1 or (candidates and len(candidates) > 1 and candidates[0][0] - candidates[1][0] >= 0.05):
+        score, candidate, canonical = candidates[0]
+        save_player_alias(player, canonical, score)
+        return candidate
+    return None
+
+
 def fetch_tennis_abstract_profiles(matches: list[dict]) -> dict[str, dict]:
     """Download each tour leaderboard once and retain only relevant singles players."""
     wanted = {
@@ -582,7 +631,15 @@ def fetch_tennis_abstract_profiles(matches: list[dict]) -> dict[str, dict]:
         else:
             log(f"  Tennis Abstract {tour} leaderboard unavailable from all sources")
 
-    selected = {key: profiles[key] for key in wanted if key in profiles}
+    aliases = load_player_aliases()
+    selected = {}
+    for match in matches:
+        for player in (match["player1"], match["player2"]):
+            if "/" in player:
+                continue
+            resolved = resolve_profile_key(player, profiles, aliases)
+            if resolved:
+                selected[normalize_player_name(player)] = profiles[resolved]
     log(f"  Tennis Abstract profiles matched: {len(selected)}/{len(wanted)}")
     return selected
 
@@ -621,6 +678,71 @@ def enrich_matches_with_profiles(matches: list[dict]) -> dict[str, dict]:
     return profiles
 
 
+def calculate_recent_form(history: list[dict], player: str, surface: str | None, as_of: str, limit: int = 20) -> dict | None:
+    """Calculate recency-, surface-, and opponent-rank-adjusted form."""
+    player_key = normalize_player_name(player)
+    cutoff = datetime.strptime(as_of, "%Y-%m-%d")
+    observations = []
+    for row in history:
+        winner_key, loser_key = normalize_player_name(row.get("winner_name", "")), normalize_player_name(row.get("loser_name", ""))
+        if player_key not in {winner_key, loser_key} or any(flag in (row.get("score") or "").upper() for flag in ("W/O", "RET", "DEF")):
+            continue
+        try:
+            played = datetime.strptime(str(row.get("tourney_date", "")), "%Y%m%d")
+        except ValueError:
+            continue
+        if played >= cutoff:
+            continue
+        won = player_key == winner_key
+        try:
+            own_rank = float(row.get("winner_rank") if won else row.get("loser_rank"))
+            opponent_rank = float(row.get("loser_rank") if won else row.get("winner_rank"))
+            if own_rank <= 0 or opponent_rank <= 0:
+                raise ValueError
+            expected = opponent_rank / (own_rank + opponent_rank)
+        except (TypeError, ValueError):
+            expected = 0.5
+        days = max(0, (cutoff - played).days)
+        weight = 0.5 ** (days / 120)
+        if surface and str(row.get("surface", "")).casefold() == surface.casefold():
+            weight *= 1.35
+        observations.append((played, 1.0 if won else 0.0, expected, weight))
+    observations.sort(key=lambda item: item[0], reverse=True)
+    observations = observations[:limit]
+    if len(observations) < 8:
+        return None
+    total_weight = sum(item[3] for item in observations)
+    residual = sum((outcome - expected) * weight for _, outcome, expected, weight in observations) / total_weight
+    win_rate = sum(outcome * weight for _, outcome, _, weight in observations) / total_weight
+    return {"sample": len(observations), "probability": max(0.35, min(0.65, 0.5 + residual)), "win_rate": win_rate, "residual": residual}
+
+
+def fetch_recent_match_history(matches: list[dict], date_str: str) -> list[dict]:
+    """Download compact current/previous season histories without paid API calls."""
+    year = int(date_str[:4])
+    urls = [
+        f"https://raw.githubusercontent.com/Tennismylife/TML-Database/master/{year - 1}.csv",
+        f"https://raw.githubusercontent.com/Tennismylife/TML-Database/master/{year}.csv",
+        "https://raw.githubusercontent.com/36-SURE/2026/main/data/wta_matches_2021_2026.csv",
+    ]
+    history = []
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        for text in executor.map(fetch, urls):
+            if text:
+                history.extend(csv.DictReader(io.StringIO(text)))
+    wanted = {normalize_player_name(player) for match in matches for player in (match["player1"], match["player2"])}
+    filtered = [row for row in history if normalize_player_name(row.get("winner_name", "")) in wanted or normalize_player_name(row.get("loser_name", "")) in wanted]
+    log(f"  Loaded {len(filtered)} relevant historical matches for opponent-adjusted form")
+    return filtered
+
+
+def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
+    history = fetch_recent_match_history(matches, date_str)
+    for match in matches:
+        match["player1_recent_form"] = calculate_recent_form(history, match["player1"], match.get("surface"), date_str)
+        match["player2_recent_form"] = calculate_recent_form(history, match["player2"], match.get("surface"), date_str)
+
+
 def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
     """Blend de-vigged two-way market probability with independent overall Elo."""
     if "/" in match.get("player1", "") or "/" in match.get("player2", ""):
@@ -635,10 +757,12 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         player_odds = float(home_odds)
         player_profile = match.get("player1_profile")
         opponent_profile = match.get("player2_profile")
+        recent_form = match.get("player1_recent_form")
     elif player_key == normalize_player_name(match["player2"]):
         player_odds = float(away_odds)
         player_profile = match.get("player2_profile")
         opponent_profile = match.get("player1_profile")
+        recent_form = match.get("player2_recent_form")
     else:
         return None
 
@@ -655,13 +779,18 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
     except (KeyError, TypeError, ValueError):
         return None
     elo_probability = 1 / (1 + 10 ** ((opponent_elo - player_elo) / 400))
-    assessed_probability = 0.55 * elo_probability + 0.45 * market_probability
+    if recent_form and recent_form.get("sample", 0) >= 8:
+        assessed_probability = 0.50 * elo_probability + 0.35 * market_probability + 0.15 * recent_form["probability"]
+    else:
+        assessed_probability = 0.55 * elo_probability + 0.45 * market_probability
     ev = assessed_probability * player_odds - 1
     score = max(0.0, min(10.0, 6.0 + max(0.0, ev) * 30))
     return {
         "player_odds": player_odds,
         "market_probability": market_probability,
         "elo_probability": elo_probability,
+        "form_probability": recent_form["probability"] if recent_form else None,
+        "form_sample": recent_form["sample"] if recent_form else 0,
         "assessed_probability": assessed_probability,
         "ev": ev,
         "score": score,
@@ -752,10 +881,15 @@ def build_prompt(
         for player in (m["player1"], m["player2"]):
             baseline = calculate_tennis_baseline(m, player)
             if baseline:
+                form_text = (
+                    f"{baseline['form_probability']:.1%} (n={baseline['form_sample']})"
+                    if baseline.get("form_probability") is not None else "unavailable"
+                )
                 baseline_lines.append(
                     f"  Python baseline for {player}: market fair "
                     f"{baseline['market_probability']:.1%}, Elo "
-                    f"{baseline['elo_probability']:.1%}, blended assessed "
+                    f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, "
+                    f"blended assessed "
                     f"{baseline['assessed_probability']:.1%}, EV "
                     f"{baseline['ev']:.2%}, score {baseline['score']:.2f}"
                 )
@@ -1038,7 +1172,8 @@ def normalize_player_name(name: str) -> str:
     if "," in name:
         parts = [part.strip() for part in name.split(",", 1)]
         name = f"{parts[1]} {parts[0]}"
-    return re.sub(r"[^a-z0-9]+", "", name.casefold())
+    ascii_name = unicodedata.normalize("NFKD", name.casefold()).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]+", "", ascii_name)
 
 
 def validate_recommendations(
@@ -1182,6 +1317,7 @@ def evidence_quality(match: dict, baseline: dict) -> tuple[int, str]:
     points += 2 if bookmakers >= 3 else 1 if bookmakers >= 2 else 0
     points += 1 if baseline.get("market_overround", 9) <= 1.08 else 0
     points += 1 if baseline.get("elo_market_gap", 9) <= 0.12 else 0
+    points += 1 if baseline.get("form_sample", 0) >= 8 else 0
     grade = "A" if points >= 9 else "B" if points >= 7 else "C" if points >= 5 else "D"
     return points, grade
 
@@ -1191,7 +1327,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
     headers = [
         "DATE", "EVENT_ID", "MATCH", "PICK", "OPENING_ODDS",
         "MARKET_PROBABILITY", "ELO_PROBABILITY", "MODEL_PROBABILITY",
-        "EV", "SCORE", "EVIDENCE", "QUALITY_SCORE", "QUALITY_GRADE",
+        "FORM_PROBABILITY", "FORM_SAMPLE", "EV", "SCORE", "EVIDENCE", "QUALITY_SCORE", "QUALITY_GRADE",
         "TOUR", "SURFACE", "BOOKMAKERS", "DECISION", "REASON", "RESULT",
         "CLOSING_ODDS", "CLV",
     ]
@@ -1243,6 +1379,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
                 f"{baseline['market_probability']:.6f}",
                 f"{baseline['elo_probability']:.6f}",
                 f"{baseline['assessed_probability']:.6f}",
+                f"{baseline['form_probability']:.6f}" if baseline.get("form_probability") is not None else "",
+                baseline.get("form_sample", 0),
                 f"{baseline['ev']:.6f}", f"{baseline['score']:.3f}",
                 "reliable" if tennis_baseline_is_reliable(baseline) else "insufficient",
                 quality_score, quality_grade, match.get("level") or "Unknown",
@@ -1722,6 +1860,8 @@ def main():
 
     log("Fetching Tennis Abstract profiles for Python validation...")
     enrich_matches_with_profiles(qualified)
+    log("Fetching recent results for opponent-adjusted form...")
+    enrich_matches_with_recent_form(qualified, date_str)
     statistical_candidates = build_statistical_candidates(
         qualified, odds_min, odds_max
     )

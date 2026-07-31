@@ -122,6 +122,33 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("official rank=23", line)
         self.assertIn("hard Elo=1682.7", line)
 
+    def test_player_identity_alias_resolves_to_canonical_profile(self):
+        profiles = {bot.normalize_player_name("Alexander Zverev"): {"name": "Alexander Zverev", "elo": 1900}}
+        with tempfile.TemporaryDirectory() as directory:
+            aliases_file = Path(directory) / "player-aliases.csv"
+            aliases_file.write_text("PROVIDER_NAME,CANONICAL_NAME,SOURCE,CONFIDENCE\nA. Zverev,Alexander Zverev,manual,1.0\n", encoding="utf-8")
+            with patch.object(bot, "PLAYER_ALIASES_FILE", aliases_file):
+                aliases = bot.load_player_aliases()
+                resolved = bot.resolve_profile_key("A. Zverev", profiles, aliases)
+
+        self.assertEqual(resolved, bot.normalize_player_name("Alexander Zverev"))
+
+    def test_player_normalization_preserves_diacritic_identity(self):
+        self.assertEqual(bot.normalize_player_name("Félix Auger-Aliassime"), bot.normalize_player_name("Felix Auger Aliassime"))
+
+    def test_recent_form_is_opponent_adjusted_and_requires_sample(self):
+        history = [{
+            "tourney_date": f"20260{month}0{day}", "surface": "Clay",
+            "winner_name": "Test Player", "loser_name": f"Opponent {day}",
+            "winner_rank": "50", "loser_rank": "10", "score": "6-4 6-4",
+        } for month, day in ((5,1),(5,2),(5,3),(5,4),(5,5),(5,6),(5,7),(5,8))]
+
+        form = bot.calculate_recent_form(history, "Test Player", "clay", "2026-06-01")
+
+        self.assertEqual(form["sample"], 8)
+        self.assertGreater(form["probability"], 0.5)
+        self.assertIsNone(bot.calculate_recent_form(history[:7], "Test Player", "clay", "2026-06-01"))
+
     @patch.object(bot.requests, "get")
     def test_reader_uses_api_headers_instead_of_blocked_browser_headers(self, get):
         response = get.return_value
@@ -319,6 +346,19 @@ class TennisBotTests(unittest.TestCase):
 
         self.assertEqual(baseline["elo_type"], "clay_elo")
         self.assertGreater(baseline["elo_probability"], 0.7)
+
+    def test_recent_form_has_bounded_weight_in_probability(self):
+        match = {
+            "player1": "Player", "player2": "Opponent",
+            "home_odds": 2.0, "away_odds": 2.0,
+            "player1_profile": {"elo": 1700}, "player2_profile": {"elo": 1700},
+            "player1_recent_form": {"sample": 12, "probability": 0.65},
+        }
+
+        baseline = bot.calculate_tennis_baseline(match, "Player")
+
+        self.assertAlmostEqual(baseline["assessed_probability"], 0.5225)
+        self.assertEqual(baseline["form_sample"], 12)
 
     def test_evidence_quality_rewards_surface_profiles_and_bookmakers(self):
         match = {
