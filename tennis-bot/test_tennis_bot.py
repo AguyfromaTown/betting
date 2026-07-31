@@ -435,6 +435,21 @@ class TennisBotTests(unittest.TestCase):
             "Bearer second-key",
         )
 
+    def test_dashboard_uses_automated_data_sources_and_wl_results(self):
+        dashboard = MODULE_PATH.parent.parent.joinpath("docs", "index.html").read_text(
+            encoding="utf-8"
+        )
+        lowered = dashboard.lower()
+
+        self.assertIn("predictions-log.csv", dashboard)
+        self.assertIn("performance-summary.md", dashboard)
+        self.assertIn("bankroll.txt", dashboard)
+        self.assertIn('["w","win","won"]', dashboard)
+        self.assertIn('id="audit-body"', dashboard)
+        self.assertNotIn("localstorage", lowered)
+        self.assertNotIn("copy-csv", lowered)
+        self.assertNotIn("showresultpicker", lowered)
+
 
 if __name__ == "__main__":
     unittest.main()
