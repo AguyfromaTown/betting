@@ -38,6 +38,11 @@ MAX_DAILY_EXPOSURE = 0.08
 MAX_DAILY_BETS = 4
 MAX_MARKET_OVERROUND = 1.12
 MAX_ELO_MARKET_GAP = 0.15
+MIN_CALIBRATION_SAMPLE = 100
+MIN_SEGMENT_SAMPLE = 30
+MIN_WEIGHT_TRAINING_SAMPLE = 200
+KELLY_FRACTION = 0.25
+MIN_STAKE_RATE = 0.005
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -816,6 +821,85 @@ def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
         match["player2_serve_return"] = calculate_serve_return_profile(history, match["player2"], match.get("surface"), date_str)
 
 
+def load_resolved_predictions(before_date: str | None = None) -> list[dict]:
+    """Load only predictions recorded and resolved before the current decision date."""
+    if not AUDIT_FILE.exists() or not AUDIT_FILE.stat().st_size:
+        return []
+    with AUDIT_FILE.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    return [row for row in rows if row.get("RESULT") in {"W", "L"} and row.get("MODEL_PROBABILITY")
+            and (not before_date or (row.get("DATE") or "") < before_date)]
+
+
+def brier_score(rows: list[dict], probability_field: str) -> float | None:
+    usable = []
+    for row in rows:
+        try:
+            probability = float(row.get(probability_field) or "")
+        except ValueError:
+            continue
+        usable.append((probability - (row.get("RESULT") == "W")) ** 2)
+    return sum(usable) / len(usable) if usable else None
+
+
+def learned_component_weights(rows: list[dict]) -> dict | None:
+    """Walk-forward challenger weights: train chronologically, require holdout improvement."""
+    rows = sorted(rows, key=lambda row: row.get("DATE", ""))
+    if len(rows) < MIN_WEIGHT_TRAINING_SAMPLE:
+        return None
+    split = max(100, int(len(rows) * .7)); training, holdout = rows[:split], rows[split:]
+    fields = {"elo": "ELO_PROBABILITY", "market": "MARKET_PROBABILITY", "form": "FORM_PROBABILITY", "serve_return": "SERVE_RETURN_PROBABILITY"}
+    inverse = {}
+    for name, field in fields.items():
+        score = brier_score(training, field)
+        if score is not None:
+            inverse[name] = 1 / max(score, .01)
+    if "elo" not in inverse or "market" not in inverse:
+        return None
+    total = sum(inverse.values()); weights = {name: value / total for name, value in inverse.items()}
+    challenger_errors = []
+    for row in holdout:
+        available = {name: float(row[field]) for name, field in fields.items() if row.get(field)}
+        used = {name: weights[name] for name in available if name in weights}
+        if not used:
+            continue
+        probability = sum(available[name] * weight for name, weight in used.items()) / sum(used.values())
+        challenger_errors.append((probability - (row.get("RESULT") == "W")) ** 2)
+    active_brier = brier_score(holdout, "MODEL_PROBABILITY")
+    challenger_brier = sum(challenger_errors) / len(challenger_errors) if challenger_errors else None
+    return {"weights": weights, "sample": len(rows), "holdout": len(holdout),
+            "active_brier": active_brier, "challenger_brier": challenger_brier,
+            "promoted": bool(active_brier and challenger_brier and challenger_brier <= active_brier * .97)}
+
+
+def calibrate_probability(probability: float, rows: list[dict]) -> tuple[float, int]:
+    """Apply a shrunk empirical correction only when the local probability bin is mature."""
+    bucket = []
+    for row in rows:
+        try:
+            historical = float(row.get("MODEL_PROBABILITY") or "")
+        except ValueError:
+            continue
+        if abs(historical - probability) <= .05:
+            bucket.append(row)
+    if len(bucket) < MIN_CALIBRATION_SAMPLE:
+        return probability, len(bucket)
+    actual = sum(row.get("RESULT") == "W" for row in bucket) / len(bucket)
+    strength = min(.5, len(bucket) / 500)
+    return max(.02, min(.98, probability * (1 - strength) + actual * strength)), len(bucket)
+
+
+def segment_health(match: dict, rows: list[dict]) -> dict:
+    """Suspend a mature surface/tour segment only when ROI and CLV both confirm harm."""
+    surface, tour = match.get("surface") or "Unknown", match.get("level") or "Unknown"
+    segment = [row for row in rows if (row.get("SURFACE") or "Unknown") == surface and (row.get("TOUR") or "Unknown") == tour]
+    roi = sum((float(row.get("OPENING_ODDS") or 0) - 1) if row["RESULT"] == "W" else -1 for row in segment) / len(segment) if segment else None
+    clv = [float(row["CLV"]) for row in segment if row.get("CLV")]
+    average_clv = sum(clv) / len(clv) if clv else None
+    suspended = len(segment) >= MIN_SEGMENT_SAMPLE and roi is not None and roi < -.05 and average_clv is not None and average_clv < -.02
+    return {"sample": len(segment), "roi": roi, "clv": average_clv, "suspended": suspended}
+
+
 def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
     """Blend de-vigged two-way market probability with independent overall Elo."""
     if "/" in match.get("player1", "") or "/" in match.get("player2", ""):
@@ -866,6 +950,25 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
     else:
         assessed_probability = 0.55 * elo_probability + 0.45 * market_probability
         component_weights = "elo=.55;market=.45;form=0;serve_return=0"
+    raw_probability = assessed_probability
+    decision_date = str(match.get("start_time") or "")[:10] or None
+    history = load_resolved_predictions(decision_date)
+    comparable = [row for row in history if (row.get("SURFACE") or "Unknown") == (surface or "Unknown")]
+    challenger = learned_component_weights(comparable)
+    challenger_probability = None
+    if challenger:
+        components = {"elo": elo_probability, "market": market_probability}
+        if recent_form:
+            components["form"] = recent_form["probability"]
+        if serve_return:
+            components["serve_return"] = serve_return["probability"]
+        used = {name: challenger["weights"][name] for name in components if name in challenger["weights"]}
+        challenger_probability = sum(components[name] * weight for name, weight in used.items()) / sum(used.values())
+        if challenger["promoted"]:
+            assessed_probability = challenger_probability
+            component_weights = "learned:" + ";".join(f"{name}={weight:.3f}" for name, weight in sorted(used.items()))
+    assessed_probability, calibration_sample = calibrate_probability(assessed_probability, comparable)
+    health = segment_health(match, history)
     ev = assessed_probability * player_odds - 1
     score = max(0.0, min(10.0, 6.0 + max(0.0, ev) * 30))
     return {
@@ -879,6 +982,15 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "expected_hold": serve_return["player_hold"] if serve_return else None,
         "opponent_expected_hold": serve_return["opponent_hold"] if serve_return else None,
         "component_weights": component_weights,
+        "raw_probability": raw_probability,
+        "challenger_probability": challenger_probability,
+        "challenger_sample": challenger["sample"] if challenger else 0,
+        "challenger_promoted": challenger["promoted"] if challenger else False,
+        "calibration_sample": calibration_sample,
+        "segment_sample": health["sample"],
+        "segment_roi": health["roi"],
+        "segment_clv": health["clv"],
+        "segment_suspended": health["suspended"],
         "assessed_probability": assessed_probability,
         "ev": ev,
         "score": score,
@@ -893,6 +1005,7 @@ def tennis_baseline_is_reliable(baseline: dict | None) -> bool:
         baseline
         and 0.98 <= baseline["market_overround"] <= MAX_MARKET_OVERROUND
         and baseline["elo_market_gap"] <= MAX_ELO_MARKET_GAP
+        and not baseline.get("segment_suspended")
     )
 
 
@@ -1422,7 +1535,10 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
         "MARKET_PROBABILITY", "ELO_PROBABILITY", "MODEL_PROBABILITY",
         "FORM_PROBABILITY", "FORM_SAMPLE", "SERVE_RETURN_PROBABILITY",
         "SERVE_RETURN_SAMPLE", "EXPECTED_HOLD", "OPPONENT_EXPECTED_HOLD",
-        "COMPONENT_WEIGHTS", "EV", "SCORE", "EVIDENCE", "QUALITY_SCORE", "QUALITY_GRADE",
+        "COMPONENT_WEIGHTS", "RAW_PROBABILITY", "CHALLENGER_PROBABILITY",
+        "CHALLENGER_SAMPLE", "CHALLENGER_PROMOTED", "CALIBRATION_SAMPLE",
+        "SEGMENT_SAMPLE", "SEGMENT_ROI", "SEGMENT_CLV", "SEGMENT_SUSPENDED",
+        "EV", "SCORE", "EVIDENCE", "QUALITY_SCORE", "QUALITY_GRADE",
         "TOUR", "SURFACE", "BOOKMAKERS", "DECISION", "REASON", "RESULT",
         "CLOSING_ODDS", "CLV",
     ]
@@ -1481,6 +1597,13 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
                 f"{baseline['expected_hold']:.6f}" if baseline.get("expected_hold") is not None else "",
                 f"{baseline['opponent_expected_hold']:.6f}" if baseline.get("opponent_expected_hold") is not None else "",
                 baseline.get("component_weights", ""),
+                f"{baseline['raw_probability']:.6f}",
+                f"{baseline['challenger_probability']:.6f}" if baseline.get("challenger_probability") is not None else "",
+                baseline.get("challenger_sample", 0), baseline.get("challenger_promoted", False),
+                baseline.get("calibration_sample", 0), baseline.get("segment_sample", 0),
+                f"{baseline['segment_roi']:.6f}" if baseline.get("segment_roi") is not None else "",
+                f"{baseline['segment_clv']:.6f}" if baseline.get("segment_clv") is not None else "",
+                baseline.get("segment_suspended", False),
                 f"{baseline['ev']:.6f}", f"{baseline['score']:.3f}",
                 "reliable" if tennis_baseline_is_reliable(baseline) else "insufficient",
                 quality_score, quality_grade, match.get("level") or "Unknown",
@@ -1517,6 +1640,20 @@ def update_audit_result(date_str, pick_key, result, closing_odds):
         with open(AUDIT_FILE, "w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=headers)
             writer.writeheader(); writer.writerows(rows)
+
+
+def tennis_void_reason(event: dict) -> str | None:
+    """Identify non-completed matches that should not be graded as model wins/losses."""
+    status = str(event.get("status") or "").casefold()
+    detail = " ".join(str(event.get(key) or "") for key in ("result", "reason", "note", "score", "scores"))
+    detail = detail.casefold()
+    if status in {"cancelled", "canceled", "postponed", "abandoned"}:
+        return status
+    if event.get("retired") or event.get("walkover"):
+        return "walkover_or_retirement"
+    if any(token in detail for token in ("walkover", "w/o", "retired", "retirement", "abandoned")):
+        return "walkover_or_retirement"
+    return None
 
 
 def settle_pending_bets(api_keys: list[str]) -> int:
@@ -1560,6 +1697,13 @@ def settle_pending_bets(api_keys: list[str]) -> int:
                       and normalize_player_name(str(e.get("away", ""))) in label), None)
         if not event:
             continue
+        void_reason = tennis_void_reason(event)
+        if void_reason:
+            stake = float(row.get("STAKE") or 0)
+            row["RESULT"], row["RETURN"] = "V", f"{stake:.2f}"
+            credited += stake; settled += 1
+            update_audit_result(row.get("DATE", ""), pick, "V", None)
+            continue
         scores = event.get("scores") or {}
         try:
             home_score, away_score = float(scores["home"]), float(scores["away"])
@@ -1602,6 +1746,8 @@ def generate_performance_summary():
             audit = list(csv.DictReader(handle))
     resolved = [row for row in audit if row.get("RESULT") in {"W", "L"} and row.get("MODEL_PROBABILITY")]
     brier = sum((float(row["MODEL_PROBABILITY"]) - (row["RESULT"] == "W")) ** 2 for row in resolved) / len(resolved) if resolved else None
+    challenger_rows = [row for row in resolved if row.get("CHALLENGER_PROBABILITY")]
+    challenger_brier = brier_score(challenger_rows, "CHALLENGER_PROBABILITY")
     clv = [float(row["CLV"]) for row in resolved if row.get("CLV")]
     lines = [
         "# Tennis Bot Performance", "",
@@ -1610,6 +1756,7 @@ def generate_performance_summary():
         f"- Profit/loss: €{profit:.2f}",
         f"- ROI: {profit / stakes:.2%}" if stakes else "- ROI: N/A",
         f"- Brier score: {brier:.4f}" if brier is not None else "- Brier score: N/A",
+        f"- Shadow challenger Brier: {challenger_brier:.4f}" if challenger_brier is not None else "- Shadow challenger Brier: N/A",
         f"- Average CLV: {sum(clv) / len(clv):.2%}" if clv else "- Average CLV: N/A",
         "", "## Calibration", "",
         "| Predicted probability | Predictions | Actual win rate |", "|---|---:|---:|",
@@ -1873,12 +2020,15 @@ def log_bets(
         if not match_info:
             continue
 
-        # Calculate stake
+        # Capped quarter-Kelly: probability drives sizing, grade remains the hard cap.
         if current_balance is not None:
-            if rec["grade"] == "Top Pick":
-                stake_pct = 0.03
-            else:
-                stake_pct = 0.02
+            cap = 0.03 if rec["grade"] == "Top Pick" else 0.02
+            try:
+                odds = float(rec["odds"]); probability = float(rec["assessed_probability"])
+                full_kelly = max(0.0, (probability * odds - 1) / (odds - 1))
+                stake_pct = min(cap, max(MIN_STAKE_RATE, full_kelly * KELLY_FRACTION))
+            except (KeyError, TypeError, ValueError, ZeroDivisionError):
+                stake_pct = MIN_STAKE_RATE
 
             stake = round(current_balance * stake_pct, 2)
             total_stake += stake

@@ -12,6 +12,33 @@ SPEC.loader.exec_module(bot)
 
 
 class TennisBotTests(unittest.TestCase):
+    def test_calibration_requires_mature_probability_bucket(self):
+        rows = [{"MODEL_PROBABILITY": ".60", "RESULT": "W"} for _ in range(99)]
+        self.assertEqual(bot.calibrate_probability(.60, rows), (.60, 99))
+        rows.append({"MODEL_PROBABILITY": ".60", "RESULT": "W"})
+        probability, sample = bot.calibrate_probability(.60, rows)
+        self.assertEqual(sample, 100)
+        self.assertGreater(probability, .60)
+
+    def test_segment_suspension_needs_roi_and_clv_confirmation(self):
+        rows = [{"SURFACE": "hard", "TOUR": "ATP", "RESULT": "L",
+                 "OPENING_ODDS": "1.60", "CLV": "-0.03"} for _ in range(30)]
+        health = bot.segment_health({"surface": "hard", "level": "ATP"}, rows)
+        self.assertTrue(health["suspended"])
+        rows[0]["CLV"] = "1.00"
+        self.assertFalse(bot.segment_health({"surface": "hard", "level": "ATP"}, rows)["suspended"])
+
+    def test_retirement_and_walkover_are_void(self):
+        self.assertEqual(bot.tennis_void_reason({"status": "cancelled"}), "cancelled")
+        self.assertEqual(bot.tennis_void_reason({"result": "Player retired"}), "walkover_or_retirement")
+        self.assertIsNone(bot.tennis_void_reason({"status": "settled", "result": "2-0"}))
+
+    def test_walk_forward_weights_stay_shadow_without_enough_history(self):
+        rows = [{"DATE": f"2026-01-{(index % 28) + 1:02d}", "RESULT": "W",
+                 "ELO_PROBABILITY": ".60", "MARKET_PROBABILITY": ".55",
+                 "MODEL_PROBABILITY": ".58"} for index in range(199)]
+        self.assertIsNone(bot.learned_component_weights(rows))
+
     def test_stage_pending_does_not_log_or_deduct(self):
         rec = {"player": "Player One", "grade": "Value Pick", "odds": 1.55,
                "assessed_probability": .70, "ev": .085,
@@ -76,6 +103,7 @@ class TennisBotTests(unittest.TestCase):
             "player": "Darderi, Luciano",
             "grade": "Value Pick",
             "odds": 1.6,
+            "assessed_probability": 0.70,
         }
         match = {
             "player1": "Svrcina, Dalibor",

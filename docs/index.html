@@ -312,10 +312,18 @@
       </div>
       <div class="table-scroll">
         <table id="audit-table">
-          <thead><tr><th>Date</th><th>Player</th><th>Tour</th><th>Surface</th><th>Quality</th><th>Books</th><th>Opening odds</th><th>Elo probability</th><th>Form probability</th><th>Form sample</th><th>Serve/return probability</th><th>Expected hold</th><th>Opponent hold</th><th>Model probability</th><th>EV</th><th>Weights</th><th>Decision</th><th>Reason</th><th>Result</th><th>CLV</th></tr></thead>
+          <thead><tr><th>Date</th><th>Player</th><th>Tour</th><th>Surface</th><th>Quality</th><th>Books</th><th>Opening odds</th><th>Elo probability</th><th>Form probability</th><th>Form sample</th><th>Serve/return probability</th><th>Expected hold</th><th>Opponent hold</th><th>Raw probability</th><th>Active probability</th><th>Challenger</th><th>Calibration sample</th><th>Segment sample</th><th>EV</th><th>Weights</th><th>Decision</th><th>Reason</th><th>Result</th><th>CLV</th></tr></thead>
           <tbody id="audit-body"></tbody>
         </table>
       </div>
+    </section>
+
+    <section class="card table-card" style="margin-top:12px">
+      <div class="table-toolbar">
+        <div><h2 class="panel-title">Active vs shadow model</h2><div class="panel-kicker">A lower Brier score is better; challengers remain shadow-only until the guarded promotion test passes</div></div>
+        <span class="count" id="model-row-count">No mature comparison</span>
+      </div>
+      <div class="table-scroll"><table><thead><tr><th>Model</th><th>Settled predictions</th><th>Brier score</th><th>Status</th></tr></thead><tbody id="model-body"></tbody></table></div>
     </section>
 
     <section class="card table-card" style="margin-top:12px">
@@ -498,7 +506,11 @@
           <td class="mono">${safe(percent(row.serve_return_probability))}</td>
           <td class="mono">${safe(percent(row.expected_hold))}</td>
           <td class="mono">${safe(percent(row.opponent_expected_hold))}</td>
+          <td class="mono">${safe(percent(row.raw_probability))}</td>
           <td class="mono">${safe(percent(row.model_probability))}</td>
+          <td class="mono">${safe(percent(row.challenger_probability))}</td>
+          <td class="mono">${safe(row.calibration_sample || "0")}</td>
+          <td class="mono">${safe(row.segment_sample || "0")}${String(row.segment_suspended).toLowerCase() === "true" ? " · suspended" : ""}</td>
           <td class="mono">${safe(percent(row.ev))}</td>
           <td>${safe(row.component_weights || "—")}</td>
           <td>${safe(decision || "—")}</td>
@@ -526,12 +538,24 @@
       el("backtest-row-count").textContent = `${settled.length} settled predictions`;
     }
 
+    function renderModelComparison(rows) {
+      const settled = rows.filter(row => ["w","l","win","loss","won","lost"].includes(String(row.result || "").toLowerCase()));
+      const score = (data, field) => data.length ? data.reduce((sum,row) => sum + Math.pow(Number(row[field]) - (["w","win","won"].includes(String(row.result).toLowerCase()) ? 1 : 0), 2), 0) / data.length : null;
+      const challenger = settled.filter(row => String(row.challenger_probability || "").trim() && Number.isFinite(Number(row.challenger_probability)));
+      const activeScore = score(settled.filter(row => Number.isFinite(Number(row.model_probability))), "model_probability");
+      const challengerScore = score(challenger, "challenger_probability");
+      const promoted = rows.some(row => String(row.challenger_promoted).toLowerCase() === "true");
+      el("model-body").innerHTML = `<tr><td>Active model</td><td>${settled.length}</td><td>${activeScore === null ? "â€”" : activeScore.toFixed(4)}</td><td><span class="badge win">Live</span></td></tr><tr><td>Learned challenger</td><td>${challenger.length}</td><td>${challengerScore === null ? "â€”" : challengerScore.toFixed(4)}</td><td><span class="badge ${promoted ? "win" : "pending"}">${promoted ? "Promoted" : "Shadow"}</span></td></tr>`;
+      el("model-row-count").textContent = challenger.length ? `${challenger.length} comparable results` : "No mature comparison";
+    }
+
     function refreshAll() {
       const rows = allRows.map(row => ({ ...row }));
       renderStats(rows);
       renderTable(rows.reverse());
       renderAudit(auditRows);
       renderBacktest(auditRows);
+      renderModelComparison(auditRows);
       renderPending(pendingRows);
       drawChart(allRows);
       updateStatus(allRows);
