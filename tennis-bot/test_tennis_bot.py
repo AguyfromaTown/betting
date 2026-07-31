@@ -293,6 +293,33 @@ class TennisBotTests(unittest.TestCase):
             (1.55, 2.5, "Bet365"),
         )
 
+    def test_moneyline_market_uses_best_prices_and_median_consensus(self):
+        payload = {"bookmakers": {
+            "A": [{"name": "ML", "odds": [{"home": "1.50", "away": "2.60"}]}],
+            "B": [{"name": "ML", "odds": [{"home": "1.60", "away": "2.40"}]}],
+            "C": [{"name": "ML", "odds": [{"home": "1.55", "away": "2.50"}]}],
+        }}
+
+        market = bot.extract_moneyline_market(payload)
+
+        self.assertEqual(market["best_home"], 1.6)
+        self.assertEqual(market["best_away"], 2.6)
+        self.assertEqual(market["consensus_home"], 1.55)
+        self.assertEqual(market["consensus_away"], 2.5)
+
+    def test_surface_elo_is_used_when_surface_is_known(self):
+        match = {
+            "player1": "Clay Player", "player2": "Opponent",
+            "home_odds": 1.8, "away_odds": 2.2, "surface": "clay",
+            "player1_profile": {"elo": 1600, "clay_elo": 1800},
+            "player2_profile": {"elo": 1700, "clay_elo": 1600},
+        }
+
+        baseline = bot.calculate_tennis_baseline(match, "Clay Player")
+
+        self.assertEqual(baseline["elo_type"], "clay_elo")
+        self.assertGreater(baseline["elo_probability"], 0.7)
+
     @patch.object(bot, "fetch_odds_json")
     def test_odds_api_uses_batches_of_ten(self, fetch_odds_json):
         events = [
