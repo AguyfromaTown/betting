@@ -301,7 +301,7 @@
       </div>
       <div class="table-scroll">
         <table id="audit-table">
-          <thead><tr><th>Date</th><th>Player</th><th>Tour</th><th>Surface</th><th>Quality</th><th>Books</th><th>Opening odds</th><th>Elo probability</th><th>Form probability</th><th>Form sample</th><th>Model probability</th><th>EV</th><th>Decision</th><th>Reason</th><th>Result</th><th>CLV</th></tr></thead>
+          <thead><tr><th>Date</th><th>Player</th><th>Tour</th><th>Surface</th><th>Quality</th><th>Books</th><th>Opening odds</th><th>Elo probability</th><th>Form probability</th><th>Form sample</th><th>Serve/return probability</th><th>Expected hold</th><th>Opponent hold</th><th>Model probability</th><th>EV</th><th>Weights</th><th>Decision</th><th>Reason</th><th>Result</th><th>CLV</th></tr></thead>
           <tbody id="audit-body"></tbody>
         </table>
       </div>
@@ -482,8 +482,12 @@
           <td class="mono">${safe(percent(row.elo_probability))}</td>
           <td class="mono">${safe(percent(row.form_probability))}</td>
           <td class="mono">${safe(row.form_sample || "—")}</td>
+          <td class="mono">${safe(percent(row.serve_return_probability))}</td>
+          <td class="mono">${safe(percent(row.expected_hold))}</td>
+          <td class="mono">${safe(percent(row.opponent_expected_hold))}</td>
           <td class="mono">${safe(percent(row.model_probability))}</td>
           <td class="mono">${safe(percent(row.ev))}</td>
+          <td>${safe(row.component_weights || "—")}</td>
           <td>${safe(decision || "—")}</td>
           <td>${safe(row.reason || "—")}</td>
           <td>${resultCell}</td>

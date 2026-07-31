@@ -149,6 +149,34 @@ class TennisBotTests(unittest.TestCase):
         self.assertGreater(form["probability"], 0.5)
         self.assertIsNone(bot.calculate_recent_form(history[:7], "Test Player", "clay", "2026-06-01"))
 
+    def test_serve_return_profile_requires_points_and_calculates_rates(self):
+        history = []
+        for day in range(1, 9):
+            history.append({
+                "tourney_date": f"202605{day:02d}", "surface": "Clay", "score": "6-4 6-4",
+                "winner_name": "Server", "loser_name": f"Opponent {day}",
+                "w_ace": "8", "w_df": "3", "w_svpt": "100", "w_1stIn": "62", "w_1stWon": "46", "w_2ndWon": "20", "w_bpSaved": "4", "w_bpFaced": "5",
+                "l_ace": "2", "l_df": "4", "l_svpt": "90", "l_1stIn": "55", "l_1stWon": "32", "l_2ndWon": "14", "l_bpSaved": "3", "l_bpFaced": "7",
+            })
+
+        profile = bot.calculate_serve_return_profile(history, "Server", "clay", "2026-06-01")
+
+        self.assertEqual(profile["sample"], 8)
+        self.assertAlmostEqual(profile["service_points_won"], 0.66)
+        self.assertGreater(profile["return_points_won"], 0.45)
+        self.assertGreater(profile["hold_probability"], 0.7)
+
+    def test_serve_return_matchup_is_symmetric_and_bounded(self):
+        strong = {"sample": 20, "service_points_won": 0.68, "return_points_won": 0.42}
+        weak = {"sample": 18, "service_points_won": 0.60, "return_points_won": 0.35}
+
+        forward = bot.calculate_serve_return_matchup(strong, weak)
+        reverse = bot.calculate_serve_return_matchup(weak, strong)
+
+        self.assertGreater(forward["probability"], 0.5)
+        self.assertAlmostEqual(forward["probability"] + reverse["probability"], 1.0)
+        self.assertEqual(forward["sample"], 18)
+
     @patch.object(bot.requests, "get")
     def test_reader_uses_api_headers_instead_of_blocked_browser_headers(self, get):
         response = get.return_value
@@ -359,6 +387,21 @@ class TennisBotTests(unittest.TestCase):
 
         self.assertAlmostEqual(baseline["assessed_probability"], 0.5225)
         self.assertEqual(baseline["form_sample"], 12)
+
+    def test_full_model_uses_serve_return_at_fifteen_percent(self):
+        match = {
+            "player1": "Player", "player2": "Opponent", "home_odds": 2.0, "away_odds": 2.0,
+            "player1_profile": {"elo": 1700}, "player2_profile": {"elo": 1700},
+            "player1_recent_form": {"sample": 12, "probability": 0.60},
+            "player1_serve_return": {"sample": 20, "service_points_won": 0.67, "return_points_won": 0.40},
+            "player2_serve_return": {"sample": 20, "service_points_won": 0.61, "return_points_won": 0.35},
+        }
+
+        baseline = bot.calculate_tennis_baseline(match, "Player")
+        expected = 0.40 * 0.5 + 0.30 * 0.5 + 0.15 * 0.60 + 0.15 * baseline["serve_return_probability"]
+
+        self.assertAlmostEqual(baseline["assessed_probability"], expected)
+        self.assertIn("serve_return=.15", baseline["component_weights"])
 
     def test_evidence_quality_rewards_surface_profiles_and_bookmakers(self):
         match = {
