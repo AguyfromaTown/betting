@@ -190,6 +190,8 @@ class TennisBotTests(unittest.TestCase):
             "player2": "Laquisa Khan",
             "home_odds": 1.5,
             "away_odds": 2.5,
+            "player1_profile": {"elo": 1600},
+            "player2_profile": {"elo": 1600},
         }]
         self.assertEqual(bot.validate_recommendations(candidates, matches), [])
 
@@ -204,12 +206,102 @@ class TennisBotTests(unittest.TestCase):
             "player2": "Darderi, Luciano",
             "home_odds": 2.5,
             "away_odds": 1.6,
+            "player1_profile": {"elo": 1600},
+            "player2_profile": {"elo": 1800},
         }]
         validated = bot.validate_recommendations(candidates, matches)
         self.assertEqual(len(validated), 1)
-        self.assertEqual(validated[0]["grade"], "Value Pick")
-        self.assertAlmostEqual(validated[0]["ev"], 0.12)
+        self.assertEqual(validated[0]["grade"], "Top Pick")
+        self.assertGreater(validated[0]["ev"], 0.05)
         self.assertEqual(validated[0]["odds"], 1.6)
+
+    def test_tennis_baseline_blends_devigged_market_and_elo(self):
+        match = {
+            "player1": "Stronger", "player2": "Weaker",
+            "home_odds": 1.6, "away_odds": 2.5,
+            "player1_profile": {"elo": 1800},
+            "player2_profile": {"elo": 1600},
+        }
+
+        baseline = bot.calculate_tennis_baseline(match, "Stronger")
+
+        self.assertAlmostEqual(baseline["market_probability"], 0.6097561)
+        self.assertAlmostEqual(baseline["elo_probability"], 0.7597469)
+        self.assertAlmostEqual(
+            baseline["assessed_probability"],
+            0.55 * 0.7597469 + 0.45 * 0.6097561,
+            places=6,
+        )
+
+    def test_statistical_scan_rejects_large_elo_market_disagreement(self):
+        match = {
+            "player1": "Market Favourite", "player2": "Elo Favourite",
+            "home_odds": 1.5, "away_odds": 2.5,
+            "player1_profile": {"elo": 1400},
+            "player2_profile": {"elo": 2000},
+        }
+
+        candidates = bot.build_statistical_candidates([match], 1.5, 3.0)
+
+        self.assertEqual(candidates, [])
+
+    def test_validation_rejects_players_own_out_of_range_odds(self):
+        match = {
+            "player1": "Longshot", "player2": "Favourite",
+            "home_odds": 3.2, "away_odds": 1.4,
+            "player1_profile": {"elo": 1700},
+            "player2_profile": {"elo": 1700},
+        }
+        candidate = {"player": "Longshot", "score": 8, "assessed_probability": 0.5}
+
+        result = bot.validate_recommendations([candidate], [match], 1.5, 3.0)
+
+        self.assertEqual(result, [])
+
+    def test_opencode_context_adjustment_is_bounded(self):
+        match = {
+            "player1": "Stronger", "player2": "Weaker",
+            "home_odds": 1.6, "away_odds": 2.5,
+            "player1_profile": {"elo": 1800},
+            "player2_profile": {"elo": 1600},
+        }
+        baseline = bot.calculate_tennis_baseline(match, "Stronger")
+        accepted = {
+            "player": "Stronger", "score": 9,
+            "assessed_probability": baseline["assessed_probability"] + 0.04,
+        }
+        rejected = {
+            "player": "Stronger", "score": 9,
+            "assessed_probability": baseline["assessed_probability"] + 0.06,
+        }
+
+        self.assertEqual(
+            len(bot.validate_recommendations(
+                [accepted], [match], 1.5, 3.0, allow_context_adjustment=True
+            )),
+            1,
+        )
+        self.assertEqual(
+            bot.validate_recommendations(
+                [rejected], [match], 1.5, 3.0, allow_context_adjustment=True
+            ),
+            [],
+        )
+
+    def test_portfolio_caps_exposure_and_one_player_per_match(self):
+        shared_match = {"player1": "A", "player2": "B"}
+        recommendations = [
+            {"player": "A", "grade": "Top Pick", "ev": .20, "score": 9, "match": shared_match},
+            {"player": "B", "grade": "Top Pick", "ev": .19, "score": 9, "match": shared_match},
+            {"player": "C", "grade": "Top Pick", "ev": .18, "score": 9,
+             "match": {"player1": "C", "player2": "D"}},
+            {"player": "E", "grade": "Top Pick", "ev": .17, "score": 9,
+             "match": {"player1": "E", "player2": "F"}},
+        ]
+
+        selected = bot.select_portfolio(recommendations)
+
+        self.assertEqual([item["player"] for item in selected], ["A", "C"])
 
     def test_extract_moneyline_odds(self):
         payload = {

@@ -28,6 +28,12 @@ DEFAULT_AGENT_REPORT = REPO_ROOT / "tennis-bot" / "agent-report.md"
 REQUEST_TIMEOUT = 30
 MAX_COMPLETION_TOKENS = 2048
 GROQ_MODEL = "llama-3.3-70b-versatile"
+MAX_AI_MATCHES = 20
+MAX_DAILY_EXPOSURE = 0.08
+MAX_DAILY_BETS = 4
+MAX_MARKET_OVERROUND = 1.12
+MAX_ELO_MARKET_GAP = 0.15
+MAX_CONTEXT_ADJUSTMENT = 0.05
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -581,6 +587,110 @@ def compact_profile_line(player: str, profiles: dict[str, dict]) -> str:
     )
 
 
+def enrich_matches_with_profiles(matches: list[dict]) -> dict[str, dict]:
+    """Attach compact Tennis Abstract records for later Python validation."""
+    profiles = fetch_tennis_abstract_profiles(matches)
+    for match in matches:
+        match["player1_profile"] = profiles.get(
+            normalize_player_name(match["player1"])
+        )
+        match["player2_profile"] = profiles.get(
+            normalize_player_name(match["player2"])
+        )
+    return profiles
+
+
+def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
+    """Blend de-vigged two-way market probability with independent overall Elo."""
+    if "/" in match.get("player1", "") or "/" in match.get("player2", ""):
+        return None
+    home_odds = match.get("home_odds")
+    away_odds = match.get("away_odds")
+    if not all(isinstance(odds, (int, float)) and odds > 1 for odds in (home_odds, away_odds)):
+        return None
+
+    player_key = normalize_player_name(player)
+    if player_key == normalize_player_name(match["player1"]):
+        player_odds = float(home_odds)
+        player_profile = match.get("player1_profile")
+        opponent_profile = match.get("player2_profile")
+    elif player_key == normalize_player_name(match["player2"]):
+        player_odds = float(away_odds)
+        player_profile = match.get("player2_profile")
+        opponent_profile = match.get("player1_profile")
+    else:
+        return None
+
+    overround = 1 / float(home_odds) + 1 / float(away_odds)
+    market_probability = (1 / player_odds) / overround
+    try:
+        player_elo = float(player_profile["elo"])
+        opponent_elo = float(opponent_profile["elo"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    elo_probability = 1 / (1 + 10 ** ((opponent_elo - player_elo) / 400))
+    assessed_probability = 0.55 * elo_probability + 0.45 * market_probability
+    ev = assessed_probability * player_odds - 1
+    score = max(0.0, min(10.0, 6.0 + max(0.0, ev) * 30))
+    return {
+        "player_odds": player_odds,
+        "market_probability": market_probability,
+        "elo_probability": elo_probability,
+        "assessed_probability": assessed_probability,
+        "ev": ev,
+        "score": score,
+        "market_overround": overround,
+        "elo_market_gap": abs(elo_probability - market_probability),
+    }
+
+
+def tennis_baseline_is_reliable(baseline: dict | None) -> bool:
+    return bool(
+        baseline
+        and 0.98 <= baseline["market_overround"] <= MAX_MARKET_OVERROUND
+        and baseline["elo_market_gap"] <= MAX_ELO_MARKET_GAP
+    )
+
+
+def build_statistical_candidates(matches: list[dict], odds_min: float, odds_max: float) -> list[dict]:
+    """Scan all eligible singles players independently of model output."""
+    candidates = []
+    for match in matches:
+        for player, opponent in (
+            (match["player1"], match["player2"]),
+            (match["player2"], match["player1"]),
+        ):
+            baseline = calculate_tennis_baseline(match, player)
+            if (
+                tennis_baseline_is_reliable(baseline)
+                and odds_min <= baseline["player_odds"] <= odds_max
+                and baseline["ev"] > 0
+            ):
+                candidates.append({
+                    "player": player,
+                    "opponent": opponent,
+                    "score": baseline["score"],
+                    "assessed_probability": baseline["assessed_probability"],
+                })
+    return candidates
+
+
+def select_analysis_matches(matches: list[dict], limit: int = MAX_AI_MATCHES) -> list[dict]:
+    ranked = []
+    for index, match in enumerate(matches):
+        baselines = [
+            calculate_tennis_baseline(match, match["player1"]),
+            calculate_tennis_baseline(match, match["player2"]),
+        ]
+        best_ev = max(
+            (item["ev"] for item in baselines if tennis_baseline_is_reliable(item)),
+            default=-999,
+        )
+        ranked.append((best_ev, -index, match))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [item[2] for item in ranked[:limit]]
+
+
 # ─── Stage 2 & 3: AI Analysis ───────────────────────────────────────
 
 def build_prompt(
@@ -591,7 +701,17 @@ def build_prompt(
     odds_max: float,
 ) -> str:
     """Construct the full 3-stage prompt with embedded data."""
-    profiles = fetch_tennis_abstract_profiles(matches)
+    profiles = {
+        normalize_player_name(player): profile
+        for match in matches
+        for player, profile in (
+            (match["player1"], match.get("player1_profile")),
+            (match["player2"], match.get("player2_profile")),
+        )
+        if profile
+    }
+    if not profiles and matches:
+        profiles = enrich_matches_with_profiles(matches)
 
     # Build match data section
     match_lines = []
@@ -601,10 +721,22 @@ def build_prompt(
             if m.get("home_odds") is not None and m.get("away_odds") is not None
             else str(m.get("odds", "N/A"))
         )
+        baseline_lines = []
+        for player in (m["player1"], m["player2"]):
+            baseline = calculate_tennis_baseline(m, player)
+            if baseline:
+                baseline_lines.append(
+                    f"  Python baseline for {player}: market fair "
+                    f"{baseline['market_probability']:.1%}, Elo "
+                    f"{baseline['elo_probability']:.1%}, blended assessed "
+                    f"{baseline['assessed_probability']:.1%}, EV "
+                    f"{baseline['ev']:.2%}, score {baseline['score']:.2f}"
+                )
         match_lines.append(
             f"Match {i}: {m['player1']} vs {m['player2']}\n"
             f"  Tournament: {m['tournament']} ({m['level']})\n"
             f"  Moneyline odds: {market_odds} (source: {m.get('odds_source', 'N/A')})\n"
+            + "\n".join(baseline_lines)
         )
 
     matches_text = "\n".join(match_lines) if match_lines else "No matches found in odds range."
@@ -673,6 +805,9 @@ For each candidate, calculate:
 - Your assessed probability
 - Expected Value = (assessed_prob × odds) - 1
 
+Python's de-vigged market/Elo blend is authoritative in GitHub mode. Copy its
+score and assessed probability exactly; do not substitute model intuition.
+
 Run the Red Flag checklist:
 - Lost 3+ consecutive?
 - 3rd match in 4 days?
@@ -687,7 +822,7 @@ Assign final calls:
 
 - **Top Pick** (score > 8.0, EV > 8%)
 - **Value Pick** (score > 7.0, EV > 5%)
-- **Moderate Pick** (score > 5.5, EV > 0%)
+- **Moderate Pick / Watchlist** (score > 5.5, EV > 0%; no stake)
 - **No Bet** (everything else)
 """
 
@@ -700,7 +835,7 @@ Current bankroll: €{bankroll:.2f}
 For each recommendation, include:
 - Top Pick: €{bankroll * 0.03:.2f} (3% of bankroll)
 - Value Pick: €{bankroll * 0.02:.2f} (2% of bankroll)
-- Moderate Pick: €{bankroll * 0.01:.2f} (1% of bankroll)
+- Moderate Pick: watchlist only (no stake)
 """
 
     prompt += """
@@ -882,8 +1017,11 @@ def normalize_player_name(name: str) -> str:
 def validate_recommendations(
     recommendations: list[dict],
     matches: list[dict],
+    odds_min: float | None = None,
+    odds_max: float | None = None,
+    allow_context_adjustment: bool = False,
 ) -> list[dict]:
-    """Recompute odds, EV, and grades; reject unsupported AI recommendations."""
+    """Authorize picks from verified odds and the Python Elo/market baseline."""
     validated = []
     for recommendation in recommendations:
         player_key = normalize_player_name(recommendation.get("player", ""))
@@ -916,8 +1054,39 @@ def validate_recommendations(
         if not match_info or verified_odds is None:
             log(f"  Rejected {recommendation.get('player', 'unknown')}: no verified odds")
             continue
+        verified_odds = float(verified_odds)
+        if (
+            (odds_min is not None and verified_odds < odds_min)
+            or (odds_max is not None and verified_odds > odds_max)
+        ):
+            log(f"  Rejected {verified_player}: own odds outside requested range")
+            continue
 
-        ev = probability * float(verified_odds) - 1
+        baseline = calculate_tennis_baseline(match_info, verified_player)
+        if not tennis_baseline_is_reliable(baseline):
+            log(
+                f"  Rejected {verified_player}: missing Elo, excessive market "
+                "margin, or large Elo/market disagreement"
+            )
+            continue
+        if allow_context_adjustment:
+            difference = probability - baseline["assessed_probability"]
+            if abs(difference) > MAX_CONTEXT_ADJUSTMENT + 1e-9:
+                log(
+                    f"  Rejected {verified_player}: researched probability differs "
+                    f"from baseline by {difference:+.1%} (limit ±{MAX_CONTEXT_ADJUSTMENT:.0%})"
+                )
+                continue
+        else:
+            if abs(probability - baseline["assessed_probability"]) > 0.005:
+                log(
+                    f"  Ignored AI estimate for {verified_player}: using Python "
+                    f"Elo/market baseline {baseline['assessed_probability']:.2%}"
+                )
+            probability = baseline["assessed_probability"]
+
+        ev = probability * verified_odds - 1
+        score = max(0.0, min(10.0, 6.0 + max(0.0, ev) * 30))
         if score > 8 and ev > 0.08:
             grade = "Top Pick"
         elif score > 7 and ev > 0.05:
@@ -934,15 +1103,56 @@ def validate_recommendations(
         validated.append({
             **recommendation,
             "player": verified_player,
-            "odds": float(verified_odds),
+            "score": score,
+            "assessed_probability": probability,
+            "odds": verified_odds,
             "ev": ev,
             "grade": grade,
+            "match": match_info,
+            "baseline": baseline,
         })
         log(
             f"  Validated {recommendation['player']}: {grade}, "
             f"score {score:.2f}, EV {ev:.2%}"
         )
     return validated
+
+
+def select_portfolio(
+    recommendations: list[dict],
+    max_exposure: float = MAX_DAILY_EXPOSURE,
+    max_bets: int = MAX_DAILY_BETS,
+) -> list[dict]:
+    """Rank independent matches and constrain total planned bankroll exposure."""
+    stake_rates = {"Top Pick": 0.03, "Value Pick": 0.02}
+    ranked = sorted(
+        recommendations,
+        key=lambda rec: (rec.get("ev", 0), rec.get("score", 0)),
+        reverse=True,
+    )
+    selected = []
+    seen_matches = set()
+    exposure = 0.0
+    for recommendation in ranked:
+        stake_rate = stake_rates.get(recommendation.get("grade"))
+        match = recommendation.get("match") or {}
+        if stake_rate is None or not match:
+            continue
+        match_key = tuple(sorted((
+            normalize_player_name(match.get("player1", "")),
+            normalize_player_name(match.get("player2", "")),
+        )))
+        if match_key in seen_matches:
+            log(f"  Portfolio rejected {recommendation['player']}: match already selected")
+            continue
+        if len(selected) >= max_bets or exposure + stake_rate > max_exposure + 1e-9:
+            log(f"  Portfolio rejected {recommendation['player']}: daily risk cap reached")
+            continue
+        selected.append(recommendation)
+        seen_matches.add(match_key)
+        exposure += stake_rate
+    log(f"Portfolio selected {len(selected)} bet(s), planned exposure {exposure:.1%}")
+    return selected
 
 
 def log_bets(
@@ -1141,21 +1351,78 @@ def add_validation_summary(
     return report.rstrip() + "\n" + "\n".join(lines) + "\n"
 
 
+def build_deterministic_report(
+    date_str: str,
+    matches: list[dict],
+    candidates: list[dict],
+) -> str:
+    """Provide usable output when Groq is unavailable or omits candidates."""
+    lines = [
+        "## MARKET OVERVIEW",
+        "",
+        f"Python evaluated {len(matches)} verified singles matches for {date_str} "
+        "using de-vigged moneyline prices and Tennis Abstract overall Elo.",
+        "",
+        "## TOP PICKS",
+        "",
+        "See the authoritative Python validation result below.",
+        "",
+        "## VALUE PICKS",
+        "",
+        "Positive-EV baseline candidates are supplied to the validator below.",
+        "",
+        "## PICKS TO AVOID",
+        "",
+        "Players with missing Elo, excessive market margin, large market/Elo "
+        "disagreement, or non-positive EV.",
+        "",
+        "## DISCLAIMER",
+        "",
+        "The Elo/market blend is a heuristic, not a guarantee. Odds change and "
+        "betting involves risk.",
+        "",
+        "## MACHINE READABLE PICKS",
+        "",
+        "```json",
+        json.dumps(candidates, indent=2, ensure_ascii=False),
+        "```",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def finalize_analysis(
     date_str: str,
     report: str,
     matches: list[dict],
     bankroll: float | None,
+    odds_min: float,
+    odds_max: float,
+    statistical_candidates: list[dict] | None = None,
+    allow_context_adjustment: bool = False,
 ):
     """Run the shared safety, staking, logging, and reporting pipeline."""
     parsed = parse_recommendations(report)
     log(f"Parsed {len(parsed)} recommendation candidates from report")
-    recommendations = validate_recommendations(parsed, matches)
+    candidates_by_player = {
+        normalize_player_name(item["player"]): item
+        for item in (statistical_candidates or [])
+    }
+    for item in parsed:
+        candidates_by_player[normalize_player_name(item["player"])] = item
+    candidates = list(candidates_by_player.values())
+    recommendations = validate_recommendations(
+        candidates,
+        matches,
+        odds_min,
+        odds_max,
+        allow_context_adjustment,
+    )
     log(f"Validated {len(recommendations)} recommendations")
-    total_stake = log_bets(date_str, recommendations, matches, bankroll)
+    authorized = select_portfolio(recommendations)
+    total_stake = log_bets(date_str, authorized, matches, bankroll)
     save_bankroll(bankroll, total_stake)
 
-    final_report = add_validation_summary(report, len(parsed), recommendations)
+    final_report = add_validation_summary(report, len(candidates), authorized)
     save_report(date_str, final_report)
     log("=== Done ===")
     print("\n" + final_report)
@@ -1180,6 +1447,14 @@ def main():
             report,
             snapshot["matches"],
             snapshot.get("bankroll"),
+            snapshot["odds_min"],
+            snapshot["odds_max"],
+            build_statistical_candidates(
+                snapshot["matches"],
+                snapshot["odds_min"],
+                snapshot["odds_max"],
+            ),
+            True,
         )
         return
 
@@ -1228,9 +1503,20 @@ def main():
     # Attach odds
     qualified = attach_odds(all_matches, odds_min, odds_max)
 
+    log("Fetching Tennis Abstract profiles for Python validation...")
+    enrich_matches_with_profiles(qualified)
+    statistical_candidates = build_statistical_candidates(
+        qualified, odds_min, odds_max
+    )
+    log(f"Found {len(statistical_candidates)} positive-EV Elo/market candidates")
+
     # Stage 2 & 3: AI Analysis
-    log("Building analysis prompt...")
-    prompt = build_prompt(date_str, qualified, bankroll, odds_min, odds_max)
+    analysis_matches = select_analysis_matches(qualified)
+    log(
+        f"Building bounded analysis prompt with {len(analysis_matches)}/"
+        f"{len(qualified)} qualifying matches..."
+    )
+    prompt = build_prompt(date_str, analysis_matches, bankroll, odds_min, odds_max)
 
     if args.mode == "opencode-prepare":
         save_agent_snapshot(
@@ -1255,14 +1541,28 @@ def main():
         )
         if value
     ]
-    if not groq_api_keys:
-        log("ERROR: No Groq API keys configured.")
-        log("Get a key at https://console.groq.com/keys")
-        sys.exit(1)
-    log(f"Loaded {len(groq_api_keys)} Groq API key(s)")
-
-    report = call_ai(prompt, groq_api_keys)
-    finalize_analysis(date_str, report, qualified, bankroll)
+    report = None
+    if groq_api_keys:
+        log(f"Loaded {len(groq_api_keys)} Groq API key(s)")
+        try:
+            report = call_ai(prompt, groq_api_keys)
+        except (requests.RequestException, RuntimeError, ValueError):
+            log("Groq unavailable; continuing with deterministic Python report")
+    else:
+        log("No Groq API keys configured; using deterministic Python report")
+    if report is None:
+        report = build_deterministic_report(
+            date_str, qualified, statistical_candidates
+        )
+    finalize_analysis(
+        date_str,
+        report,
+        qualified,
+        bankroll,
+        odds_min,
+        odds_max,
+        statistical_candidates,
+    )
 
 
 if __name__ == "__main__":
