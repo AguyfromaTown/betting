@@ -21,6 +21,7 @@ from bs4 import BeautifulSoup
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BANKROLL_FILE = REPO_ROOT / "bankroll.txt"
 LOG_FILE = REPO_ROOT / "bets-log.csv"
+AUDIT_FILE = REPO_ROOT / "predictions-log.csv"
 REPORTS_DIR = REPO_ROOT / "reports"
 REQUEST_TIMEOUT = 30
 MAX_COMPLETION_TOKENS = 2048
@@ -353,6 +354,8 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
             league = event.get("league") or odds_event.get("league") or {}
             tournament = league.get("name") or "Tennis"
             matches.append({
+                "event_id": str(event.get("id", odds_event.get("id", ""))),
+                "start_time": event.get("date") or odds_event.get("date"),
                 "player1": home,
                 "player2": away,
                 "tournament": tournament,
@@ -1123,6 +1126,141 @@ def select_portfolio(
     return selected
 
 
+def append_prediction_audit(date_str, matches, recommendations, authorized):
+    """Persist all Elo-modelled singles candidates and final decisions."""
+    validated = {normalize_player_name(item["player"]): item for item in recommendations}
+    selected = {normalize_player_name(item["player"]) for item in authorized}
+    existing = set()
+    if AUDIT_FILE.exists() and AUDIT_FILE.stat().st_size:
+        with open(AUDIT_FILE, newline="", encoding="utf-8") as handle:
+            existing = {(r["DATE"], r["EVENT_ID"], r["PICK"]) for r in csv.DictReader(handle)}
+    rows = []
+    for match in matches:
+        for player in (match["player1"], match["player2"]):
+            baseline = calculate_tennis_baseline(match, player)
+            if not baseline:
+                continue
+            key = (date_str, match.get("event_id", ""), player)
+            if key in existing:
+                continue
+            item = validated.get(normalize_player_name(player))
+            decision = item["grade"] if normalize_player_name(player) in selected else "Watchlist" if item else "Rejected"
+            rows.append([
+                date_str, match.get("event_id", ""),
+                f"{match['player1']} vs {match['player2']}", player,
+                f"{baseline['player_odds']:.3f}",
+                f"{baseline['market_probability']:.6f}",
+                f"{baseline['elo_probability']:.6f}",
+                f"{baseline['assessed_probability']:.6f}",
+                f"{baseline['ev']:.6f}", f"{baseline['score']:.3f}",
+                "reliable" if tennis_baseline_is_reliable(baseline) else "insufficient",
+                decision, "", "", "",
+            ])
+    if not rows:
+        return
+    write_header = not AUDIT_FILE.exists() or not AUDIT_FILE.stat().st_size
+    with open(AUDIT_FILE, "a", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        if write_header:
+            writer.writerow([
+                "DATE", "EVENT_ID", "MATCH", "PICK", "OPENING_ODDS",
+                "MARKET_PROBABILITY", "ELO_PROBABILITY", "MODEL_PROBABILITY",
+                "EV", "SCORE", "EVIDENCE", "DECISION", "RESULT",
+                "CLOSING_ODDS", "CLV",
+            ])
+        writer.writerows(rows)
+    log(f"Audited {len(rows)} evaluated player(s) to {AUDIT_FILE.name}")
+
+
+def update_audit_result(date_str, pick_key, result, closing_odds):
+    if not AUDIT_FILE.exists() or not AUDIT_FILE.stat().st_size:
+        return
+    with open(AUDIT_FILE, newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        rows, headers = list(reader), reader.fieldnames
+    changed = False
+    for row in rows:
+        if row["DATE"] == date_str and normalize_player_name(row["PICK"]) == pick_key:
+            row["RESULT"] = result
+            if closing_odds:
+                row["CLOSING_ODDS"] = f"{closing_odds:.3f}"
+                opening = float(row.get("OPENING_ODDS") or 0)
+                row["CLV"] = f"{opening / closing_odds - 1:.6f}" if opening else ""
+            changed = True
+    if changed:
+        with open(AUDIT_FILE, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=headers)
+            writer.writeheader(); writer.writerows(rows)
+
+
+def settle_pending_bets(api_keys: list[str]) -> int:
+    """Settle finished tennis bets and add bookmaker returns to bankroll."""
+    if not LOG_FILE.exists() or not LOG_FILE.stat().st_size or not api_keys:
+        return 0
+    with open(LOG_FILE, newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    dates = sorted({r.get("DATE", "") for r in rows if not r.get("RESULT", "").strip()})
+    events = []
+    key_index = 0
+    for date in dates:
+        payload, key_index = fetch_odds_json(
+            "https://api.odds-api.io/v3/events",
+            {"sport": "tennis", "status": "settled", "from": f"{date}T00:00:00Z", "to": f"{date}T23:59:59Z"},
+            api_keys, key_index,
+        )
+        if isinstance(payload, list):
+            events.extend(payload)
+    closing_by_id = {}
+    event_ids = [str(event.get("id")) for event in events if event.get("id")]
+    for start in range(0, len(event_ids), 10):
+        payload, key_index = fetch_odds_json(
+            "https://api.odds-api.io/v3/odds/multi",
+            {"eventIds": ",".join(event_ids[start:start + 10]), "bookmakers": "Bet365,Unibet"},
+            api_keys, key_index,
+        )
+        odds_events = payload if isinstance(payload, list) else []
+        for odds_event in odds_events:
+            home_odds, away_odds, _ = extract_moneyline_odds(odds_event)
+            closing_by_id[str(odds_event.get("id"))] = (home_odds, away_odds)
+    settled = 0
+    credited = 0.0
+    for row in rows:
+        if row.get("RESULT", "").strip():
+            continue
+        label = normalize_player_name(row.get("MATCH", ""))
+        pick = normalize_player_name(re.sub(r"\s+to win\s*$", "", row.get("BET", ""), flags=re.I))
+        event = next((e for e in events if str(e.get("date", "")).startswith(row.get("DATE", ""))
+                      and normalize_player_name(str(e.get("home", ""))) in label
+                      and normalize_player_name(str(e.get("away", ""))) in label), None)
+        if not event:
+            continue
+        scores = event.get("scores") or {}
+        try:
+            home_score, away_score = float(scores["home"]), float(scores["away"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        home_pick = pick == normalize_player_name(str(event.get("home", "")))
+        away_pick = pick == normalize_player_name(str(event.get("away", "")))
+        if not (home_pick or away_pick) or home_score == away_score:
+            continue
+        won = (home_pick and home_score > away_score) or (away_pick and away_score > home_score)
+        closing_pair = closing_by_id.get(str(event.get("id")), (None, None))
+        closing = closing_pair[0] if home_pick else closing_pair[1]
+        stake, odds = float(row.get("STAKE") or 0), float(row.get("ODDS") or 0)
+        returned = stake * odds if won else 0.0
+        row["RESULT"], row["RETURN"] = ("W" if won else "L"), f"{returned:.2f}"
+        credited += returned; settled += 1
+        update_audit_result(row.get("DATE", ""), pick, row["RESULT"], closing)
+    if settled:
+        headers = ["DATE", "MATCH", "BET", "ODDS", "STAKE", "RESULT", "RETURN", "STARTING BALANCE"]
+        with open(LOG_FILE, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=headers); writer.writeheader(); writer.writerows(rows)
+        balance = float(BANKROLL_FILE.read_text().strip() or 0) + credited
+        BANKROLL_FILE.write_text(f"{balance:.2f}", encoding="utf-8")
+        log(f"Settled {settled} bet(s); credited €{credited:.2f}")
+    return settled
+
+
 def log_bets(
     date_str: str,
     recommendations: list[dict],
@@ -1340,6 +1478,7 @@ def finalize_analysis(
     )
     log(f"Validated {len(recommendations)} recommendations")
     authorized = select_portfolio(recommendations)
+    append_prediction_audit(date_str, matches, recommendations, authorized)
     total_stake = log_bets(date_str, authorized, matches, bankroll)
     save_bankroll(bankroll, total_stake)
 
@@ -1359,16 +1498,6 @@ def main():
     log(f"=== Tennis Bot — {date_str} ===")
     log(f"Odds range: {odds_min}-{odds_max}")
 
-    # Skip if already logged today (prevents double-logging when running locally)
-    if not args.force and already_logged_today(date_str):
-        log(f"Bets already logged for {date_str}. Skipping to avoid duplicates.")
-        log("(Use --force to override.)")
-        return
-
-    bankroll = load_bankroll(args.bankroll)
-    if bankroll is None:
-        log("WARNING: No bankroll set. Run with --bankroll <amount>")
-
     odds_api_keys = [
         value for value in (
             os.environ.get("ODDS_API_KEY"),
@@ -1383,6 +1512,16 @@ def main():
         log("ERROR: No odds keys configured.")
         sys.exit(1)
     log(f"Loaded {len(odds_api_keys)} Odds API key(s)")
+    settle_pending_bets(odds_api_keys)
+
+    if not args.force and already_logged_today(date_str):
+        log(f"Bets already logged for {date_str}. Skipping to avoid duplicates.")
+        log("(Use --force to override.)")
+        return
+
+    bankroll = load_bankroll(args.bankroll)
+    if bankroll is None:
+        log("WARNING: No bankroll set. Run with --bankroll <amount>")
 
     # Stage 1: Collect verified matches and odds
     log("Fetching tennis fixtures and odds...")

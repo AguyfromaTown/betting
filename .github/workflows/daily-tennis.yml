@@ -26,6 +26,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: daily-tennis-picks
+  cancel-in-progress: false
+
 jobs:
   run-picks:
     runs-on: ubuntu-latest
