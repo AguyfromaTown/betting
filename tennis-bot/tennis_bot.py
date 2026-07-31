@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 BANKROLL_FILE = REPO_ROOT / "bankroll.txt"
 LOG_FILE = REPO_ROOT / "bets-log.csv"
 AUDIT_FILE = REPO_ROOT / "predictions-log.csv"
+PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
 REPORTS_DIR = REPO_ROOT / "reports"
 REQUEST_TIMEOUT = 30
 MAX_COMPLETION_TOKENS = 2048
@@ -144,6 +145,7 @@ def parse_args():
     parser.add_argument("--odds-max", type=float, default=1.6, help="Max decimal odds")
     parser.add_argument("--bankroll", type=float, default=None, help="Override bankroll")
     parser.add_argument("--force", action="store_true", help="Run even if bets already logged for this date")
+    parser.add_argument("--settle-only", action="store_true", help="Settle pending bets without generating picks")
     return parser.parse_args()
 
 
@@ -281,7 +283,13 @@ def fetch_matches_all(date_str: str) -> list[dict]:
 
 
 def extract_moneyline_odds(payload: dict) -> tuple[float | None, float | None, str | None]:
-    """Return the first valid home/away match-winner market."""
+    """Return the best available home and away prices across bookmakers."""
+    market = extract_moneyline_market(payload)
+    return market["best_home"], market["best_away"], market["source"]
+
+
+def extract_moneyline_market(payload: dict) -> dict:
+    prices_found = []
     for bookmaker, markets in (payload.get("bookmakers") or {}).items():
         for market in markets or []:
             name = str(market.get("name", "")).strip().lower()
@@ -294,8 +302,33 @@ def extract_moneyline_odds(payload: dict) -> tuple[float | None, float | None, s
                 except (TypeError, ValueError):
                     continue
                 if home > 1 and away > 1:
-                    return home, away, bookmaker
-    return None, None, None
+                    prices_found.append((home, away, bookmaker))
+    if not prices_found:
+        return {"best_home": None, "best_away": None, "consensus_home": None, "consensus_away": None, "source": None}
+    homes, aways = sorted(p[0] for p in prices_found), sorted(p[1] for p in prices_found)
+    midpoint = len(homes) // 2
+    median_home = homes[midpoint] if len(homes) % 2 else (homes[midpoint - 1] + homes[midpoint]) / 2
+    median_away = aways[midpoint] if len(aways) % 2 else (aways[midpoint - 1] + aways[midpoint]) / 2
+    best_home = max(prices_found, key=lambda p: p[0])
+    best_away = max(prices_found, key=lambda p: p[1])
+    source = best_home[2] if best_home[2] == best_away[2] else f"{best_home[2]}/{best_away[2]}"
+    return {"best_home": best_home[0], "best_away": best_away[1], "consensus_home": median_home, "consensus_away": median_away, "source": source}
+
+
+def detect_surface(event: dict, tournament: str) -> str | None:
+    """Use provider metadata first, then conservative tournament-name hints."""
+    raw = event.get("surface") or (event.get("league") or {}).get("surface")
+    if raw and str(raw).lower() in {"hard", "clay", "grass"}:
+        return str(raw).lower()
+    name = tournament.casefold()
+    hints = {
+        "grass": ("wimbledon", "queens", "halle", "eastbourne", "nottingham"),
+        "clay": ("roland garros", "french open", "rome", "madrid", "monte carlo", "barcelona", "hamburg", "bastad", "gstaad", "umag", "kitzbuhel"),
+    }
+    for surface, terms in hints.items():
+        if any(term in name for term in terms):
+            return surface
+    return None
 
 
 def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict]:
@@ -330,7 +363,7 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
             "https://api.odds-api.io/v3/odds/multi",
             {
                 "eventIds": ",".join(str(event.get("id")) for event in batch),
-                "bookmakers": "Bet365,Unibet",
+                "bookmakers": "Bet365,Unibet,Pinnacle,William Hill,Betway",
             },
             api_keys,
             key_index,
@@ -348,7 +381,8 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
             away = event.get("away") or odds_event.get("away")
             if not home or not away:
                 continue
-            home_odds, away_odds, bookmaker = extract_moneyline_odds(odds_event)
+            market = extract_moneyline_market(odds_event)
+            home_odds, away_odds, bookmaker = market["best_home"], market["best_away"], market["source"]
             if home_odds is None or away_odds is None:
                 continue
             league = event.get("league") or odds_event.get("league") or {}
@@ -356,6 +390,7 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
             matches.append({
                 "event_id": str(event.get("id", odds_event.get("id", ""))),
                 "start_time": event.get("date") or odds_event.get("date"),
+                "surface": detect_surface(event, tournament),
                 "player1": home,
                 "player2": away,
                 "tournament": tournament,
@@ -363,6 +398,8 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
                 "source": "https://api.odds-api.io",
                 "home_odds": home_odds,
                 "away_odds": away_odds,
+                "consensus_home_odds": market["consensus_home"],
+                "consensus_away_odds": market["consensus_away"],
                 "odds_source": bookmaker or "Odds-API.io",
             })
     log(f"  Found verified moneyline odds for {len(matches)} matches")
@@ -602,11 +639,16 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
     else:
         return None
 
-    overround = 1 / float(home_odds) + 1 / float(away_odds)
-    market_probability = (1 / player_odds) / overround
+    consensus_home = match.get("consensus_home_odds") or home_odds
+    consensus_away = match.get("consensus_away_odds") or away_odds
+    overround = 1 / float(consensus_home) + 1 / float(consensus_away)
+    consensus_player_odds = float(consensus_home) if player_key == normalize_player_name(match["player1"]) else float(consensus_away)
+    market_probability = (1 / consensus_player_odds) / overround
+    surface = match.get("surface")
+    elo_field = f"{surface}_elo" if surface in {"hard", "clay", "grass"} else "elo"
     try:
-        player_elo = float(player_profile["elo"])
-        opponent_elo = float(opponent_profile["elo"])
+        player_elo = float(player_profile.get(elo_field) or player_profile["elo"])
+        opponent_elo = float(opponent_profile.get(elo_field) or opponent_profile["elo"])
     except (KeyError, TypeError, ValueError):
         return None
     elo_probability = 1 / (1 + 10 ** ((opponent_elo - player_elo) / 400))
@@ -622,6 +664,7 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "score": score,
         "market_overround": overround,
         "elo_market_gap": abs(elo_probability - market_probability),
+        "elo_type": elo_field,
     }
 
 
@@ -1128,6 +1171,22 @@ def select_portfolio(
 
 def append_prediction_audit(date_str, matches, recommendations, authorized):
     """Persist all Elo-modelled singles candidates and final decisions."""
+    headers = [
+        "DATE", "EVENT_ID", "MATCH", "PICK", "OPENING_ODDS",
+        "MARKET_PROBABILITY", "ELO_PROBABILITY", "MODEL_PROBABILITY",
+        "EV", "SCORE", "EVIDENCE", "DECISION", "REASON", "RESULT",
+        "CLOSING_ODDS", "CLV",
+    ]
+    if AUDIT_FILE.exists() and AUDIT_FILE.stat().st_size:
+        with open(AUDIT_FILE, newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            old_rows, old_headers = list(reader), reader.fieldnames or []
+        if old_headers != headers:
+            for row in old_rows:
+                row.setdefault("REASON", "legacy")
+            with open(AUDIT_FILE, "w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=headers, extrasaction="ignore")
+                writer.writeheader(); writer.writerows(old_rows)
     validated = {normalize_player_name(item["player"]): item for item in recommendations}
     selected = {normalize_player_name(item["player"]) for item in authorized}
     existing = set()
@@ -1145,6 +1204,18 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
                 continue
             item = validated.get(normalize_player_name(player))
             decision = item["grade"] if normalize_player_name(player) in selected else "Watchlist" if item else "Rejected"
+            if normalize_player_name(player) in selected:
+                reason = "authorized"
+            elif item and item.get("grade") in {"Top Pick", "Value Pick"}:
+                reason = "portfolio_limit"
+            elif item:
+                reason = "below_staking_threshold"
+            elif not tennis_baseline_is_reliable(baseline):
+                reason = "missing_elo_or_market_disagreement"
+            elif baseline["ev"] <= 0:
+                reason = "non_positive_ev"
+            else:
+                reason = "not_selected"
             rows.append([
                 date_str, match.get("event_id", ""),
                 f"{match['player1']} vs {match['player2']}", player,
@@ -1154,7 +1225,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
                 f"{baseline['assessed_probability']:.6f}",
                 f"{baseline['ev']:.6f}", f"{baseline['score']:.3f}",
                 "reliable" if tennis_baseline_is_reliable(baseline) else "insufficient",
-                decision, "", "", "",
+                decision, reason, "", "", "",
             ])
     if not rows:
         return
@@ -1162,12 +1233,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
     with open(AUDIT_FILE, "a", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         if write_header:
-            writer.writerow([
-                "DATE", "EVENT_ID", "MATCH", "PICK", "OPENING_ODDS",
-                "MARKET_PROBABILITY", "ELO_PROBABILITY", "MODEL_PROBABILITY",
-                "EV", "SCORE", "EVIDENCE", "DECISION", "RESULT",
-                "CLOSING_ODDS", "CLV",
-            ])
+            writer.writerow(headers)
         writer.writerows(rows)
     log(f"Audited {len(rows)} evaluated player(s) to {AUDIT_FILE.name}")
 
@@ -1259,6 +1325,42 @@ def settle_pending_bets(api_keys: list[str]) -> int:
         BANKROLL_FILE.write_text(f"{balance:.2f}", encoding="utf-8")
         log(f"Settled {settled} bet(s); credited €{credited:.2f}")
     return settled
+
+
+def generate_performance_summary():
+    bets = []
+    if LOG_FILE.exists() and LOG_FILE.stat().st_size:
+        with open(LOG_FILE, newline="", encoding="utf-8") as handle:
+            bets = list(csv.DictReader(handle))
+    settled = [row for row in bets if row.get("RESULT") in {"W", "L"}]
+    stakes = sum(float(row.get("STAKE") or 0) for row in settled)
+    profit = sum(float(row.get("RETURN") or 0) - float(row.get("STAKE") or 0) for row in settled)
+    wins = sum(row.get("RESULT") == "W" for row in settled)
+    audit = []
+    if AUDIT_FILE.exists() and AUDIT_FILE.stat().st_size:
+        with open(AUDIT_FILE, newline="", encoding="utf-8") as handle:
+            audit = list(csv.DictReader(handle))
+    resolved = [row for row in audit if row.get("RESULT") in {"W", "L"} and row.get("MODEL_PROBABILITY")]
+    brier = sum((float(row["MODEL_PROBABILITY"]) - (row["RESULT"] == "W")) ** 2 for row in resolved) / len(resolved) if resolved else None
+    clv = [float(row["CLV"]) for row in resolved if row.get("CLV")]
+    lines = [
+        "# Tennis Bot Performance", "",
+        f"- Settled bets: {len(settled)}",
+        f"- Win rate: {wins / len(settled):.1%}" if settled else "- Win rate: N/A",
+        f"- Profit/loss: €{profit:.2f}",
+        f"- ROI: {profit / stakes:.2%}" if stakes else "- ROI: N/A",
+        f"- Brier score: {brier:.4f}" if brier is not None else "- Brier score: N/A",
+        f"- Average CLV: {sum(clv) / len(clv):.2%}" if clv else "- Average CLV: N/A",
+        "", "## Calibration", "",
+        "| Predicted probability | Predictions | Actual win rate |", "|---|---:|---:|",
+    ]
+    for low, high in ((.50, .55), (.55, .60), (.60, .65), (.65, .70), (.70, 1.01)):
+        bucket = [row for row in resolved if low <= float(row["MODEL_PROBABILITY"]) < high]
+        actual = sum(row["RESULT"] == "W" for row in bucket) / len(bucket) if bucket else None
+        label = f"{low:.0%}–{high:.0%}" if high <= 1 else "70%+"
+        lines.append(f"| {label} | {len(bucket)} | {actual:.1%} |" if actual is not None else f"| {label} | 0 | N/A |")
+    PERFORMANCE_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    log(f"Performance summary saved: {PERFORMANCE_FILE.name}")
 
 
 def log_bets(
@@ -1484,6 +1586,7 @@ def finalize_analysis(
 
     final_report = add_validation_summary(report, len(candidates), authorized)
     save_report(date_str, final_report)
+    generate_performance_summary()
     log("=== Done ===")
     print("\n" + final_report)
 
@@ -1513,6 +1616,11 @@ def main():
         sys.exit(1)
     log(f"Loaded {len(odds_api_keys)} Odds API key(s)")
     settle_pending_bets(odds_api_keys)
+    generate_performance_summary()
+
+    if args.settle_only:
+        log("Settlement-only run complete")
+        return
 
     if not args.force and already_logged_today(date_str):
         log(f"Bets already logged for {date_str}. Skipping to avoid duplicates.")

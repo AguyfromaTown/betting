@@ -1,0 +1,38 @@
+name: Settle Tennis Bets
+
+on:
+  schedule:
+    - cron: '30 2,14,22 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-tennis-picks
+  cancel-in-progress: false
+
+jobs:
+  settle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r tennis-bot/requirements.txt
+      - name: Settle pending bets
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          ODDS_API_KEY_2: ${{ secrets.ODDS_API_KEY_2 }}
+          ODDS_API_KEY_3: ${{ secrets.ODDS_API_KEY_3 }}
+          ODDS_API_KEY_4: ${{ secrets.ODDS_API_KEY_4 }}
+          ODDS_API_KEY_5: ${{ secrets.ODDS_API_KEY_5 }}
+        run: python tennis-bot/tennis_bot.py --settle-only
+      - name: Commit settlement
+        run: |
+          git config --local user.email "tennis-bot@github.com"
+          git config --local user.name "Tennis Bot"
+          git add -A
+          git diff --staged --quiet || git commit -m "Settle tennis bets"
+          git push
