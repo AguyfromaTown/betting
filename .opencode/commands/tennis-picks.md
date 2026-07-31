@@ -51,6 +51,13 @@ Then complete every step below. Do not stop after preparing the data.
    - Expected value is exactly
      `(assessed_probability * verified_decimal_odds) - 1`.
    - Never call negative EV a pick, regardless of name recognition or score.
+   - If Elo and market probability differ by more than 15 percentage points,
+     exclude the match because the missing-information risk is too high.
+   - Keep researched context adjustments within ±5 percentage points of the
+     Python baseline. Larger differences will be rejected by the finalizer.
+   - Moderate positive-EV candidates are watchlist-only and must not be staked.
+   - Rank authorized Top/Value bets by EV, never select both players in one
+     match, select at most four bets, and cap planned daily exposure at 8%.
 
 5. Write a concise report to `tennis-bot/agent-report.md` with:
 
