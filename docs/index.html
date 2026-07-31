@@ -301,8 +301,21 @@
       </div>
       <div class="table-scroll">
         <table id="audit-table">
-          <thead><tr><th>Date</th><th>Player</th><th>Opening odds</th><th>Model probability</th><th>EV</th><th>Decision</th><th>Reason</th><th>Result</th><th>CLV</th></tr></thead>
+          <thead><tr><th>Date</th><th>Player</th><th>Tour</th><th>Surface</th><th>Quality</th><th>Books</th><th>Opening odds</th><th>Model probability</th><th>EV</th><th>Decision</th><th>Reason</th><th>Result</th><th>CLV</th></tr></thead>
           <tbody id="audit-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card table-card" style="margin-top:12px">
+      <div class="table-toolbar">
+        <div><h2 class="panel-title">Backtest by odds range</h2><div class="panel-kicker">Settled audited picks, measured at recorded opening prices</div></div>
+        <span class="count" id="backtest-row-count">0 settled predictions</span>
+      </div>
+      <div class="table-scroll">
+        <table id="backtest-table">
+          <thead><tr><th>Odds range</th><th>Bets</th><th>Win rate</th><th>Flat-unit ROI</th><th>Brier</th><th>Average CLV</th><th>Reliability</th></tr></thead>
+          <tbody id="backtest-body"></tbody>
         </table>
       </div>
     </section>
@@ -461,6 +474,10 @@
         return `<tr>
           <td class="mono">${safe(row.date || "—")}</td>
           <td>${safe(row.pick || row.player || "—")}</td>
+          <td>${safe(row.tour || "—")}</td>
+          <td>${safe(row.surface || "—")}</td>
+          <td>${safe(row.quality_grade || "—")}</td>
+          <td class="mono">${safe(row.bookmakers || "—")}</td>
           <td class="mono">${safe(row.opening_odds || "—")}</td>
           <td class="mono">${safe(percent(row.model_probability))}</td>
           <td class="mono">${safe(percent(row.ev))}</td>
@@ -474,11 +491,27 @@
       el("audit-row-count").textContent = `${rows.length} audited ${rows.length === 1 ? "prediction" : "predictions"}`;
     }
 
+    function renderBacktest(rows) {
+      const settled = rows.filter(row => ["w", "l", "win", "loss", "won", "lost"].includes(String(row.result || "").toLowerCase()));
+      const bands = [[1, 1.5, "1.00–1.50"], [1.5, 1.75, "1.50–1.75"], [1.75, 2, "1.75–2.00"], [2, 2.5, "2.00–2.50"], [2.5, Infinity, "2.50+"]];
+      el("backtest-body").innerHTML = bands.map(([low, high, label]) => {
+        const group = settled.filter(row => Number(row.opening_odds) >= low && Number(row.opening_odds) < high);
+        const wins = group.filter(row => ["w", "win", "won"].includes(String(row.result).toLowerCase())).length;
+        const profit = group.reduce((sum, row) => sum + (["w", "win", "won"].includes(String(row.result).toLowerCase()) ? Number(row.opening_odds) - 1 : -1), 0);
+        const brier = group.length ? group.reduce((sum, row) => sum + Math.pow(Number(row.model_probability) - (["w", "win", "won"].includes(String(row.result).toLowerCase()) ? 1 : 0), 2), 0) / group.length : null;
+        const clv = group.filter(row => String(row.clv || "").trim()).map(row => Number(row.clv)).filter(Number.isFinite);
+        const reliability = group.length >= 100 ? "Usable" : group.length >= 30 ? "Developing" : "Small sample";
+        return `<tr><td>${label}</td><td>${group.length}</td><td>${group.length ? (wins / group.length * 100).toFixed(1) + "%" : "—"}</td><td class="${profit > 0 ? "positive" : profit < 0 ? "negative" : ""}">${group.length ? (profit / group.length * 100).toFixed(1) + "%" : "—"}</td><td>${brier === null ? "—" : brier.toFixed(4)}</td><td>${clv.length ? (clv.reduce((a,b) => a+b, 0) / clv.length * 100).toFixed(1) + "%" : "—"}</td><td>${reliability}</td></tr>`;
+      }).join("");
+      el("backtest-row-count").textContent = `${settled.length} settled predictions`;
+    }
+
     function refreshAll() {
       const rows = allRows.map(row => ({ ...row }));
       renderStats(rows);
       renderTable(rows.reverse());
       renderAudit(auditRows);
+      renderBacktest(auditRows);
       drawChart(allRows);
       updateStatus(allRows);
     }

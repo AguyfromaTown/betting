@@ -23,6 +23,7 @@ BANKROLL_FILE = REPO_ROOT / "bankroll.txt"
 LOG_FILE = REPO_ROOT / "bets-log.csv"
 AUDIT_FILE = REPO_ROOT / "predictions-log.csv"
 PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
+BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 REPORTS_DIR = REPO_ROOT / "reports"
 REQUEST_TIMEOUT = 30
 MAX_COMPLETION_TOKENS = 2048
@@ -146,6 +147,7 @@ def parse_args():
     parser.add_argument("--bankroll", type=float, default=None, help="Override bankroll")
     parser.add_argument("--force", action="store_true", help="Run even if bets already logged for this date")
     parser.add_argument("--settle-only", action="store_true", help="Settle pending bets without generating picks")
+    parser.add_argument("--backtest-only", action="store_true", help="Rebuild analytics without API calls")
     return parser.parse_args()
 
 
@@ -304,7 +306,7 @@ def extract_moneyline_market(payload: dict) -> dict:
                 if home > 1 and away > 1:
                     prices_found.append((home, away, bookmaker))
     if not prices_found:
-        return {"best_home": None, "best_away": None, "consensus_home": None, "consensus_away": None, "source": None}
+        return {"best_home": None, "best_away": None, "consensus_home": None, "consensus_away": None, "source": None, "bookmaker_count": 0}
     homes, aways = sorted(p[0] for p in prices_found), sorted(p[1] for p in prices_found)
     midpoint = len(homes) // 2
     median_home = homes[midpoint] if len(homes) % 2 else (homes[midpoint - 1] + homes[midpoint]) / 2
@@ -312,7 +314,7 @@ def extract_moneyline_market(payload: dict) -> dict:
     best_home = max(prices_found, key=lambda p: p[0])
     best_away = max(prices_found, key=lambda p: p[1])
     source = best_home[2] if best_home[2] == best_away[2] else f"{best_home[2]}/{best_away[2]}"
-    return {"best_home": best_home[0], "best_away": best_away[1], "consensus_home": median_home, "consensus_away": median_away, "source": source}
+    return {"best_home": best_home[0], "best_away": best_away[1], "consensus_home": median_home, "consensus_away": median_away, "source": source, "bookmaker_count": len(prices_found)}
 
 
 def detect_surface(event: dict, tournament: str) -> str | None:
@@ -401,6 +403,7 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
                 "consensus_home_odds": market["consensus_home"],
                 "consensus_away_odds": market["consensus_away"],
                 "odds_source": bookmaker or "Odds-API.io",
+                "bookmaker_count": market["bookmaker_count"],
             })
     log(f"  Found verified moneyline odds for {len(matches)} matches")
     return matches
@@ -1169,12 +1172,27 @@ def select_portfolio(
     return selected
 
 
+def evidence_quality(match: dict, baseline: dict) -> tuple[int, str]:
+    """Score whether a candidate has enough independent, relevant evidence."""
+    points = 0
+    points += 2 if match.get("player1_profile") and match.get("player2_profile") else 0
+    points += 2 if match.get("surface") in {"hard", "clay", "grass"} else 0
+    points += 2 if baseline.get("elo_type") != "elo" else 1
+    bookmakers = int(match.get("bookmaker_count") or 0)
+    points += 2 if bookmakers >= 3 else 1 if bookmakers >= 2 else 0
+    points += 1 if baseline.get("market_overround", 9) <= 1.08 else 0
+    points += 1 if baseline.get("elo_market_gap", 9) <= 0.12 else 0
+    grade = "A" if points >= 9 else "B" if points >= 7 else "C" if points >= 5 else "D"
+    return points, grade
+
+
 def append_prediction_audit(date_str, matches, recommendations, authorized):
     """Persist all Elo-modelled singles candidates and final decisions."""
     headers = [
         "DATE", "EVENT_ID", "MATCH", "PICK", "OPENING_ODDS",
         "MARKET_PROBABILITY", "ELO_PROBABILITY", "MODEL_PROBABILITY",
-        "EV", "SCORE", "EVIDENCE", "DECISION", "REASON", "RESULT",
+        "EV", "SCORE", "EVIDENCE", "QUALITY_SCORE", "QUALITY_GRADE",
+        "TOUR", "SURFACE", "BOOKMAKERS", "DECISION", "REASON", "RESULT",
         "CLOSING_ODDS", "CLV",
     ]
     if AUDIT_FILE.exists() and AUDIT_FILE.stat().st_size:
@@ -1184,6 +1202,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
         if old_headers != headers:
             for row in old_rows:
                 row.setdefault("REASON", "legacy")
+                row.setdefault("QUALITY_GRADE", "legacy")
             with open(AUDIT_FILE, "w", newline="", encoding="utf-8") as handle:
                 writer = csv.DictWriter(handle, fieldnames=headers, extrasaction="ignore")
                 writer.writeheader(); writer.writerows(old_rows)
@@ -1216,6 +1235,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
                 reason = "non_positive_ev"
             else:
                 reason = "not_selected"
+            quality_score, quality_grade = evidence_quality(match, baseline)
             rows.append([
                 date_str, match.get("event_id", ""),
                 f"{match['player1']} vs {match['player2']}", player,
@@ -1225,6 +1245,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
                 f"{baseline['assessed_probability']:.6f}",
                 f"{baseline['ev']:.6f}", f"{baseline['score']:.3f}",
                 "reliable" if tennis_baseline_is_reliable(baseline) else "insufficient",
+                quality_score, quality_grade, match.get("level") or "Unknown",
+                match.get("surface") or "Unknown", match.get("bookmaker_count") or 0,
                 decision, reason, "", "", "",
             ])
     if not rows:
@@ -1360,7 +1382,60 @@ def generate_performance_summary():
         label = f"{low:.0%}–{high:.0%}" if high <= 1 else "70%+"
         lines.append(f"| {label} | {len(bucket)} | {actual:.1%} |" if actual is not None else f"| {label} | 0 | N/A |")
     PERFORMANCE_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    generate_backtest_summary(resolved)
     log(f"Performance summary saved: {PERFORMANCE_FILE.name}")
+
+
+def _segment_metrics(rows: list[dict]) -> tuple[int, float, float, float, float | None]:
+    count = len(rows)
+    if not count:
+        return 0, 0.0, 0.0, 0.0, None
+    wins = sum(row.get("RESULT") == "W" for row in rows)
+    profit = sum(
+        (float(row.get("OPENING_ODDS") or 0) - 1) if row.get("RESULT") == "W" else -1
+        for row in rows
+    )
+    brier = sum(
+        (float(row["MODEL_PROBABILITY"]) - (row.get("RESULT") == "W")) ** 2
+        for row in rows
+    ) / count
+    clv_values = [float(row["CLV"]) for row in rows if row.get("CLV")]
+    return count, wins / count, profit / count, brier, (sum(clv_values) / len(clv_values) if clv_values else None)
+
+
+def _append_segment_table(lines: list[str], title: str, groups: list[tuple[str, list[dict]]]):
+    lines.extend(["", f"## {title}", "", "| Segment | Bets | Win rate | Flat-unit ROI | Brier | Avg CLV | Reliability |", "|---|---:|---:|---:|---:|---:|---|"])
+    for label, rows in groups:
+        count, win_rate, roi, brier, clv = _segment_metrics(rows)
+        reliability = "usable" if count >= 100 else "developing" if count >= 30 else "small sample"
+        clv_text = f"{clv:.2%}" if clv is not None else "N/A"
+        lines.append(f"| {label} | {count} | {win_rate:.1%} | {roi:.2%} | {brier:.4f} | {clv_text} | {reliability} |")
+
+
+def generate_backtest_summary(resolved: list[dict]):
+    """Create a leakage-free report using only predictions recorded before results."""
+    lines = [
+        "# Tennis Bot Backtest", "",
+        "This report uses the opening odds and model probabilities saved before settlement.",
+        "Flat-unit ROI makes segments comparable; fewer than 30 settled bets is a small sample.",
+    ]
+    odds_bands = [(1.0, 1.5), (1.5, 1.75), (1.75, 2.0), (2.0, 2.5), (2.5, 99.0)]
+    _append_segment_table(lines, "Odds bands", [
+        (f"{low:.2f}–{high:.2f}" if high < 99 else "2.50+", [r for r in resolved if low <= float(r.get("OPENING_ODDS") or 0) < high])
+        for low, high in odds_bands
+    ])
+    ev_bands = [(-99, 0), (0, .03), (.03, .06), (.06, .10), (.10, 99)]
+    _append_segment_table(lines, "Expected-value bands", [
+        ("Negative" if high == 0 else f"{low:.0%}–{high:.0%}" if high < 99 else "10%+", [r for r in resolved if low <= float(r.get("EV") or 0) < high])
+        for low, high in ev_bands
+    ])
+    for field, title in (("TOUR", "Tour and level"), ("SURFACE", "Surface"), ("QUALITY_GRADE", "Evidence quality")):
+        values = sorted({row.get(field) or "Unknown" for row in resolved})
+        _append_segment_table(lines, title, [(value, [r for r in resolved if (r.get(field) or "Unknown") == value]) for value in values])
+    months = sorted({(row.get("DATE") or "")[:7] for row in resolved if row.get("DATE")})
+    _append_segment_table(lines, "Monthly performance", [(month, [r for r in resolved if (r.get("DATE") or "").startswith(month)]) for month in months])
+    BACKTEST_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    log(f"Backtest summary saved: {BACKTEST_FILE.name}")
 
 
 def log_bets(
@@ -1600,6 +1675,11 @@ def main():
 
     log(f"=== Tennis Bot — {date_str} ===")
     log(f"Odds range: {odds_min}-{odds_max}")
+
+    if args.backtest_only:
+        generate_performance_summary()
+        log("Backtest-only run complete")
+        return
 
     odds_api_keys = [
         value for value in (
