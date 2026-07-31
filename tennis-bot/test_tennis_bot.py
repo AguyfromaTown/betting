@@ -12,11 +12,32 @@ SPEC.loader.exec_module(bot)
 
 
 class TennisBotTests(unittest.TestCase):
+    def test_stage_pending_does_not_log_or_deduct(self):
+        rec = {"player": "Player One", "grade": "Value Pick", "odds": 1.55,
+               "assessed_probability": .70, "ev": .085,
+               "match": {"player1": "Player One", "player2": "Player Two", "tournament": "ATP Test",
+                         "surface": "hard", "start_time": "2026-08-01T13:00:00Z", "event_id": "7"}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); pending = root / "pending-bets.csv"
+            with patch.object(bot, "PENDING_FILE", pending):
+                staged = bot.stage_pending_bets("2026-08-01", [rec], 1.5, 1.6)
+            with pending.open(encoding="utf-8") as handle:
+                rows = list(__import__("csv").DictReader(handle))
+        self.assertEqual(staged, 1)
+        self.assertEqual(rows[0]["STATUS"], "pending_revalidation")
+
+    def test_match_time_state_controls_authorization_window(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
+        self.assertEqual(bot.match_time_state("2026-08-01T14:00:00Z", now), "waiting")
+        self.assertEqual(bot.match_time_state("2026-08-01T13:00:00Z", now), "ready")
+        self.assertEqual(bot.match_time_state("2026-08-01T11:00:00Z", now), "passed")
+
     def test_validation_summary_overrides_rejected_narrative_picks(self):
         report = "## TOP PICKS\nA speculative candidate."
         result = bot.add_validation_summary(report, 1, [])
 
-        self.assertIn("Python accepted 0 bet(s)", result)
+        self.assertIn("Python accepted 0 candidate(s) for staging", result)
         self.assertIn("Final betting decision: NO BETS", result)
         self.assertIn("must not be treated as recommendations", result)
 

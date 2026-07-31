@@ -1,0 +1,40 @@
+name: Revalidate Tennis Bets
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-tennis-picks
+  cancel-in-progress: false
+
+jobs:
+  revalidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r tennis-bot/requirements.txt
+      - name: Run tests
+        run: python -m unittest discover -s tennis-bot -p "test_*.py"
+      - name: Revalidate pending tennis bets
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          ODDS_API_KEY_2: ${{ secrets.ODDS_API_KEY_2 }}
+          ODDS_API_KEY_3: ${{ secrets.ODDS_API_KEY_3 }}
+          ODDS_API_KEY_4: ${{ secrets.ODDS_API_KEY_4 }}
+          ODDS_API_KEY_5: ${{ secrets.ODDS_API_KEY_5 }}
+        run: python tennis-bot/tennis_bot.py --revalidate-only
+      - name: Commit lifecycle updates
+        run: |
+          git config --local user.email "tennis-bot@github.com"
+          git config --local user.name "Tennis Bot"
+          git add -A
+          git diff --staged --quiet || git commit -m "Revalidate tennis bets"
+          git push

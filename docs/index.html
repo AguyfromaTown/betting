@@ -217,6 +217,17 @@
       <div class="updated">Latest activity<strong id="last-updated">Loading your log…</strong></div>
     </section>
 
+    <section class="card table-card" style="margin-top:12px">
+      <div class="table-toolbar">
+        <div><h2 class="panel-title">Bet lifecycle</h2><div class="panel-kicker">Discovery, pre-match authorization, cancellation and price movement</div></div>
+        <span class="count" id="pending-row-count">0 candidates</span>
+      </div>
+      <div class="table-scroll"><table id="pending-table">
+        <thead><tr><th>Date</th><th>Match</th><th>Pick</th><th>Start</th><th>Status</th><th>Reason</th><th>Discovery odds</th><th>Final odds</th><th>Discovery EV</th><th>Final EV</th><th>Books</th><th>Movement</th></tr></thead>
+        <tbody id="pending-body"></tbody>
+      </table></div>
+    </section>
+
     <section class="stats" aria-label="Betting summary">
       <article class="card metric">
         <div class="metric-label">Total bets <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 3h10v4a5 5 0 0 1-10 0V3Z"/><path d="M12 12v5m-4 4h8m-4-4H9m8-12h3v2a4 4 0 0 1-4 4M7 5H4v2a4 4 0 0 0 4 4"/></svg></div>
@@ -330,7 +341,9 @@
     const AUDIT_URL = RAW_ROOT + "predictions-log.csv";
     const BANKROLL_URL = RAW_ROOT + "bankroll.txt";
     const PERFORMANCE_URL = RAW_ROOT + "performance-summary.md";
+    const PENDING_URL = RAW_ROOT + "pending-bets.csv";
     let allRows = [];
+    let pendingRows = [];
     let auditRows = [];
     let currentBankroll = null;
     let performanceText = "";
@@ -519,8 +532,19 @@
       renderTable(rows.reverse());
       renderAudit(auditRows);
       renderBacktest(auditRows);
+      renderPending(pendingRows);
       drawChart(allRows);
       updateStatus(allRows);
+    }
+
+    function renderPending(rows) {
+      const recent = rows.slice(-100).reverse();
+      el("pending-body").innerHTML = recent.map(row => {
+        const status = String(row.status || "pending_revalidation");
+        const badge = status === "authorized" ? "win" : status === "cancelled" ? "loss" : "pending";
+        return `<tr><td>${safe(row.date || "â€”")}</td><td>${safe(row.match || "â€”")}</td><td>${safe(row.pick || "â€”")}</td><td>${safe(row.start_time || "â€”")}</td><td><span class="badge ${badge}">${safe(status.replaceAll("_", " "))}</span></td><td>${safe(row.reason || "â€”")}</td><td>${safe(row.discovery_odds || "â€”")}</td><td>${safe(row.final_odds || "â€”")}</td><td>${safe(percent(row.discovery_ev))}</td><td>${safe(percent(row.final_ev))}</td><td>${safe(row.final_bookmakers || "â€”")}</td><td>${safe(percent(row.price_movement))}</td></tr>`;
+      }).join("");
+      el("pending-row-count").textContent = `${rows.length} lifecycle candidates`;
     }
 
     function updateStatus(rows) {
@@ -577,9 +601,10 @@
         if (!required[1].ok) throw new Error(`bankroll.txt returned ${required[1].status}`);
         allRows = normalizeRows(await required[0].text());
         currentBankroll = Number.parseFloat((await required[1].text()).trim());
-        const optional = await Promise.all([fetch(AUDIT_URL), fetch(PERFORMANCE_URL)]);
+        const optional = await Promise.all([fetch(AUDIT_URL), fetch(PERFORMANCE_URL), fetch(PENDING_URL)]);
         auditRows = optional[0].ok ? parseCSV(await optional[0].text()) : [];
         performanceText = optional[1].ok ? await optional[1].text() : "";
+        pendingRows = optional[2].ok ? parseCSV(await optional[2].text()) : [];
         refreshAll();
         el("status-text").textContent = "Automated data synced";
       } catch (error) {
