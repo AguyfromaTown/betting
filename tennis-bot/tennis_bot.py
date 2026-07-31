@@ -22,9 +22,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 BANKROLL_FILE = REPO_ROOT / "bankroll.txt"
 LOG_FILE = REPO_ROOT / "bets-log.csv"
 REPORTS_DIR = REPO_ROOT / "reports"
-DEFAULT_AGENT_SNAPSHOT = REPO_ROOT / "tennis-bot" / "agent-run.json"
-DEFAULT_AGENT_REPORT = REPO_ROOT / "tennis-bot" / "agent-report.md"
-
 REQUEST_TIMEOUT = 30
 MAX_COMPLETION_TOKENS = 2048
 GROQ_MODEL = "llama-3.3-70b-versatile"
@@ -33,7 +30,6 @@ MAX_DAILY_EXPOSURE = 0.08
 MAX_DAILY_BETS = 4
 MAX_MARKET_OVERROUND = 1.12
 MAX_ELO_MARKET_GAP = 0.15
-MAX_CONTEXT_ADJUSTMENT = 0.05
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -147,24 +143,6 @@ def parse_args():
     parser.add_argument("--odds-max", type=float, default=1.6, help="Max decimal odds")
     parser.add_argument("--bankroll", type=float, default=None, help="Override bankroll")
     parser.add_argument("--force", action="store_true", help="Run even if bets already logged for this date")
-    parser.add_argument(
-        "--mode",
-        choices=("github", "opencode-prepare", "opencode-finalize"),
-        default="github",
-        help="Analysis engine; GitHub/Groq remains the default",
-    )
-    parser.add_argument(
-        "--snapshot",
-        type=Path,
-        default=DEFAULT_AGENT_SNAPSHOT,
-        help="Verified OpenCode run snapshot",
-    )
-    parser.add_argument(
-        "--analysis-file",
-        type=Path,
-        default=DEFAULT_AGENT_REPORT,
-        help="OpenCode research report to validate",
-    )
     return parser.parse_args()
 
 
@@ -1019,7 +997,6 @@ def validate_recommendations(
     matches: list[dict],
     odds_min: float | None = None,
     odds_max: float | None = None,
-    allow_context_adjustment: bool = False,
 ) -> list[dict]:
     """Authorize picks from verified odds and the Python Elo/market baseline."""
     validated = []
@@ -1069,21 +1046,12 @@ def validate_recommendations(
                 "margin, or large Elo/market disagreement"
             )
             continue
-        if allow_context_adjustment:
-            difference = probability - baseline["assessed_probability"]
-            if abs(difference) > MAX_CONTEXT_ADJUSTMENT + 1e-9:
-                log(
-                    f"  Rejected {verified_player}: researched probability differs "
-                    f"from baseline by {difference:+.1%} (limit ±{MAX_CONTEXT_ADJUSTMENT:.0%})"
-                )
-                continue
-        else:
-            if abs(probability - baseline["assessed_probability"]) > 0.005:
-                log(
-                    f"  Ignored AI estimate for {verified_player}: using Python "
-                    f"Elo/market baseline {baseline['assessed_probability']:.2%}"
-                )
-            probability = baseline["assessed_probability"]
+        if abs(probability - baseline["assessed_probability"]) > 0.005:
+            log(
+                f"  Ignored AI estimate for {verified_player}: using Python "
+                f"Elo/market baseline {baseline['assessed_probability']:.2%}"
+            )
+        probability = baseline["assessed_probability"]
 
         ev = probability * verified_odds - 1
         score = max(0.0, min(10.0, 6.0 + max(0.0, ev) * 30))
@@ -1274,51 +1242,6 @@ def already_logged_today(date_str: str) -> bool:
     return False
 
 
-def save_agent_snapshot(
-    path: Path,
-    date_str: str,
-    odds_min: float,
-    odds_max: float,
-    bankroll: float | None,
-    matches: list[dict],
-    prompt: str,
-):
-    """Persist the verified inputs OpenCode must use for its research pass."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "schema_version": 1,
-        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "date": date_str,
-        "odds_min": odds_min,
-        "odds_max": odds_max,
-        "bankroll": bankroll,
-        "matches": matches,
-        "analysis_prompt": prompt,
-    }
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    log(f"OpenCode snapshot saved: {path}")
-
-
-def load_agent_snapshot(path: Path) -> dict:
-    """Load and minimally validate an OpenCode handoff snapshot."""
-    if not path.exists():
-        raise FileNotFoundError(
-            f"OpenCode snapshot not found: {path}. Run opencode-prepare first."
-        )
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    required = {"date", "odds_min", "odds_max", "matches", "analysis_prompt"}
-    missing = required.difference(payload)
-    if payload.get("schema_version") != 1 or missing:
-        detail = f"; missing: {', '.join(sorted(missing))}" if missing else ""
-        raise ValueError(f"Invalid OpenCode snapshot{detail}")
-    if not isinstance(payload["matches"], list):
-        raise ValueError("Invalid OpenCode snapshot: matches must be a list")
-    return payload
-
-
 def add_validation_summary(
     report: str,
     candidate_count: int,
@@ -1398,7 +1321,6 @@ def finalize_analysis(
     odds_min: float,
     odds_max: float,
     statistical_candidates: list[dict] | None = None,
-    allow_context_adjustment: bool = False,
 ):
     """Run the shared safety, staking, logging, and reporting pipeline."""
     parsed = parse_recommendations(report)
@@ -1415,7 +1337,6 @@ def finalize_analysis(
         matches,
         odds_min,
         odds_max,
-        allow_context_adjustment,
     )
     log(f"Validated {len(recommendations)} recommendations")
     authorized = select_portfolio(recommendations)
@@ -1431,33 +1352,6 @@ def finalize_analysis(
 def main():
     args = parse_args()
 
-    if args.mode == "opencode-finalize":
-        snapshot = load_agent_snapshot(args.snapshot)
-        date_str = snapshot["date"]
-        log(f"=== Tennis Bot (OpenCode finalize) — {date_str} ===")
-        if not args.analysis_file.exists():
-            raise FileNotFoundError(
-                f"OpenCode report not found: {args.analysis_file}"
-            )
-        report = args.analysis_file.read_text(encoding="utf-8").strip()
-        if not report:
-            raise ValueError("OpenCode report is empty")
-        finalize_analysis(
-            date_str,
-            report,
-            snapshot["matches"],
-            snapshot.get("bankroll"),
-            snapshot["odds_min"],
-            snapshot["odds_max"],
-            build_statistical_candidates(
-                snapshot["matches"],
-                snapshot["odds_min"],
-                snapshot["odds_max"],
-            ),
-            True,
-        )
-        return
-
     date_str = resolve_date(args.date)
     odds_min = args.odds_min
     odds_max = args.odds_max
@@ -1466,11 +1360,7 @@ def main():
     log(f"Odds range: {odds_min}-{odds_max}")
 
     # Skip if already logged today (prevents double-logging when running locally)
-    if (
-        args.mode == "github"
-        and not args.force
-        and already_logged_today(date_str)
-    ):
+    if not args.force and already_logged_today(date_str):
         log(f"Bets already logged for {date_str}. Skipping to avoid duplicates.")
         log("(Use --force to override.)")
         return
@@ -1517,19 +1407,6 @@ def main():
         f"{len(qualified)} qualifying matches..."
     )
     prompt = build_prompt(date_str, analysis_matches, bankroll, odds_min, odds_max)
-
-    if args.mode == "opencode-prepare":
-        save_agent_snapshot(
-            args.snapshot,
-            date_str,
-            odds_min,
-            odds_max,
-            bankroll,
-            qualified,
-            prompt,
-        )
-        log("=== Preparation complete; OpenCode research can begin ===")
-        return
 
     groq_api_keys = [
         value for value in (

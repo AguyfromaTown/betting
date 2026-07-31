@@ -12,32 +12,6 @@ SPEC.loader.exec_module(bot)
 
 
 class TennisBotTests(unittest.TestCase):
-    def test_opencode_snapshot_round_trip(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "agent-run.json"
-            matches = [{
-                "player1": "Player One",
-                "player2": "Player Two",
-                "home_odds": 1.55,
-                "away_odds": 2.4,
-            }]
-            bot.save_agent_snapshot(
-                path,
-                "2026-07-30",
-                1.5,
-                1.6,
-                57.0,
-                matches,
-                "verified prompt",
-            )
-
-            snapshot = bot.load_agent_snapshot(path)
-
-        self.assertEqual(snapshot["schema_version"], 1)
-        self.assertEqual(snapshot["date"], "2026-07-30")
-        self.assertEqual(snapshot["matches"], matches)
-        self.assertEqual(snapshot["analysis_prompt"], "verified prompt")
-
     def test_validation_summary_overrides_rejected_narrative_picks(self):
         report = "## TOP PICKS\nA speculative candidate."
         result = bot.add_validation_summary(report, 1, [])
@@ -257,36 +231,6 @@ class TennisBotTests(unittest.TestCase):
         result = bot.validate_recommendations([candidate], [match], 1.5, 3.0)
 
         self.assertEqual(result, [])
-
-    def test_opencode_context_adjustment_is_bounded(self):
-        match = {
-            "player1": "Stronger", "player2": "Weaker",
-            "home_odds": 1.6, "away_odds": 2.5,
-            "player1_profile": {"elo": 1800},
-            "player2_profile": {"elo": 1600},
-        }
-        baseline = bot.calculate_tennis_baseline(match, "Stronger")
-        accepted = {
-            "player": "Stronger", "score": 9,
-            "assessed_probability": baseline["assessed_probability"] + 0.04,
-        }
-        rejected = {
-            "player": "Stronger", "score": 9,
-            "assessed_probability": baseline["assessed_probability"] + 0.06,
-        }
-
-        self.assertEqual(
-            len(bot.validate_recommendations(
-                [accepted], [match], 1.5, 3.0, allow_context_adjustment=True
-            )),
-            1,
-        )
-        self.assertEqual(
-            bot.validate_recommendations(
-                [rejected], [match], 1.5, 3.0, allow_context_adjustment=True
-            ),
-            [],
-        )
 
     def test_portfolio_caps_exposure_and_one_player_per_match(self):
         shared_match = {"player1": "A", "player2": "B"}
