@@ -320,6 +320,40 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(baseline["elo_type"], "clay_elo")
         self.assertGreater(baseline["elo_probability"], 0.7)
 
+    def test_evidence_quality_rewards_surface_profiles_and_bookmakers(self):
+        match = {
+            "surface": "clay",
+            "player1_profile": {"elo": 1700},
+            "player2_profile": {"elo": 1650},
+            "bookmaker_count": 4,
+        }
+        baseline = {
+            "elo_type": "clay_elo",
+            "market_overround": 1.05,
+            "elo_market_gap": 0.08,
+        }
+
+        score, grade = bot.evidence_quality(match, baseline)
+
+        self.assertEqual(score, 10)
+        self.assertEqual(grade, "A")
+
+    def test_backtest_summary_segments_settled_predictions(self):
+        rows = [
+            {"DATE": "2026-07-01", "OPENING_ODDS": "1.60", "MODEL_PROBABILITY": "0.65", "EV": "0.04", "RESULT": "W", "CLV": "0.02", "TOUR": "ATP", "SURFACE": "clay", "QUALITY_GRADE": "A"},
+            {"DATE": "2026-07-02", "OPENING_ODDS": "1.70", "MODEL_PROBABILITY": "0.62", "EV": "0.03", "RESULT": "L", "CLV": "-0.01", "TOUR": "ATP", "SURFACE": "clay", "QUALITY_GRADE": "B"},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "backtest-summary.md"
+            with patch.object(bot, "BACKTEST_FILE", output):
+                bot.generate_backtest_summary(rows)
+            report = output.read_text(encoding="utf-8")
+
+        self.assertIn("## Odds bands", report)
+        self.assertIn("1.50–1.75 | 2 | 50.0%", report)
+        self.assertIn("## Surface", report)
+        self.assertIn("## Monthly performance", report)
+
     @patch.object(bot, "fetch_odds_json")
     def test_odds_api_uses_batches_of_ten(self, fetch_odds_json):
         events = [
@@ -446,6 +480,7 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("bankroll.txt", dashboard)
         self.assertIn('["w","win","won"]', dashboard)
         self.assertIn('id="audit-body"', dashboard)
+        self.assertIn('id="backtest-body"', dashboard)
         self.assertNotIn("localstorage", lowered)
         self.assertNotIn("copy-csv", lowered)
         self.assertNotIn("showresultpicker", lowered)
