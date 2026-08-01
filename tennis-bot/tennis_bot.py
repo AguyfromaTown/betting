@@ -92,7 +92,7 @@ OFFICIAL_STATUS_DOMAINS = {
 BLOCKING_PHYSICAL_STATUSES = {"questionable", "injured", "withdrawn", "unavailable", "suspended"}
 MAX_CACHE_ENTRY_BYTES = 2_000_000
 MAX_CACHE_ENTRIES = 20
-MODEL_VERSION = "tennis-2026.08-tour-market-limits-v1"
+MODEL_VERSION = "tennis-2026.08-counterfactual-metrics-v1"
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -4132,17 +4132,72 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
                        {normalize_player_name(str(event.get("home", ""))), normalize_player_name(str(event.get("away", "")))} ==
                        {normalize_player_name(row.get("PLAYER1", "")), normalize_player_name(row.get("PLAYER2", ""))})), None)
         if not event: continue
-        if tennis_void_reason(event): row["RESULT"], row["FLAT_RETURN"] = "V", "0.000"; policy_settled += 1; continue
+        if tennis_void_reason(event):
+            row.update({"RESULT": "V", "FLAT_RETURN": "0.000", "CLOSING_ODDS": "", "CLV": "", "BRIER_SCORE": ""})
+            policy_settled += 1
+            continue
         try: home_score, away_score = float(event["scores"]["home"]), float(event["scores"]["away"])
         except (KeyError, TypeError, ValueError): continue
-        pick = normalize_player_name(row.get("PICK", "")); home_pick = pick == normalize_player_name(str(event.get("home", "")))
-        won = (home_pick and home_score > away_score) or (not home_pick and away_score > home_score)
-        odds = float(row.get("ODDS") or 0); row["RESULT"] = "W" if won else "L"; row["FLAT_RETURN"] = f"{odds - 1 if won else -1:.3f}"; policy_settled += 1
+        pick = normalize_player_name(row.get("PICK", ""))
+        home_pick = pick == normalize_player_name(str(event.get("home", "")))
+        away_pick = pick == normalize_player_name(str(event.get("away", "")))
+        if not (home_pick or away_pick) or home_score == away_score:
+            continue
+        won = (home_pick and home_score > away_score) or (away_pick and away_score > home_score)
+        odds = float(row.get("ODDS") or 0)
+        try:
+            probability = float(row["PROBABILITY"]) if row.get("PROBABILITY") not in (None, "") else None
+        except (TypeError, ValueError):
+            probability = None
+        closing_pair = closing_by_id.get(str(event.get("id")), (None, None))
+        closing = closing_pair[0] if home_pick else closing_pair[1]
+        row.update({
+            "RESULT": "W" if won else "L",
+            "FLAT_RETURN": f"{odds - 1 if won else -1:.3f}",
+            "CLOSING_ODDS": f"{closing:.3f}" if closing else "",
+            "CLV": f"{odds / closing - 1:.6f}" if closing and odds else "",
+            "BRIER_SCORE": (f"{(probability - (1.0 if won else 0.0)) ** 2:.6f}"
+                            if probability is not None and 0 <= probability <= 1 else ""),
+        })
+        policy_settled += 1
     if policy_settled:
         atomic_write_csv(POLICY_FILE, POLICY_HEADERS, policy_rows)
         log(f"Settled {policy_settled} counterfactual policy decision(s)")
     save_settlement_alerts(rows, paper_rows)
     return settled + paper_settled
+
+
+def counterfactual_rule_metrics(rows: list[dict]) -> dict:
+    """Summarize settled hypothetical decisions without treating missing prices as zero CLV."""
+    settled = [row for row in rows if row.get("RESULT") in {"W", "L"}]
+    returns, clv_values, brier_values = [], [], []
+    for row in settled:
+        try:
+            returns.append(float(row.get("FLAT_RETURN") or 0))
+        except (TypeError, ValueError):
+            pass
+        try:
+            if row.get("CLV") not in (None, ""):
+                clv_values.append(float(row["CLV"]))
+        except (TypeError, ValueError):
+            pass
+        try:
+            if row.get("BRIER_SCORE") not in (None, ""):
+                brier_values.append(float(row["BRIER_SCORE"]))
+            elif row.get("PROBABILITY") not in (None, ""):
+                probability = float(row["PROBABILITY"])
+                if 0 <= probability <= 1:
+                    brier_values.append((probability - (1.0 if row["RESULT"] == "W" else 0.0)) ** 2)
+        except (TypeError, ValueError):
+            pass
+    return {
+        "count": len(settled),
+        "roi": sum(returns) / len(returns) if returns else 0.0,
+        "clv": sum(clv_values) / len(clv_values) if clv_values else None,
+        "clv_sample": len(clv_values),
+        "brier": sum(brier_values) / len(brier_values) if brier_values else None,
+        "brier_sample": len(brier_values),
+    }
 
 
 def generate_performance_summary():
@@ -4192,12 +4247,19 @@ def generate_performance_summary():
         label = f"{low:.0%}–{high:.0%}" if high <= 1 else "70%+"
         lines.append(f"| {label} | {len(bucket)} | {actual:.1%} |" if actual is not None else f"| {label} | 0 | N/A |")
     atomic_write_text(PERFORMANCE_FILE, "\n".join(lines) + "\n")
-    health = ["# Weekly Tennis Policy Health", "", f"Model version: `{MODEL_VERSION}`", "", "| Rule | Decisions | Flat-unit ROI |", "|---|---:|---:|"]
-    for rule in sorted({row.get("RULE", "unknown") for row in policy_resolved}):
-        group = [row for row in policy_resolved if row.get("RULE", "unknown") == rule]
-        roi = sum(float(row.get("FLAT_RETURN") or 0) for row in group) / len(group)
-        health.append(f"| {rule} | {len(group)} | {roi:.2%} |")
-    if not policy_resolved: health.append("| No settled policy decisions | 0 | N/A |")
+    rejected_policy = [row for row in policy_resolved if row.get("DECISION") == "cancelled"]
+    health = ["# Weekly Tennis Policy Health", "", f"Model version: `{MODEL_VERSION}`", "",
+              "Counterfactual metrics show what happened to candidates rejected by each rule; they never affect bankroll.", "",
+              "| Rejection rule | Decisions | Flat-unit ROI | Avg CLV | Brier |",
+              "|---|---:|---:|---:|---:|"]
+    for rule in sorted({row.get("RULE", "unknown") for row in rejected_policy}):
+        group = [row for row in rejected_policy if row.get("RULE", "unknown") == rule]
+        metrics = counterfactual_rule_metrics(group)
+        average_clv = f"{metrics['clv']:.2%}" if metrics["clv"] is not None else "N/A"
+        brier_score_text = f"{metrics['brier']:.4f}" if metrics["brier"] is not None else "N/A"
+        health.append(f"| {rule} | {metrics['count']} | {metrics['roi']:.2%} | "
+                      f"{average_clv} | {brier_score_text} |")
+    if not rejected_policy: health.append("| No settled rejected decisions | 0 | N/A | N/A | N/A |")
     atomic_write_text(REPO_ROOT / "weekly-health.md", "\n".join(health) + "\n")
     generate_backtest_summary(resolved)
     log(f"Performance summary saved: {PERFORMANCE_FILE.name}")
@@ -4573,7 +4635,7 @@ def append_price_snapshot(now: datetime, row: dict, match: dict | None, baseline
 
 
 POLICY_HEADERS = ["DATE", "MODEL_VERSION", "EVENT_ID", "MATCH", "PLAYER1", "PLAYER2", "PICK", "DECISION", "RULE",
-                  "ODDS", "PROBABILITY", "EV", "TIMESTAMP", "RESULT", "FLAT_RETURN"]
+                  "ODDS", "PROBABILITY", "EV", "TIMESTAMP", "RESULT", "FLAT_RETURN", "CLOSING_ODDS", "CLV", "BRIER_SCORE"]
 
 
 def record_policy_decision(now: datetime, row: dict, match: dict | None, baseline: dict | None, decision: str, rule: str):
@@ -4586,7 +4648,8 @@ def record_policy_decision(now: datetime, row: dict, match: dict | None, baselin
                  "MATCH": row.get("MATCH", ""), "PLAYER1": row.get("PLAYER1", ""), "PLAYER2": row.get("PLAYER2", ""),
                  "PICK": row.get("PICK", ""), "DECISION": decision, "RULE": rule,
                  "ODDS": f"{baseline['player_odds']:.3f}" if baseline else "", "PROBABILITY": f"{baseline['assessed_probability']:.6f}" if baseline else "",
-                 "EV": f"{baseline['ev']:.6f}" if baseline else "", "TIMESTAMP": now.isoformat(), "RESULT": "", "FLAT_RETURN": ""})
+                 "EV": f"{baseline['ev']:.6f}" if baseline else "", "TIMESTAMP": now.isoformat(), "RESULT": "", "FLAT_RETURN": "",
+                 "CLOSING_ODDS": "", "CLV": "", "BRIER_SCORE": ""})
     atomic_write_csv(POLICY_FILE, POLICY_HEADERS, rows)
 
 

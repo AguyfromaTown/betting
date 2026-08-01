@@ -124,7 +124,7 @@ Status conventions:
 - [x] Record authorized and cancelled candidates in `counterfactual-log.csv`.
 - [x] Settle policy decisions hypothetically without affecting bankroll.
 - [x] Measure flat-unit ROI by decision rule.
-- [ ] Add counterfactual CLV and Brier score by rejection rule.
+- [x] Add counterfactual CLV and Brier score by rejection rule.
 - [x] Preserve rule and model versions.
 - [x] Require mature samples before learned model promotion.
 - [ ] Build multiple challenger threshold policies simultaneously.

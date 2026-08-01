@@ -291,6 +291,47 @@ class TennisBotTests(unittest.TestCase):
             with policy.open(encoding="utf-8") as handle: rows = list(__import__("csv").DictReader(handle))
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["MODEL_VERSION"], bot.MODEL_VERSION)
+        self.assertIn("CLOSING_ODDS", rows[0])
+        self.assertIn("BRIER_SCORE", rows[0])
+
+    def test_counterfactual_settlement_records_clv_and_brier(self):
+        event = {"id": 7, "date": "2026-08-01T12:00:00Z", "home": "A", "away": "B",
+                 "status": "settled", "scores": {"home": 2, "away": 0}}
+        odds_event = {"id": 7, "bookmakers": {"Bet365": [{"name": "ML", "odds": [{"home": "1.50", "away": "2.70"}]}]}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            policy = root / "counterfactual-log.csv"
+            bot.atomic_write_csv(policy, bot.POLICY_HEADERS, [{
+                "DATE": "2026-08-01", "MODEL_VERSION": bot.MODEL_VERSION, "EVENT_ID": "7",
+                "MATCH": "A vs B", "PLAYER1": "A", "PLAYER2": "B", "PICK": "A",
+                "DECISION": "cancelled", "RULE": "bookmaker_conflict", "ODDS": "1.60",
+                "PROBABILITY": "0.70", "EV": "0.12", "TIMESTAMP": "2026-08-01T11:00:00Z",
+            }])
+            with (
+                patch.object(bot, "LOG_FILE", root / "bets.csv"),
+                patch.object(bot, "PAPER_LOG_FILE", root / "paper.csv"),
+                patch.object(bot, "POLICY_FILE", policy),
+                patch.object(bot, "BANKROLL_FILE", root / "bankroll.txt"),
+                patch.object(bot, "SETTLEMENT_ALERT_FILE", root / "settlement-alerts.md"),
+                patch.object(bot, "fetch_odds_json", side_effect=[([event], 0), ([odds_event], 0)]),
+            ):
+                bot.settle_pending_bets(["key"])
+            _, rows = bot.read_csv_rows(policy)
+        self.assertEqual(rows[0]["RESULT"], "W")
+        self.assertEqual(rows[0]["CLOSING_ODDS"], "1.500")
+        self.assertEqual(rows[0]["CLV"], "0.066667")
+        self.assertEqual(rows[0]["BRIER_SCORE"], "0.090000")
+
+    def test_counterfactual_metrics_group_brier_and_available_clv(self):
+        metrics = bot.counterfactual_rule_metrics([
+            {"RESULT": "W", "FLAT_RETURN": ".6", "CLV": ".04", "PROBABILITY": ".7"},
+            {"RESULT": "L", "FLAT_RETURN": "-1", "CLV": "", "PROBABILITY": ".6"},
+        ])
+        self.assertEqual(metrics["count"], 2)
+        self.assertAlmostEqual(metrics["roi"], -.2)
+        self.assertAlmostEqual(metrics["clv"], .04)
+        self.assertEqual(metrics["clv_sample"], 1)
+        self.assertAlmostEqual(metrics["brier"], (.09 + .36) / 2)
 
     def test_emergency_kill_switch_detects_calibration_drift(self):
         stable = [{"DATE": "2026-01-01", "RESULT": "W", "MODEL_PROBABILITY": ".9", "CLV": ".02"}] * 30
@@ -605,6 +646,26 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("- Expected calibration error (10 bins): 10.00%", report)
         self.assertIn("- Shadow challenger log loss: 0.2231", report)
         self.assertIn("- Shadow challenger ECE (10 bins): 20.00%", report)
+
+    def test_weekly_health_reports_counterfactual_clv_and_brier_by_rejection_rule(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            policy = root / "counterfactual.csv"
+            bot.atomic_write_csv(policy, bot.POLICY_HEADERS, [{
+                "DATE": "2026-08-01", "DECISION": "cancelled", "RULE": "bookmaker_conflict",
+                "RESULT": "W", "FLAT_RETURN": ".600", "CLV": ".040000",
+                "PROBABILITY": ".700000", "BRIER_SCORE": ".090000",
+            }])
+            with (patch.object(bot, "AUDIT_FILE", root / "predictions.csv"),
+                  patch.object(bot, "LOG_FILE", root / "bets.csv"),
+                  patch.object(bot, "POLICY_FILE", policy),
+                  patch.object(bot, "PERFORMANCE_FILE", root / "performance.md"),
+                  patch.object(bot, "BACKTEST_FILE", root / "backtest.md"),
+                  patch.object(bot, "REPO_ROOT", root)):
+                bot.generate_performance_summary()
+            report = (root / "weekly-health.md").read_text(encoding="utf-8")
+        self.assertIn("| Rejection rule | Decisions | Flat-unit ROI | Avg CLV | Brier |", report)
+        self.assertIn("| bookmaker_conflict | 1 | 60.00% | 4.00% | 0.0900 |", report)
 
     def test_tour_calibration_never_borrows_other_tours(self):
         rows = ([{"MODEL_PROBABILITY": ".60", "RESULT": "W", "TOUR": "ATP"} for _ in range(99)] +
