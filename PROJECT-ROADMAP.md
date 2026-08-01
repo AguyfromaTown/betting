@@ -57,7 +57,7 @@ Status conventions:
 - [x] Calculate rest days.
 - [x] Count matches over the previous 7 and 14 days.
 - [x] Count sets played over the previous 7 days.
-- [ ] Count matches over the previous 30 days.
+- [x] Count matches over the previous 30 days.
 - [ ] Use verified match duration when available.
 - [x] Detect consecutive-day and dense schedules through workload rules.
 - [ ] Explicitly identify unusually long previous matches.

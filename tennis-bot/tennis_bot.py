@@ -2041,12 +2041,14 @@ def calculate_workload(history: list[dict], player: str, as_of: str, current_tou
     last = played[0] if played else None
     matches_7 = sum((cutoff - date).days <= 7 for date, _, _ in played)
     matches_14 = sum((cutoff - date).days <= 14 for date, _, _ in played)
+    matches_30 = sum((cutoff - date).days <= 30 for date, _, _ in played)
     sets_7 = sum(sets for date, sets, _ in played if (cutoff - date).days <= 7)
     rest_days = (cutoff - last[0]).days if last else None
     tournament_change = bool(last and last[2] and current_tournament and normalize_player_name(last[2]) != normalize_player_name(current_tournament) and rest_days <= 5)
     penalty = .025 if matches_7 >= 4 or sets_7 >= 10 else .015 if matches_7 >= 3 or sets_7 >= 8 else .01 if rest_days is not None and rest_days <= 1 else 0.0
     if tournament_change and rest_days is not None and rest_days <= 3: penalty += .005
-    return {"matches_7": matches_7, "matches_14": matches_14, "sets_7": sets_7, "rest_days": rest_days,
+    return {"matches_7": matches_7, "matches_14": matches_14, "matches_30": matches_30,
+            "sets_7": sets_7, "rest_days": rest_days,
             "tournament_change": tournament_change, "penalty": min(.03, penalty)}
 
 
@@ -2558,10 +2560,16 @@ def build_prompt(
                 physical_text = baseline.get("physical_status") or "unknown"
                 if baseline.get("physical_status_detail"):
                     physical_text += f" ({baseline['physical_status_detail']})"
+                workload = baseline.get("workload") or {}
+                workload_text = (
+                    f"rest={workload.get('rest_days', 'N/A')}d, matches 7/14/30d="
+                    f"{workload.get('matches_7', 0)}/{workload.get('matches_14', 0)}/{workload.get('matches_30', 0)}, "
+                    f"sets 7d={workload.get('sets_7', 0)}"
+                )
                 baseline_lines.append(
                     f"  Python baseline for {player}: market fair "
                     f"{baseline['market_probability']:.1%}, Elo "
-                    f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, serve/return {serve_text}, H2H {h2h_text}, clutch {clutch_text}, BO5 {bo5_text}, physical status {physical_text}, "
+                    f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, serve/return {serve_text}, H2H {h2h_text}, clutch {clutch_text}, BO5 {bo5_text}, physical status {physical_text}, workload {workload_text}, "
                     f"blended assessed "
                     f"{baseline['assessed_probability']:.1%}, EV "
                     f"{baseline['ev']:.2%}, score {baseline['score']:.2f}"
@@ -3111,7 +3119,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "COMPONENT_WEIGHTS", "RAW_PROBABILITY", "CHALLENGER_PROBABILITY",
         "CHALLENGER_SAMPLE", "CHALLENGER_PROMOTED", "CALIBRATION_SAMPLE",
         "CONTEXT_PENALTY", "CONTEXT_REASON", "WORKLOAD_PENALTY", "REST_DAYS",
-        "MATCHES_7", "MATCHES_14", "SETS_7", "TOURNAMENT_CHANGE", "BEST_OF", "INDOOR",
+        "MATCHES_7", "MATCHES_14", "MATCHES_30", "SETS_7", "TOURNAMENT_CHANGE", "BEST_OF", "INDOOR",
         "MARKET_DISPERSION", "DATA_QUALITY_SCORE", "DATA_QUALITY_GRADE",
         "UNCERTAINTY_MARGIN", "RISK_ADJUSTED_EV", "KILL_SWITCH", "KILL_SWITCH_REASON",
         "SEGMENT_SAMPLE", "SEGMENT_ROI", "SEGMENT_CLV", "SEGMENT_SUSPENDED",
@@ -3222,7 +3230,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 baseline.get("challenger_sample", 0), baseline.get("challenger_promoted", False),
                 baseline.get("calibration_sample", 0), f"{baseline.get('context_penalty', 0):.6f}", baseline.get("context_reason", "main_draw"),
                 f"{baseline.get('workload_penalty', 0):.6f}", workload.get("rest_days", ""), workload.get("matches_7", 0),
-                workload.get("matches_14", 0), workload.get("sets_7", 0), workload.get("tournament_change", False),
+                workload.get("matches_14", 0), workload.get("matches_30", 0), workload.get("sets_7", 0), workload.get("tournament_change", False),
                 baseline.get("best_of", 3), baseline.get("indoor", ""),
                 f"{data_quality['dispersion']:.6f}" if data_quality.get("dispersion") is not None else "",
                 data_quality["score"], data_quality["grade"], f"{baseline['uncertainty_margin']:.6f}",

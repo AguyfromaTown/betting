@@ -302,9 +302,13 @@ class TennisBotTests(unittest.TestCase):
             {"tourney_date": "20260731", "winner_name": "Player One", "loser_name": "Other", "score": "6-4 6-4", "tourney_name": "Event A"},
             {"tourney_date": "20260729", "winner_name": "Other", "loser_name": "Player One", "score": "6-4 4-6 6-3", "tourney_name": "Event A"},
             {"tourney_date": "20260727", "winner_name": "Player One", "loser_name": "Other", "score": "7-6 6-7 6-4", "tourney_name": "Event B"},
+            {"tourney_date": "20260710", "winner_name": "Player One", "loser_name": "Other", "score": "6-4 6-4", "tourney_name": "Event Old"},
+            {"tourney_date": "20260630", "winner_name": "Player One", "loser_name": "Other", "score": "6-4 6-4", "tourney_name": "Event Too Old"},
         ]
         workload = bot.calculate_workload(history, "Player One", "2026-08-01", "Event C")
         self.assertEqual((workload["rest_days"], workload["matches_7"], workload["sets_7"]), (1, 3, 8))
+        self.assertEqual(workload["matches_14"], 3)
+        self.assertEqual(workload["matches_30"], 4)
         self.assertGreater(workload["penalty"], 0)
 
     def test_tennis_context_and_match_format(self):
@@ -848,6 +852,8 @@ class TennisBotTests(unittest.TestCase):
                                      "comeback_0_2_rate": 0.30, "comeback_0_2_sample": 2, "source": "historical_match_records"},
             "player1_physical_status": {"status": "cleared", "detail": "Available", "expires_date": "2026-08-02", "source": "official"},
             "player2_physical_status": {"status": "injured", "detail": "Official withdrawal", "expires_date": "2026-08-10", "source": "https://www.wtatennis.com/news"},
+            "player1_workload": {"rest_days": 2, "matches_7": 2, "matches_14": 3, "matches_30": 5, "sets_7": 5, "penalty": 0},
+            "player2_workload": {"rest_days": 1, "matches_7": 3, "matches_14": 4, "matches_30": 7, "sets_7": 8, "penalty": 0.015},
         }
         with tempfile.TemporaryDirectory() as directory:
             audit_file = Path(directory) / "prediction-audit.csv"
@@ -881,6 +887,7 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["PHYSICAL_STATUS"], "injured")
         self.assertEqual(second["PHYSICAL_BLOCK"], "True")
         self.assertEqual(second["REASON"], "verified_physical_status:injured")
+        self.assertEqual(second["MATCHES_30"], "7")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
