@@ -33,6 +33,7 @@ POLICY_FILE = REPO_ROOT / "counterfactual-log.csv"
 TRANSACTION_FILE = REPO_ROOT / "bankroll-transactions.csv"
 PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
 SETTLEMENT_ALERT_FILE = REPO_ROOT / "settlement-alerts.md"
+MANUAL_KILL_SWITCH_FILE = REPO_ROOT / "kill-switch.json"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
@@ -275,6 +276,28 @@ def update_run_state(phase: str, status: str = "running", detail: str = ""):
     atomic_write_text(RUN_STATE_FILE, json.dumps(state, indent=2) + "\n")
     if status in {"complete", "interrupted"}:
         RUN_STATE_ACTIVE = False
+
+
+def manual_kill_switch() -> dict:
+    """Read the repository-level live-betting stop; malformed state fails closed."""
+    if not MANUAL_KILL_SWITCH_FILE.exists():
+        return {"active": False, "reason": "not_configured"}
+    try:
+        state = json.loads(MANUAL_KILL_SWITCH_FILE.read_text(encoding="utf-8"))
+        if not isinstance(state, dict) or not isinstance(state.get("active"), bool):
+            raise ValueError("active must be a boolean")
+        return {"active": state["active"], "reason": str(state.get("reason") or "manual_repository_switch")}
+    except (OSError, ValueError, TypeError) as exc:
+        log(f"WARNING: Invalid kill-switch.json; live betting disabled ({exc})")
+        return {"active": True, "reason": "invalid_kill_switch_configuration"}
+
+
+def apply_manual_kill_switch(recommendations: list[dict], paper_trading: bool = False) -> tuple[list[dict], str]:
+    state = manual_kill_switch()
+    if state["active"] and not paper_trading:
+        log(f"MANUAL KILL SWITCH ACTIVE: {state['reason']}; no live candidates can be authorized")
+        return [], state["reason"]
+    return recommendations, ""
 
 
 def fetch(url: str) -> str | None:
@@ -2108,7 +2131,7 @@ def tennis_data_quality(match: dict, baseline: dict, player: str) -> dict:
             "reasons": reasons, "dispersion": dispersion}
 
 
-def append_prediction_audit(date_str, matches, recommendations, authorized):
+def append_prediction_audit(date_str, matches, recommendations, authorized, authorization_block_reason: str = ""):
     """Persist all Elo-modelled singles candidates and final decisions."""
     headers = [
         "DATE", "MODEL_VERSION", "EVENT_ID", "MATCH", "PICK", "OPENING_ODDS",
@@ -2155,6 +2178,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
             decision = item["grade"] if normalize_player_name(player) in selected else "Watchlist" if item else "Rejected"
             if normalize_player_name(player) in selected:
                 reason = "authorized"
+            elif item and authorization_block_reason:
+                reason = authorization_block_reason
             elif item and item.get("grade") in {"Top Pick", "Value Pick"}:
                 reason = "portfolio_limit"
             elif item:
@@ -2672,11 +2697,19 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
         log("No pending tennis bets to revalidate")
         return 0, 0
     now = now or datetime.now(timezone.utc)
+    manual_stop = manual_kill_switch()
     with PENDING_FILE.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     ready_by_date, cancelled = {}, 0
     for row in rows:
         if row.get("STATUS") != "pending_revalidation":
+            continue
+        if manual_stop["active"] and (row.get("MODE") or "live") != "paper":
+            reason = f"manual_kill_switch:{manual_stop['reason']}"
+            row.update({"STATUS": "cancelled", "REASON": reason, "REVALIDATED_AT": now.isoformat()})
+            record_policy_decision(now, row, None, None, "cancelled", "manual_kill_switch")
+            update_audit_lifecycle(row["DATE"], row["PICK"], "Cancelled", reason)
+            cancelled += 1
             continue
         state = match_time_state(row.get("START_TIME", ""), now)
         if state == "waiting":
@@ -3000,7 +3033,8 @@ def finalize_analysis(
     )
     log(f"Validated {len(recommendations)} recommendations")
     authorized = select_portfolio(recommendations)
-    append_prediction_audit(date_str, matches, recommendations, authorized)
+    authorized, block_reason = apply_manual_kill_switch(authorized, PAPER_TRADING_MODE)
+    append_prediction_audit(date_str, matches, recommendations, authorized, block_reason)
     save_rollback_state()
     stage_pending_bets(date_str, authorized, odds_min, odds_max)
 

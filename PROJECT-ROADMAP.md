@@ -117,7 +117,7 @@ Status conventions:
 - [ ] Add separately configurable ATP/WTA/Challenger/ITF exposure caps.
 - [x] Enforce global daily bet-count and exposure limits.
 - [x] Add an automatic mature-sample emergency kill switch.
-- [ ] Add a manual repository-level kill switch.
+- [x] Add a manual repository-level kill switch.
 
 ## Counterfactual evaluation
 

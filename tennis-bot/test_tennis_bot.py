@@ -443,6 +443,28 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("OVERDUE UNRESOLVED OUTCOMES", report)
         self.assertIn("Alert threshold: 24 hours", report)
 
+    def test_manual_kill_switch_blocks_live_but_not_paper_candidates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            switch = Path(directory) / "kill-switch.json"
+            switch.write_text('{"active": true, "reason": "operator_pause"}', encoding="utf-8")
+            recommendations = [{"player": "A"}]
+            with patch.object(bot, "MANUAL_KILL_SWITCH_FILE", switch):
+                live, reason = bot.apply_manual_kill_switch(recommendations, paper_trading=False)
+                paper, paper_reason = bot.apply_manual_kill_switch(recommendations, paper_trading=True)
+            self.assertEqual(live, [])
+            self.assertEqual(reason, "operator_pause")
+            self.assertEqual(paper, recommendations)
+            self.assertEqual(paper_reason, "")
+
+    def test_invalid_manual_kill_switch_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            switch = Path(directory) / "kill-switch.json"
+            switch.write_text('{"active": "yes"}', encoding="utf-8")
+            with patch.object(bot, "MANUAL_KILL_SWITCH_FILE", switch):
+                state = bot.manual_kill_switch()
+            self.assertTrue(state["active"])
+            self.assertEqual(state["reason"], "invalid_kill_switch_configuration")
+
     def test_bankroll_ledger_reconciles_stake_return_and_duplicate_rerun(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
