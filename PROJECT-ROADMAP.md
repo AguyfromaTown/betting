@@ -114,7 +114,7 @@ Status conventions:
 - [x] Limit authorization to two bets from one tournament.
 - [x] Prevent opposite selections in the same match.
 - [x] Prevent duplicate bets across reruns.
-- [ ] Add separately configurable ATP/WTA/Challenger/ITF exposure caps.
+- [x] Add separately configurable ATP/WTA/Challenger/ITF exposure caps.
 - [x] Enforce global daily bet-count and exposure limits.
 - [x] Add an automatic mature-sample emergency kill switch.
 - [x] Add a manual repository-level kill switch.

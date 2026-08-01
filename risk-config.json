@@ -1,0 +1,9 @@
+{
+  "tour_exposure_caps": {
+    "ATP": 0.08,
+    "WTA": 0.08,
+    "Challenger": 0.05,
+    "ITF": 0.03,
+    "Unknown": 0.03
+  }
+}

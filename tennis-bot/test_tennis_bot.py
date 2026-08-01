@@ -250,8 +250,24 @@ class TennisBotTests(unittest.TestCase):
 
     def test_tournament_correlation_cap(self):
         recs = [{"player": f"P{i}", "grade": "Value Pick", "ev": .10 - i * .01, "score": 8,
-                 "match": {"player1": f"P{i}", "player2": f"O{i}", "tournament": "ATP Test"}} for i in range(3)]
+                 "match": {"player1": f"P{i}", "player2": f"O{i}", "tournament": "ATP Test", "level": "ATP"}} for i in range(3)]
         self.assertEqual(len(bot.select_portfolio(recs, max_exposure=.2, max_bets=4)), 2)
+
+    def test_configurable_tour_exposure_caps_are_independent(self):
+        recommendations = [
+            {"player": "A", "grade": "Top Pick", "ev": .15, "score": 9,
+             "match": {"player1": "A", "player2": "B", "tournament": "ITF One", "level": "ITF"}},
+            {"player": "C", "grade": "Top Pick", "ev": .14, "score": 9,
+             "match": {"player1": "C", "player2": "D", "tournament": "ITF Two", "level": "ITF"}},
+            {"player": "E", "grade": "Top Pick", "ev": .13, "score": 9,
+             "match": {"player1": "E", "player2": "F", "tournament": "ATP One", "level": "ATP"}},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "risk-config.json"
+            config.write_text('{"tour_exposure_caps":{"ITF":0.03,"ATP":0.08}}', encoding="utf-8")
+            with patch.object(bot, "RISK_CONFIG_FILE", config), patch.object(bot, "load_resolved_predictions", return_value=[]):
+                selected = bot.select_portfolio(recommendations, max_exposure=.08, max_bets=4)
+        self.assertEqual([item["player"] for item in selected], ["A", "E"])
 
     def test_calibration_requires_mature_probability_bucket(self):
         rows = [{"MODEL_PROBABILITY": ".60", "RESULT": "W"} for _ in range(99)]
@@ -777,14 +793,14 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(result, [])
 
     def test_portfolio_caps_exposure_and_one_player_per_match(self):
-        shared_match = {"player1": "A", "player2": "B"}
+        shared_match = {"player1": "A", "player2": "B", "level": "ATP"}
         recommendations = [
             {"player": "A", "grade": "Top Pick", "ev": .20, "score": 9, "match": shared_match},
             {"player": "B", "grade": "Top Pick", "ev": .19, "score": 9, "match": shared_match},
             {"player": "C", "grade": "Top Pick", "ev": .18, "score": 9,
-             "match": {"player1": "C", "player2": "D"}},
+             "match": {"player1": "C", "player2": "D", "level": "ATP"}},
             {"player": "E", "grade": "Top Pick", "ev": .17, "score": 9,
-             "match": {"player1": "E", "player2": "F"}},
+             "match": {"player1": "E", "player2": "F", "level": "ATP"}},
         ]
 
         selected = bot.select_portfolio(recommendations)

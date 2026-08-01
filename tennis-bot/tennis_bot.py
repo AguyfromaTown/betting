@@ -34,6 +34,7 @@ TRANSACTION_FILE = REPO_ROOT / "bankroll-transactions.csv"
 PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
 SETTLEMENT_ALERT_FILE = REPO_ROOT / "settlement-alerts.md"
 MANUAL_KILL_SWITCH_FILE = REPO_ROOT / "kill-switch.json"
+RISK_CONFIG_FILE = REPO_ROOT / "risk-config.json"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
@@ -64,6 +65,7 @@ MIN_STAKE_RATE = 0.005
 MAX_PRICE_MOVEMENT = 0.10
 MAX_BOOKMAKER_DISPERSION = 0.12
 MAX_BETS_PER_TOURNAMENT = 2
+DEFAULT_TOUR_EXPOSURE_CAPS = {"ATP": .08, "WTA": .08, "Challenger": .05, "ITF": .03, "Unknown": .03}
 MODEL_VERSION = "tennis-2026.08-quality-v2"
 REQUEST_HEADERS = {
     "User-Agent": (
@@ -298,6 +300,36 @@ def apply_manual_kill_switch(recommendations: list[dict], paper_trading: bool = 
         log(f"MANUAL KILL SWITCH ACTIVE: {state['reason']}; no live candidates can be authorized")
         return [], state["reason"]
     return recommendations, ""
+
+
+def load_tour_exposure_caps() -> dict[str, float]:
+    caps = dict(DEFAULT_TOUR_EXPOSURE_CAPS)
+    if not RISK_CONFIG_FILE.exists():
+        return caps
+    try:
+        payload = json.loads(RISK_CONFIG_FILE.read_text(encoding="utf-8"))
+        configured = payload.get("tour_exposure_caps", {})
+        if not isinstance(configured, dict):
+            raise ValueError("tour_exposure_caps must be an object")
+        for tour in caps:
+            if tour in configured:
+                value = float(configured[tour])
+                if not 0 <= value <= MAX_DAILY_EXPOSURE:
+                    raise ValueError(f"{tour} cap must be between 0 and {MAX_DAILY_EXPOSURE}")
+                caps[tour] = value
+        return caps
+    except (OSError, TypeError, ValueError) as exc:
+        log(f"WARNING: Invalid risk-config.json; using conservative defaults ({exc})")
+        return dict(DEFAULT_TOUR_EXPOSURE_CAPS)
+
+
+def tour_exposure_bucket(match: dict) -> str:
+    text = f"{match.get('level', '')} {match.get('tournament', '')}".casefold()
+    if "itf" in text: return "ITF"
+    if "challenger" in text: return "Challenger"
+    if "wta" in text: return "WTA"
+    if "atp" in text: return "ATP"
+    return "Unknown"
 
 
 def fetch(url: str) -> str | None:
@@ -2053,6 +2085,7 @@ def select_portfolio(
         recommendations = [item for item in recommendations if item.get("grade") == "Top Pick"]
         log("Policy rollback active: using one-bet Top-Pick-only safe baseline")
     stake_rates = {"Top Pick": 0.03, "Value Pick": 0.02}
+    tour_caps = load_tour_exposure_caps()
     ranked = sorted(
         recommendations,
         key=lambda rec: (rec.get("ev", 0), rec.get("score", 0)),
@@ -2061,6 +2094,7 @@ def select_portfolio(
     selected = []
     seen_matches = set()
     tournament_counts = {}
+    tour_exposure = {}
     exposure = 0.0
     for recommendation in ranked:
         stake_rate = stake_rates.get(recommendation.get("grade"))
@@ -2075,8 +2109,12 @@ def select_portfolio(
             log(f"  Portfolio rejected {recommendation['player']}: match already selected")
             continue
         tournament = normalize_player_name(match.get("tournament", "Unknown"))
+        tour = tour_exposure_bucket(match)
         if tournament_counts.get(tournament, 0) >= MAX_BETS_PER_TOURNAMENT:
             log(f"  Portfolio rejected {recommendation['player']}: tournament correlation cap reached")
+            continue
+        if tour_exposure.get(tour, 0.0) + stake_rate > tour_caps[tour] + 1e-9:
+            log(f"  Portfolio rejected {recommendation['player']}: {tour} exposure cap reached")
             continue
         if len(selected) >= max_bets or exposure + stake_rate > max_exposure + 1e-9:
             log(f"  Portfolio rejected {recommendation['player']}: daily risk cap reached")
@@ -2084,6 +2122,7 @@ def select_portfolio(
         selected.append(recommendation)
         seen_matches.add(match_key)
         tournament_counts[tournament] = tournament_counts.get(tournament, 0) + 1
+        tour_exposure[tour] = tour_exposure.get(tour, 0.0) + stake_rate
         exposure += stake_rate
     log(f"Portfolio selected {len(selected)} bet(s), planned exposure {exposure:.1%}")
     return selected
