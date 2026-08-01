@@ -2582,6 +2582,33 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("does not change `bets-log.csv`, `bankroll-transactions.csv`, or `bankroll.txt`", guide)
         self.assertIn("consumes Odds API quota", guide)
 
+    def test_recurring_maintenance_schedule_is_read_only_and_documented(self):
+        root = MODULE_PATH.parent.parent
+        workflow = root.joinpath(".github", "workflows", "maintenance-review.yml").read_text(encoding="utf-8")
+        schedule = root.joinpath("MAINTENANCE-SCHEDULE.md").read_text(encoding="utf-8")
+        self.assertIn("cron: '0 7 * * 1'", workflow)
+        self.assertIn("cron: '0 8 1 * *'", workflow)
+        self.assertIn("contents: read", workflow)
+        self.assertNotIn("contents: write", workflow)
+        self.assertNotIn("git push", workflow)
+        self.assertNotIn("ODDS_API_KEY", workflow)
+        self.assertIn("--backtest-only", workflow)
+        self.assertIn("--fail-under=70", workflow)
+        self.assertIn("retention-days: 90", workflow)
+        self.assertIn("retention-days: 365", workflow)
+        for required in (
+            "Every workflow run",
+            "Weekly review — Monday 07:00 UTC",
+            "Monthly provider review — first day 08:00 UTC",
+            "Monthly model and policy review",
+            "Quarterly recovery exercise",
+            "Annual security and dependency review",
+            "Evidence retention and missed reviews",
+            "Review sign-off template",
+            "second reviewer",
+        ):
+            self.assertIn(required, schedule)
+
 
 if __name__ == "__main__":
     unittest.main()

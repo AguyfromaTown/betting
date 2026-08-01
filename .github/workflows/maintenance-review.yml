@@ -1,0 +1,111 @@
+name: Tennis Maintenance Review
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'
+    - cron: '0 8 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tennis-maintenance-review
+  cancel-in-progress: false
+
+jobs:
+  weekly-health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies
+        run: pip install -r tennis-bot/requirements-test.txt
+
+      - name: Run tests and coverage gate
+        run: |
+          python -m coverage run -m unittest discover -s tennis-bot -p "test_*.py"
+          python -m coverage report --fail-under=70 > maintenance-coverage.txt
+          cat maintenance-coverage.txt
+
+      - name: Rebuild analytics from committed ledgers
+        run: python tennis-bot/tennis_bot.py --backtest-only
+
+      - name: Publish weekly maintenance summary
+        if: always()
+        run: |
+          echo "# Tennis weekly maintenance review" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Workflow is read-only: generated review files remain artifacts and are not committed." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Review the test and coverage result, performance summary, policy health, settlement alerts, source health, and unresolved identities." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Follow MAINTENANCE-SCHEDULE.md for escalation and sign-off." >> "$GITHUB_STEP_SUMMARY"
+          if [ -f maintenance-coverage.txt ]; then
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            cat maintenance-coverage.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          for report in performance-summary.md weekly-policy-health.md monthly-policy-report.md settlement-alerts.md source-health.md unresolved-player-identities.md operations-alerts.md provider-schema-alerts.md api-quota.md; do
+            if [ -f "$report" ]; then
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              cat "$report" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      - name: Upload weekly review evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tennis-maintenance-weekly-${{ github.run_id }}
+          path: |
+            maintenance-coverage.txt
+            performance-summary.md
+            weekly-policy-health.md
+            monthly-policy-report.md
+            settlement-alerts.md
+            source-health.md
+            source-health.json
+            unresolved-player-identities.md
+            operations-alerts.md
+            provider-schema-alerts.md
+            api-quota.md
+            model-policy-state.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  monthly-provider-review:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 8 1 * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Publish provider review checklist
+        run: |
+          echo "# Tennis monthly provider review" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "This job does not call providers or use secrets. Review the committed evidence and complete the checklist in MAINTENANCE-SCHEDULE.md." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Required review areas: contract/schema drift, source freshness and latency, quota/key health, fixture and result coverage, bookmaker independence, unresolved identities, fallback use, retirement/void semantics, and replacement risk." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          cat PROVIDERS.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload provider review inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tennis-provider-review-${{ github.run_id }}
+          path: |
+            PROVIDERS.md
+            IDENTITY-AND-PROVIDER-OPERATIONS.md
+            source-health.md
+            source-health.json
+            provider-schema-alerts.md
+            api-quota.md
+            unresolved-player-identities.md
+          if-no-files-found: warn
+          retention-days: 365

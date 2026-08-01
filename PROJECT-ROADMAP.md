@@ -255,7 +255,7 @@ Status conventions:
 - [ ] Disable persistently unreliable tours, segments or sources.
 - [ ] Freeze a documented production policy release.
 - [x] Require champion-versus-challenger evidence before learned-weight promotion.
-- [ ] Establish a recurring maintenance and provider-review schedule.
+- [x] Establish a recurring maintenance and provider-review schedule.
 
 ## Definition of production-complete
 
