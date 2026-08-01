@@ -235,7 +235,7 @@ Status conventions:
 ## Documentation and operations
 
 - [x] Add an authoritative architecture document.
-- [ ] Document every provider, fallback and expected schema.
+- [x] Document every provider, fallback and expected schema.
 - [x] Document the current betting and risk policy in `how i bet.txt`.
 - [ ] Document every model formula and weight in a technical reference.
 - [ ] Document threshold sample requirements in one configuration reference.

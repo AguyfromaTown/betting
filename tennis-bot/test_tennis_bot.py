@@ -2422,6 +2422,26 @@ class TennisBotTests(unittest.TestCase):
         ):
             self.assertIn(required, architecture)
 
+    def test_provider_reference_documents_contracts_and_fallback_order(self):
+        providers = MODULE_PATH.parent.parent.joinpath("PROVIDERS.md").read_text(encoding="utf-8")
+        for required in (
+            "Odds-API.io",
+            "GET /v3/events",
+            "GET /v3/odds/multi",
+            "ESPN scoreboard",
+            "Tennis Abstract",
+            "Jina Reader",
+            "Historical match CSV sources",
+            "Oddspedia discovery fallback",
+            "ATP Tour and WTA HTML helpers",
+            "Operator-maintained verified evidence",
+            "Groq",
+            "Settlement contract",
+            "Schema-change response procedure",
+        ):
+            self.assertIn(required, providers)
+        self.assertIn("not called by the production `fetch_verified_matches` path", providers)
+
 
 if __name__ == "__main__":
     unittest.main()
