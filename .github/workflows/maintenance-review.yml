@@ -57,6 +57,11 @@ jobs:
         continue-on-error: true
         run: python tennis-bot/tennis_bot.py --verify-policy-freeze > policy-freeze-audit.json
 
+      - name: Audit persistent reliability and quarantine evidence
+        id: reliability-audit
+        continue-on-error: true
+        run: python tennis-bot/tennis_bot.py --reliability-audit > reliability-quarantine-audit.json
+
       - name: Publish weekly maintenance summary
         if: always()
         run: |
@@ -97,6 +102,14 @@ jobs:
             cat policy-freeze-audit.json >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
+          if [ "${{ steps.reliability-audit.outcome }}" != "success" ]; then
+            echo "::warning::Mature unreliable segment/source evidence requires an explicit quarantine review"
+          fi
+          if [ -f reliability-quarantine-audit.json ]; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat reliability-quarantine-audit.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [ -f maintenance-coverage.txt ]; then
             echo '```text' >> "$GITHUB_STEP_SUMMARY"
             cat maintenance-coverage.txt >> "$GITHUB_STEP_SUMMARY"
@@ -120,12 +133,14 @@ jobs:
             counterfactual-coverage-audit.json
             paper-readiness-audit.json
             policy-freeze-audit.json
+            reliability-quarantine-audit.json
             performance-summary.md
             weekly-policy-health.md
             monthly-policy-report.md
             settlement-alerts.md
             source-health.md
             source-health.json
+            source-health-history.csv
             unresolved-player-identities.md
             operations-alerts.md
             provider-schema-alerts.md
@@ -160,6 +175,7 @@ jobs:
             IDENTITY-AND-PROVIDER-OPERATIONS.md
             source-health.md
             source-health.json
+            source-health-history.csv
             provider-schema-alerts.md
             api-quota.md
             unresolved-player-identities.md

@@ -49,6 +49,8 @@ The workflow also runs `--counterfactual-audit`. Every active cancellation rule 
 
 `--verify-policy-freeze` verifies the active model version, static financial-risk constants, and SHA-256 hashes of every governing policy artifact against `PRODUCTION-POLICY.json`. Any mismatch blocks production sign-off until it is released through the documented versioning process.
 
+`--reliability-audit` reviews persistent provider history and every supported tour/surface segment. Follow `RELIABILITY-QUARANTINE.md`; never activate or remove a quarantine from a single run, ROI alone, or in order to increase pick count.
+
 ## Monthly provider review — first day 08:00 UTC
 
 The monthly job packages the committed provider contract and health inputs without making external calls. The reviewer then evaluates each production source:

@@ -47,6 +47,7 @@ MONTHLY_POLICY_FILE = REPO_ROOT / "monthly-policy-report.md"
 SETTLEMENT_ALERT_FILE = REPO_ROOT / "settlement-alerts.md"
 API_QUOTA_FILE = REPO_ROOT / "api-quota.md"
 SOURCE_HEALTH_FILE = REPO_ROOT / "source-health.md"
+SOURCE_HEALTH_HISTORY_FILE = REPO_ROOT / "source-health-history.csv"
 SCHEMA_ALERT_FILE = REPO_ROOT / "provider-schema-alerts.md"
 MANUAL_KILL_SWITCH_FILE = REPO_ROOT / "kill-switch.json"
 RISK_CONFIG_FILE = REPO_ROOT / "risk-config.json"
@@ -63,6 +64,7 @@ TOURNAMENT_LOCATIONS_FILE = REPO_ROOT / "verified-tournament-locations.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
 ROLLBACK_STATE_FILE = REPO_ROOT / "model-policy-state.json"
 POLICY_FREEZE_FILE = REPO_ROOT / "PRODUCTION-POLICY.json"
+RELIABILITY_POLICY_FILE = REPO_ROOT / "reliability-policy.json"
 BACKUPS_DIR = REPO_ROOT / "state-backups"
 TRANSACTION_HEADERS = ["ID", "TIMESTAMP", "TYPE", "REFERENCE", "AMOUNT", "BALANCE", "PREVIOUS_HASH", "HASH"]
 BET_HEADERS = [
@@ -88,6 +90,10 @@ MAX_MARKET_OVERROUND = 1.12
 MAX_ELO_MARKET_GAP = 0.15
 MIN_CALIBRATION_SAMPLE = 100
 MIN_SEGMENT_SAMPLE = 30
+MIN_SOURCE_RELIABILITY_RUNS = 10
+MIN_SOURCE_RELIABILITY_REQUESTS = 30
+MAX_SOURCE_FAILURE_RATE = 0.50
+MAX_SOURCE_STALE_RATE = 0.25
 MIN_WEIGHT_TRAINING_SAMPLE = 200
 MIN_WORKLOAD_TRAINING_SAMPLE = 200
 MIN_WORKLOAD_TRIGGER_SAMPLE = 30
@@ -392,11 +398,49 @@ def record_provider_failure(provider: str, detail: str, now: float | None = None
 
 
 def allow_provider_request(provider: str) -> bool:
+    policy = load_reliability_policy()
+    if not policy["valid"]:
+        log("  Reliability policy is invalid; blocking external provider requests")
+        return False
+    if normalize_provider_name(provider) in policy["disabled_sources"]:
+        log(f"  {provider} is quarantined by the versioned reliability policy; skipping request")
+        return False
     if not provider_circuit_open(provider):
         return True
     state = CIRCUIT_BREAKERS.get(provider, {})
     log(f"  {provider} circuit is open; skipping request ({state.get('last_error', 'provider failure')})")
     return False
+
+
+def normalize_provider_name(value: str | None) -> str:
+    return str(value or "").strip().casefold()
+
+
+def load_reliability_policy(path: Path | None = None) -> dict:
+    """Load an explicit quarantine policy; malformed policy fails closed for providers."""
+    source = path or RELIABILITY_POLICY_FILE
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+        if payload.get("schema_version") != 1:
+            raise ValueError("unsupported schema")
+        disabled_sources = payload.get("disabled_sources")
+        disabled_segments = payload.get("disabled_segments")
+        if not isinstance(disabled_sources, list) or not all(isinstance(item, str) and item.strip() for item in disabled_sources):
+            raise ValueError("disabled_sources must contain provider names")
+        if not isinstance(disabled_segments, list):
+            raise ValueError("disabled_segments must be a list")
+        segments = []
+        for item in disabled_segments:
+            if not isinstance(item, dict) or canonical_tour(item.get("tour")) == "Unknown":
+                raise ValueError("disabled segment requires a supported tour")
+            surface = canonical_surface(item.get("surface"))
+            if surface == "Unknown":
+                raise ValueError("disabled segment requires a supported surface")
+            segments.append({"tour": canonical_tour(item["tour"]), "surface": surface})
+        return {"valid": True, "disabled_sources": {normalize_provider_name(item) for item in disabled_sources},
+                "disabled_segments": segments, "error": ""}
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        return {"valid": False, "disabled_sources": set(), "disabled_segments": [], "error": str(exc)}
 
 
 def external_cache_key(namespace: str, url: str) -> str:
@@ -662,6 +706,21 @@ def save_source_health():
                "failures": sum(not item["ok"] for item in SOURCE_HEALTH),
                "stale_responses": sum(bool(item.get("stale")) for item in SOURCE_HEALTH),
                "api_quota": API_QUOTA, "schema_alerts": SCHEMA_ALERTS}
+    history_headers = ["RUN_AT", "SOURCE", "EVENTS", "SUCCESSES", "FAILURES", "FAILURE_RATE",
+                       "STALE_RESPONSES", "STALE_RATE", "AVERAGE_LATENCY_MS", "P95_LATENCY_MS", "FIXTURE_STATUS"]
+    _, history_rows = read_csv_rows(SOURCE_HEALTH_HISTORY_FILE)
+    for item in summaries:
+        history_rows.append({
+            "RUN_AT": generated_at, "SOURCE": item["source"], "EVENTS": item["events"],
+            "SUCCESSES": item["successes"], "FAILURES": item["failures"],
+            "FAILURE_RATE": f"{item['failures'] / item['events']:.6f}" if item["events"] else "",
+            "STALE_RESPONSES": item["stale_responses"],
+            "STALE_RATE": f"{item['stale_responses'] / item['events']:.6f}" if item["events"] else "",
+            "AVERAGE_LATENCY_MS": item["average_latency_ms"], "P95_LATENCY_MS": item["p95_latency_ms"],
+            "FIXTURE_STATUS": LAST_FIXTURE_STATUS,
+        })
+    if summaries:
+        atomic_write_csv(SOURCE_HEALTH_HISTORY_FILE, history_headers, history_rows)
     atomic_write_text(REPO_ROOT / "source-health.json", json.dumps(payload, indent=2) + "\n")
     lines = ["# Tennis Source Health", "", f"Updated: {generated_at}", "", f"Fixture status: `{LAST_FIXTURE_STATUS}`", ""]
     if payload["stale_responses"]:
@@ -1065,6 +1124,7 @@ def parse_args():
     parser.add_argument("--counterfactual-audit", action="store_true", help="Read-only active rejection-rule evidence coverage audit")
     parser.add_argument("--paper-readiness", action="store_true", help="Read-only frozen-policy paper evidence audit")
     parser.add_argument("--verify-policy-freeze", action="store_true", help="Read-only verification of the frozen production policy manifest")
+    parser.add_argument("--reliability-audit", action="store_true", help="Read-only segment and provider quarantine evidence audit")
     return parser.parse_args()
 
 
@@ -3353,8 +3413,14 @@ def canonical_tour(value: str | None) -> str:
     return "Unknown"
 
 
+def canonical_surface(value: str | None) -> str:
+    text = str(value or "").strip().casefold()
+    return {"hard": "Hard", "clay": "Clay", "grass": "Grass"}.get(text, "Unknown")
+
+
 def current_policy_snapshot() -> dict:
     """Return the financially consequential static policy represented by this build."""
+    reliability = load_reliability_policy()
     return {
         "max_daily_exposure": MAX_DAILY_EXPOSURE,
         "max_daily_bets": MAX_DAILY_BETS,
@@ -3367,6 +3433,8 @@ def current_policy_snapshot() -> dict:
         "max_bookmaker_dispersion": MAX_BOOKMAKER_DISPERSION,
         "max_bets_per_tournament": MAX_BETS_PER_TOURNAMENT,
         "tour_exposure_caps": DEFAULT_TOUR_EXPOSURE_CAPS,
+        "disabled_sources": sorted(reliability["disabled_sources"]) if reliability["valid"] else ["INVALID_POLICY"],
+        "disabled_segments": reliability["disabled_segments"] if reliability["valid"] else [{"policy": "INVALID"}],
     }
 
 
@@ -3426,13 +3494,20 @@ def calibrate_probability_by_tour(probability: float, rows: list[dict], tour: st
 
 def segment_health(match: dict, rows: list[dict]) -> dict:
     """Suspend a mature surface/tour segment only when ROI and CLV both confirm harm."""
-    surface, tour = match.get("surface") or "Unknown", match.get("level") or "Unknown"
-    segment = [row for row in rows if (row.get("SURFACE") or "Unknown") == surface and (row.get("TOUR") or "Unknown") == tour]
+    surface, tour = canonical_surface(match.get("surface")), canonical_tour(match.get("level"))
+    segment = [row for row in rows if canonical_surface(row.get("SURFACE")) == surface and canonical_tour(row.get("TOUR")) == tour]
     roi = sum((float(row.get("OPENING_ODDS") or 0) - 1) if row["RESULT"] == "W" else -1 for row in segment) / len(segment) if segment else None
     clv = [float(row["CLV"]) for row in segment if row.get("CLV")]
     average_clv = sum(clv) / len(clv) if clv else None
-    suspended = len(segment) >= MIN_SEGMENT_SAMPLE and roi is not None and roi < -.05 and average_clv is not None and average_clv < -.02
-    return {"sample": len(segment), "roi": roi, "clv": average_clv, "suspended": suspended}
+    evidence_suspended = len(segment) >= MIN_SEGMENT_SAMPLE and roi is not None and roi < -.05 and average_clv is not None and average_clv < -.02
+    policy = load_reliability_policy()
+    explicitly_disabled = policy["valid"] and any(
+        item["tour"] == tour and item["surface"] == surface for item in policy["disabled_segments"]
+    )
+    return {"sample": len(segment), "roi": roi, "clv": average_clv,
+            "suspended": evidence_suspended or explicitly_disabled,
+            "evidence_suspended": evidence_suspended, "explicitly_disabled": explicitly_disabled,
+            "policy_valid": policy["valid"]}
 
 
 def tennis_kill_switch(rows: list[dict], window: int = 30) -> dict:
@@ -5620,6 +5695,96 @@ def paper_readiness_audit(rows: list[dict] | None = None) -> dict:
     }
 
 
+def reliability_quarantine_audit(prediction_rows: list[dict] | None = None,
+                                 source_rows: list[dict] | None = None,
+                                 policy_path: Path | None = None) -> dict:
+    """Recommend persistent quarantine only from mature outcome or cross-run provider evidence."""
+    predictions = prediction_rows if prediction_rows is not None else load_resolved_predictions()
+    if source_rows is None:
+        _, source_rows = read_csv_rows(SOURCE_HEALTH_HISTORY_FILE)
+    policy = load_reliability_policy(policy_path)
+    if not policy["valid"]:
+        return {"status": "invalid", "policy_error": policy["error"], "segments": [], "sources": [],
+                "unapplied_recommendations": [], "recovery_reviews": []}
+
+    settled = [row for row in predictions if row.get("RESULT") in {"W", "L"}]
+    segment_results = []
+    recommendations = []
+    recovery_reviews = []
+    for tour in ("ATP", "WTA", "Challenger", "ITF"):
+        for surface in ("Hard", "Clay", "Grass"):
+            group = [row for row in settled if canonical_tour(row.get("TOUR")) == tour
+                     and canonical_surface(row.get("SURFACE")) == surface]
+            roi_values = []
+            clv_values = []
+            for row in group:
+                try:
+                    odds = float(row.get("OPENING_ODDS") or 0)
+                    if odds > 1:
+                        roi_values.append(odds - 1 if row["RESULT"] == "W" else -1.0)
+                    if row.get("CLV") not in {None, ""}:
+                        clv_values.append(float(row["CLV"]))
+                except (TypeError, ValueError):
+                    continue
+            roi = sum(roi_values) / len(roi_values) if roi_values else None
+            clv = sum(clv_values) / len(clv_values) if clv_values else None
+            mature = len(roi_values) >= MIN_SEGMENT_SAMPLE and len(clv_values) >= MIN_SEGMENT_SAMPLE
+            unreliable = bool(mature and roi is not None and roi < -.05 and clv is not None and clv < -.02)
+            disabled = any(item["tour"] == tour and item["surface"] == surface for item in policy["disabled_segments"])
+            key = f"segment:{tour}:{surface}"
+            if unreliable and not disabled:
+                recommendations.append(key)
+            if disabled and mature and not unreliable:
+                recovery_reviews.append(key)
+            segment_results.append({"tour": tour, "surface": surface, "sample": len(roi_values),
+                                    "clv_sample": len(clv_values), "roi": roi, "clv": clv,
+                                    "mature": mature, "unreliable": unreliable, "disabled": disabled})
+
+    by_source = {}
+    for row in source_rows:
+        source = normalize_provider_name(row.get("SOURCE"))
+        if source:
+            by_source.setdefault(source, []).append(row)
+    source_results = []
+    for source, rows in sorted(by_source.items()):
+        events = failures = stale = 0
+        runs = set()
+        for row in rows:
+            try:
+                events += int(float(row.get("EVENTS") or 0))
+                failures += int(float(row.get("FAILURES") or 0))
+                stale += int(float(row.get("STALE_RESPONSES") or 0))
+                runs.add(row.get("RUN_AT") or "")
+            except (TypeError, ValueError):
+                continue
+        failure_rate = failures / events if events else None
+        stale_rate = stale / events if events else None
+        mature = len(runs) >= MIN_SOURCE_RELIABILITY_RUNS and events >= MIN_SOURCE_RELIABILITY_REQUESTS
+        unreliable = bool(mature and ((failure_rate or 0) >= MAX_SOURCE_FAILURE_RATE
+                                      or (stale_rate or 0) >= MAX_SOURCE_STALE_RATE))
+        disabled = source in policy["disabled_sources"]
+        key = f"source:{source}"
+        if unreliable and not disabled:
+            recommendations.append(key)
+        if disabled and mature and not unreliable:
+            recovery_reviews.append(key)
+        source_results.append({"source": source, "runs": len(runs), "events": events,
+                               "failure_rate": failure_rate, "stale_rate": stale_rate,
+                               "mature": mature, "unreliable": unreliable, "disabled": disabled})
+    mature_evidence = any(item["mature"] for item in segment_results + source_results)
+    return {
+        "status": "action_required" if recommendations else "reviewed" if mature_evidence else "collecting_data",
+        "policy_valid": True,
+        "segment_minimum": MIN_SEGMENT_SAMPLE,
+        "source_minimum_runs": MIN_SOURCE_RELIABILITY_RUNS,
+        "source_minimum_requests": MIN_SOURCE_RELIABILITY_REQUESTS,
+        "segments": segment_results,
+        "sources": source_results,
+        "unapplied_recommendations": recommendations,
+        "recovery_reviews": recovery_reviews,
+    }
+
+
 def record_policy_decision(now: datetime, row: dict, match: dict | None, baseline: dict | None, decision: str, rule: str,
                            policy_id: str = "active-v1", policy_role: str = "active", thresholds: str = ""):
     rows = []
@@ -6143,6 +6308,12 @@ def main():
         result = policy_freeze_audit()
         print(json.dumps(result, indent=2))
         if result["status"] != "verified":
+            raise SystemExit(2)
+        return
+    if args.reliability_audit:
+        result = reliability_quarantine_audit()
+        print(json.dumps(result, indent=2))
+        if result["status"] in {"invalid", "action_required"}:
             raise SystemExit(2)
         return
 

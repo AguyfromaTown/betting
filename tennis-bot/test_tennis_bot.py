@@ -932,6 +932,43 @@ class TennisBotTests(unittest.TestCase):
         rows[0]["CLV"] = "1.00"
         self.assertFalse(bot.segment_health({"surface": "hard", "level": "ATP"}, rows)["suspended"])
 
+    def test_reliability_audit_requires_mature_roi_and_clv_before_segment_quarantine(self):
+        immature = [{"TOUR": "ATP", "SURFACE": "hard", "RESULT": "L",
+                     "OPENING_ODDS": "1.60", "CLV": "-0.03"} for _ in range(29)]
+        self.assertNotIn("segment:ATP:Hard", bot.reliability_quarantine_audit(immature, [])["unapplied_recommendations"])
+        mature = immature + [dict(immature[0])]
+        result = bot.reliability_quarantine_audit(mature, [])
+        self.assertEqual(result["status"], "action_required")
+        self.assertIn("segment:ATP:Hard", result["unapplied_recommendations"])
+
+    def test_reliability_audit_uses_persistent_cross_run_source_evidence(self):
+        rows = [{"RUN_AT": f"2026-07-{day:02d}T00:00:00Z", "SOURCE": "broken.example",
+                 "EVENTS": "3", "FAILURES": "2", "STALE_RESPONSES": "0"} for day in range(1, 11)]
+        result = bot.reliability_quarantine_audit([], rows)
+        self.assertIn("source:broken.example", result["unapplied_recommendations"])
+        source = next(item for item in result["sources"] if item["source"] == "broken.example")
+        self.assertEqual(source["runs"], 10)
+        self.assertEqual(source["events"], 30)
+
+    def test_explicit_reliability_quarantine_blocks_provider_and_segment(self):
+        policy = {"schema_version": 1, "disabled_sources": ["blocked.example"],
+                  "disabled_segments": [{"tour": "ATP", "surface": "hard"}]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "reliability.json"
+            path.write_text(json.dumps(policy), encoding="utf-8")
+            with patch.object(bot, "RELIABILITY_POLICY_FILE", path):
+                self.assertFalse(bot.allow_provider_request("blocked.example"))
+                health = bot.segment_health({"surface": "Hard", "level": "ATP"}, [])
+        self.assertTrue(health["suspended"])
+        self.assertTrue(health["explicitly_disabled"])
+
+    def test_invalid_reliability_policy_fails_closed_for_providers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "reliability.json"
+            path.write_text('{"schema_version": 1, "disabled_sources": "bad"}', encoding="utf-8")
+            with patch.object(bot, "RELIABILITY_POLICY_FILE", path):
+                self.assertFalse(bot.allow_provider_request("api.example"))
+
     def test_retirement_and_walkover_are_void(self):
         self.assertEqual(bot.tennis_void_reason({"status": "cancelled"}), "cancelled")
         self.assertEqual(bot.tennis_void_reason({"result": "Player retired"}), "walkover_or_retirement")

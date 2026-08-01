@@ -19,6 +19,8 @@ The format follows Keep a Changelog categories: Added, Changed, Deprecated, Remo
 - Added a read-only paper-readiness audit for frozen-policy duration, meaningful positive CLV, and calibration across every supported tour and surface.
 - Added a machine-verifiable frozen production-policy manifest covering the active model version, implementation reference, static risk controls and governing document hashes.
 - Added a read-only policy-freeze audit to weekly maintenance so silent policy or documentation drift fails visibly.
+- Added persistent cross-run provider reliability evidence and a weekly quarantine audit for sources and tour/surface segments.
+- Added a version-pinned, fail-closed reliability policy with explicit enforcement and recovery-review controls.
 
 ### Fixed
 

@@ -258,6 +258,9 @@ Status conventions:
 - [ ] Review counterfactual performance for every active rejection rule.
   - [x] Add a strict coverage audit for every active rule and distinguish tunable thresholds from hard safety gates.
 - [ ] Disable persistently unreliable tours, segments or sources.
+  - [x] Persist provider reliability summaries across runs and require mature failure/stale-response evidence.
+  - [x] Audit every supported tour/surface using settled ROI and CLV confirmation before recommending quarantine.
+  - [x] Enforce an explicit fail-closed, version-pinned source/segment quarantine policy with recovery-review reporting.
 - [x] Freeze a documented production policy release.
   - [x] Pin the active model version, implementation commit, static risk parameters and governing artifact hashes in `PRODUCTION-POLICY.json`.
   - [x] Fail scheduled maintenance verification if code constants or frozen documents drift silently.
