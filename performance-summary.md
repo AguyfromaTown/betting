@@ -5,7 +5,11 @@
 - Profit/loss: €-2.76
 - ROI: -100.00%
 - Brier score: N/A
+- Log loss: N/A
+- Expected calibration error (10 bins): N/A
 - Shadow challenger Brier: N/A
+- Shadow challenger log loss: N/A
+- Shadow challenger ECE (10 bins): N/A
 - Average CLV: N/A
 - Settled counterfactual decisions: 0
 
