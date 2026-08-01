@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import re
 import tempfile
@@ -2640,6 +2641,34 @@ class TennisBotTests(unittest.TestCase):
             "tennis-2026.08-quality-v2",
         ):
             self.assertIn(historical, releases)
+
+    def test_frozen_policy_manifest_matches_code_and_governing_artifacts(self):
+        result = bot.policy_freeze_audit()
+        self.assertEqual(result["status"], "verified", result["problems"])
+        self.assertEqual(result["model_version"], bot.MODEL_VERSION)
+        self.assertTrue(result["artifacts"])
+        self.assertTrue(all(item["status"] == "verified" for item in result["artifacts"]))
+
+    def test_frozen_policy_manifest_fails_closed_on_policy_drift(self):
+        manifest = json.loads(bot.POLICY_FREEZE_FILE.read_text(encoding="utf-8"))
+        manifest["policy"]["max_daily_bets"] += 1
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            result = bot.policy_freeze_audit(path)
+        self.assertEqual(result["status"], "invalid")
+        self.assertIn("policy_constants_mismatch", result["problems"])
+
+    def test_frozen_policy_hashes_are_independent_of_line_endings(self):
+        source = bot.REPO_ROOT / "THRESHOLDS.md"
+        manifest = json.loads(bot.POLICY_FREEZE_FILE.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            windows_copy = root / "THRESHOLDS.md"
+            windows_copy.write_bytes(source.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8"))
+            canonical = windows_copy.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        self.assertEqual(hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+                         manifest["artifacts"]["THRESHOLDS.md"])
 
     def test_one_command_paper_launcher_is_isolated_and_gated(self):
         root = MODULE_PATH.parent.parent

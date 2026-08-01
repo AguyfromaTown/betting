@@ -62,6 +62,7 @@ PLAYER_STATUS_FILE = REPO_ROOT / "verified-player-status.csv"
 TOURNAMENT_LOCATIONS_FILE = REPO_ROOT / "verified-tournament-locations.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
 ROLLBACK_STATE_FILE = REPO_ROOT / "model-policy-state.json"
+POLICY_FREEZE_FILE = REPO_ROOT / "PRODUCTION-POLICY.json"
 BACKUPS_DIR = REPO_ROOT / "state-backups"
 TRANSACTION_HEADERS = ["ID", "TIMESTAMP", "TYPE", "REFERENCE", "AMOUNT", "BALANCE", "PREVIOUS_HASH", "HASH"]
 BET_HEADERS = [
@@ -1063,6 +1064,7 @@ def parse_args():
     parser.add_argument("--migrate-legacy-ledger", action="store_true", help="One-time guarded migration of exact historical bankroll transactions")
     parser.add_argument("--counterfactual-audit", action="store_true", help="Read-only active rejection-rule evidence coverage audit")
     parser.add_argument("--paper-readiness", action="store_true", help="Read-only frozen-policy paper evidence audit")
+    parser.add_argument("--verify-policy-freeze", action="store_true", help="Read-only verification of the frozen production policy manifest")
     return parser.parse_args()
 
 
@@ -3349,6 +3351,66 @@ def canonical_tour(value: str | None) -> str:
     if text == "atp" or text.startswith("atp "):
         return "ATP"
     return "Unknown"
+
+
+def current_policy_snapshot() -> dict:
+    """Return the financially consequential static policy represented by this build."""
+    return {
+        "max_daily_exposure": MAX_DAILY_EXPOSURE,
+        "max_daily_bets": MAX_DAILY_BETS,
+        "max_market_overround": MAX_MARKET_OVERROUND,
+        "max_elo_market_gap": MAX_ELO_MARKET_GAP,
+        "kelly_fraction": KELLY_FRACTION,
+        "minimum_stake_rate": MIN_STAKE_RATE,
+        "max_price_movement": MAX_PRICE_MOVEMENT,
+        "max_price_age_minutes": MAX_PRICE_AGE_MINUTES,
+        "max_bookmaker_dispersion": MAX_BOOKMAKER_DISPERSION,
+        "max_bets_per_tournament": MAX_BETS_PER_TOURNAMENT,
+        "tour_exposure_caps": DEFAULT_TOUR_EXPOSURE_CAPS,
+    }
+
+
+def policy_freeze_audit(path: Path | None = None) -> dict:
+    """Verify the frozen policy manifest against code constants and governing artifacts."""
+    manifest_path = path or POLICY_FREEZE_FILE
+    problems = []
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return {"status": "invalid", "manifest": str(manifest_path), "problems": [type(exc).__name__]}
+    if manifest.get("schema_version") != 1:
+        problems.append("unsupported_schema_version")
+    if manifest.get("status") != "frozen_for_paper_validation":
+        problems.append("policy_not_frozen")
+    if manifest.get("model_version") != MODEL_VERSION:
+        problems.append("model_version_mismatch")
+    if manifest.get("policy") != current_policy_snapshot():
+        problems.append("policy_constants_mismatch")
+    artifact_results = []
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict) or not artifacts:
+        problems.append("artifact_manifest_missing")
+        artifacts = {}
+    for relative, expected in artifacts.items():
+        artifact = REPO_ROOT / relative
+        if not artifact.is_file():
+            actual, state = None, "missing"
+        else:
+            canonical = artifact.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+            actual = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            state = "verified" if actual == expected else "hash_mismatch"
+        if state != "verified":
+            problems.append(f"artifact_{state}:{relative}")
+        artifact_results.append({"path": relative, "expected_sha256": expected,
+                                 "actual_sha256": actual, "status": state})
+    return {
+        "status": "verified" if not problems else "invalid",
+        "manifest": str(manifest_path),
+        "model_version": manifest.get("model_version"),
+        "implementation_commit": manifest.get("implementation_commit"),
+        "problems": problems,
+        "artifacts": artifact_results,
+    }
 
 
 def calibrate_probability_by_tour(probability: float, rows: list[dict], tour: str | None) -> dict:
@@ -6075,6 +6137,12 @@ def main():
         result = paper_readiness_audit()
         print(json.dumps(result, indent=2))
         if result["status"] != "review_ready":
+            raise SystemExit(2)
+        return
+    if args.verify_policy_freeze:
+        result = policy_freeze_audit()
+        print(json.dumps(result, indent=2))
+        if result["status"] != "verified":
             raise SystemExit(2)
         return
 

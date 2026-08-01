@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "status": "frozen_for_paper_validation",
+  "model_version": "tennis-2026.08-bookmaker-retirement-rules-v1",
+  "released_at": "2026-08-01",
+  "implementation_commit": "18b954c",
+  "policy": {
+    "max_daily_exposure": 0.08,
+    "max_daily_bets": 4,
+    "max_market_overround": 1.12,
+    "max_elo_market_gap": 0.15,
+    "kelly_fraction": 0.25,
+    "minimum_stake_rate": 0.005,
+    "max_price_movement": 0.1,
+    "max_price_age_minutes": 15,
+    "max_bookmaker_dispersion": 0.12,
+    "max_bets_per_tournament": 2,
+    "tour_exposure_caps": {
+      "ATP": 0.08,
+      "WTA": 0.08,
+      "Challenger": 0.05,
+      "ITF": 0.03,
+      "Unknown": 0.03
+    }
+  },
+  "artifacts": {
+    "how i bet.txt": "c48bf72d40eae81d1def36ef22b61fa7be8efb58a90263db4a3048b44c68c6f8",
+    "MODEL-REFERENCE.md": "5fc540e54264267eb71800a68b594cf1cd7a6315baa1c2f88192caf784cff338",
+    "THRESHOLDS.md": "aa4cf4ecc18f71c678c43de679fd43b0fa0c79f966f28724c7bbcde80cbb4a81",
+    "risk-config.json": "b8bdc1f926ea77daa6f077ca31c11f38c9f442c33dbcac4de1dc1edd3a5c93e9",
+    "MODEL-POLICY-RELEASES.md": "4338a5f23e779e5f399d1eade5a0efcf0c96daba179b9c601f232bf182529b18"
+  }
+}

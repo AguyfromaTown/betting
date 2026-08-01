@@ -52,6 +52,11 @@ jobs:
         continue-on-error: true
         run: python tennis-bot/tennis_bot.py --paper-readiness > paper-readiness-audit.json
 
+      - name: Verify frozen production policy without mutation
+        id: policy-freeze
+        continue-on-error: true
+        run: python tennis-bot/tennis_bot.py --verify-policy-freeze > policy-freeze-audit.json
+
       - name: Publish weekly maintenance summary
         if: always()
         run: |
@@ -84,6 +89,14 @@ jobs:
             cat paper-readiness-audit.json >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
+          if [ "${{ steps.policy-freeze.outcome }}" != "success" ]; then
+            echo "::error::Frozen production policy does not match code or governing artifacts"
+          fi
+          if [ -f policy-freeze-audit.json ]; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat policy-freeze-audit.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [ -f maintenance-coverage.txt ]; then
             echo '```text' >> "$GITHUB_STEP_SUMMARY"
             cat maintenance-coverage.txt >> "$GITHUB_STEP_SUMMARY"
@@ -106,6 +119,7 @@ jobs:
             financial-state-audit.json
             counterfactual-coverage-audit.json
             paper-readiness-audit.json
+            policy-freeze-audit.json
             performance-summary.md
             weekly-policy-health.md
             monthly-policy-report.md

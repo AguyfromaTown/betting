@@ -258,7 +258,9 @@ Status conventions:
 - [ ] Review counterfactual performance for every active rejection rule.
   - [x] Add a strict coverage audit for every active rule and distinguish tunable thresholds from hard safety gates.
 - [ ] Disable persistently unreliable tours, segments or sources.
-- [ ] Freeze a documented production policy release.
+- [x] Freeze a documented production policy release.
+  - [x] Pin the active model version, implementation commit, static risk parameters and governing artifact hashes in `PRODUCTION-POLICY.json`.
+  - [x] Fail scheduled maintenance verification if code constants or frozen documents drift silently.
 - [x] Require champion-versus-challenger evidence before learned-weight promotion.
 - [x] Establish a recurring maintenance and provider-review schedule.
 

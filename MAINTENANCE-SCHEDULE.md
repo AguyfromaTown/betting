@@ -47,6 +47,8 @@ The workflow also runs `--counterfactual-audit`. Every active cancellation rule 
 
 `--paper-readiness` verifies that paper evidence is attributable to one immutable current `MODEL_VERSION` for at least 90 calendar days, includes at least 100 settled closing-line observations with positive mean CLV, and has at least 30 probability outcomes in every supported ATP/WTA/Challenger/ITF and hard/clay/grass segment. Segment readiness requires Brier score at most 0.25 and expected calibration error at most 0.10. These are minimum review gates, not proof of future profitability.
 
+`--verify-policy-freeze` verifies the active model version, static financial-risk constants, and SHA-256 hashes of every governing policy artifact against `PRODUCTION-POLICY.json`. Any mismatch blocks production sign-off until it is released through the documented versioning process.
+
 ## Monthly provider review — first day 08:00 UTC
 
 The monthly job packages the committed provider contract and health inputs without making external calls. The reviewer then evaluates each production source:

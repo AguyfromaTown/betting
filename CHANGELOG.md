@@ -17,6 +17,8 @@ The format follows Keep a Changelog categories: Added, Changed, Deprecated, Remo
 - Added a read-only completeness audit covering all active rejection rules and their settled, CLV, and Brier sample maturity.
 - Versioned paper-bet evidence now retains decision probability, EV, grade, event, tour, surface, authorization time, closing odds, CLV, and Brier score with pre-schema-migration backups.
 - Added a read-only paper-readiness audit for frozen-policy duration, meaningful positive CLV, and calibration across every supported tour and surface.
+- Added a machine-verifiable frozen production-policy manifest covering the active model version, implementation reference, static risk controls and governing document hashes.
+- Added a read-only policy-freeze audit to weekly maintenance so silent policy or documentation drift fails visibly.
 
 ### Fixed
 
