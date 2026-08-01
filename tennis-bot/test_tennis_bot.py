@@ -2396,6 +2396,18 @@ class TennisBotTests(unittest.TestCase):
                 self.assertRegex(ref, r"^[0-9a-f]{40}$", f"{path.name}: {action} is not pinned")
         self.assertTrue(found)
 
+    def test_dependency_audit_is_strict_scheduled_and_non_mutating(self):
+        workflow = MODULE_PATH.parent.parent.joinpath(".github", "workflows", "dependency-audit.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("schedule:", workflow)
+        self.assertIn("pip-audit==2.10.1", workflow)
+        self.assertIn("--requirement tennis-bot/requirements-test.txt", workflow)
+        self.assertIn("--strict", workflow)
+        self.assertIn("--format json", workflow)
+        self.assertIn("if: always()", workflow)
+        self.assertNotIn("--fix", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -230,7 +230,7 @@ Status conventions:
 - [x] Use limited GitHub workflow permissions.
 - [x] Pin GitHub Actions by immutable commit SHA.
 - [x] Escape externally sourced dashboard content.
-- [ ] Add automated dependency vulnerability scanning.
+- [x] Add automated dependency vulnerability scanning.
 
 ## Documentation and operations
 
