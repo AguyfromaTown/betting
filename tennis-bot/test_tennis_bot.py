@@ -127,6 +127,55 @@ class TennisBotTests(unittest.TestCase):
         finally:
             bot.CIRCUIT_BREAKERS.clear()
 
+    def test_automated_rollback_detects_degraded_challenger_and_policy(self):
+        rows = []
+        for index in range(30):
+            won = index % 2 == 0
+            rows.append({
+                "DATE": f"2026-07-{index + 1:02d}",
+                "RESULT": "W" if won else "L",
+                "CHALLENGER_PROMOTED": "True",
+                "MODEL_PROBABILITY": ".10" if won else ".90",
+                "RAW_PROBABILITY": ".90" if won else ".10",
+                "DECISION": "Top Pick",
+                "OPENING_ODDS": "1.60",
+                "CLV": "-.03",
+            })
+
+        state = bot.automated_rollback_state(rows)
+
+        self.assertTrue(state["model_rollback"])
+        self.assertEqual(state["model_mode"], "static_baseline")
+        self.assertTrue(state["policy_rollback"])
+        self.assertEqual(state["policy_mode"], "safe_baseline")
+
+    def test_policy_rollback_limits_portfolio_to_one_top_pick(self):
+        history = [{
+            "DATE": f"2026-07-{index + 1:02d}", "RESULT": "L", "DECISION": "Top Pick",
+            "OPENING_ODDS": "1.60", "CLV": "-.03",
+        } for index in range(30)]
+        recommendations = [
+            {"player": "A", "grade": "Top Pick", "ev": .12, "score": 9,
+             "match": {"player1": "A", "player2": "B", "tournament": "One"}},
+            {"player": "C", "grade": "Top Pick", "ev": .10, "score": 8.5,
+             "match": {"player1": "C", "player2": "D", "tournament": "Two"}},
+            {"player": "E", "grade": "Value Pick", "ev": .09, "score": 8,
+             "match": {"player1": "E", "player2": "F", "tournament": "Three"}},
+        ]
+        with patch.object(bot, "load_resolved_predictions", return_value=history):
+            selected = bot.select_portfolio(recommendations)
+
+        self.assertEqual([item["player"] for item in selected], ["A"])
+
+    def test_rollback_state_is_persisted_atomically(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = Path(directory) / "model-policy-state.json"
+            with patch.object(bot, "ROLLBACK_STATE_FILE", state_file):
+                state = bot.save_rollback_state([])
+            saved = __import__("json").loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(saved["model_mode"], state["model_mode"])
+            self.assertEqual(saved["policy_mode"], "standard")
+
     def test_diagnostic_summary_has_no_mutating_actions(self):
         with patch.object(bot, "fetch_matches_from_odds_api", return_value=[]):
             result = bot.run_diagnostic("2026-08-01", 1.5, 1.6, ["key"])

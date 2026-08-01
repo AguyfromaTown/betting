@@ -33,6 +33,7 @@ PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
+ROLLBACK_STATE_FILE = REPO_ROOT / "model-policy-state.json"
 BACKUPS_DIR = REPO_ROOT / "state-backups"
 REPORTS_DIR = REPO_ROOT / "reports"
 REQUEST_TIMEOUT = 30
@@ -1242,6 +1243,69 @@ def tennis_kill_switch(rows: list[dict], window: int = 30) -> dict:
     return {"active": calibration_drop or clv_drop, "reason": "calibration_or_clv_drift" if calibration_drop or clv_drop else "stable", "sample": len(ordered)}
 
 
+def automated_rollback_state(rows: list[dict], window: int = 30) -> dict:
+    """Revert learned model/policy behavior when mature live evidence deteriorates."""
+    ordered = sorted(rows, key=lambda row: row.get("DATE", ""))
+    promoted = [row for row in ordered if str(row.get("CHALLENGER_PROMOTED", "")).casefold() == "true"
+                and row.get("RAW_PROBABILITY") and row.get("MODEL_PROBABILITY")][-window:]
+    active_brier = brier_score(promoted, "MODEL_PROBABILITY")
+    baseline_errors = []
+    for row in promoted:
+        try:
+            probability = float(row["RAW_PROBABILITY"]) - float(row.get("CONTEXT_PENALTY") or 0) - float(row.get("WORKLOAD_PENALTY") or 0)
+            baseline_errors.append((max(.02, min(.98, probability)) - (row.get("RESULT") == "W")) ** 2)
+        except (TypeError, ValueError):
+            pass
+    baseline_brier = sum(baseline_errors) / len(baseline_errors) if baseline_errors else None
+    model_rollback = bool(
+        len(promoted) >= window and active_brier is not None and baseline_brier is not None
+        and active_brier > baseline_brier * 1.10
+    )
+
+    authorized = [row for row in ordered if row.get("DECISION") in {"Top Pick", "Value Pick"}
+                  and row.get("RESULT") in {"W", "L"}][-window:]
+    roi = None
+    if authorized:
+        returns = []
+        for row in authorized:
+            try:
+                returns.append(float(row.get("OPENING_ODDS") or 0) - 1 if row["RESULT"] == "W" else -1)
+            except ValueError:
+                pass
+        roi = sum(returns) / len(returns) if returns else None
+    clv = []
+    for row in authorized:
+        try:
+            if row.get("CLV"):
+                clv.append(float(row["CLV"]))
+        except ValueError:
+            pass
+    average_clv = sum(clv) / len(clv) if clv else None
+    policy_rollback = bool(
+        len(authorized) >= window and roi is not None and roi < -.05
+        and average_clv is not None and average_clv < -.02
+    )
+    return {
+        "model_mode": "static_baseline" if model_rollback else "eligible_for_challenger",
+        "policy_mode": "safe_baseline" if policy_rollback else "standard",
+        "model_rollback": model_rollback,
+        "policy_rollback": policy_rollback,
+        "model_sample": len(promoted),
+        "active_brier": active_brier,
+        "baseline_brier": baseline_brier,
+        "policy_sample": len(authorized),
+        "policy_roi": roi,
+        "policy_clv": average_clv,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def save_rollback_state(rows: list[dict] | None = None) -> dict:
+    state = automated_rollback_state(rows if rows is not None else load_resolved_predictions())
+    atomic_write_text(ROLLBACK_STATE_FILE, json.dumps(state, indent=2) + "\n")
+    return state
+
+
 def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
     """Blend de-vigged two-way market probability with independent overall Elo."""
     if "/" in match.get("player1", "") or "/" in match.get("player2", ""):
@@ -1299,6 +1363,7 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
     history = load_resolved_predictions(decision_date)
     comparable = [row for row in history if (row.get("SURFACE") or "Unknown") == (surface or "Unknown")]
     challenger = learned_component_weights(comparable)
+    rollback = automated_rollback_state(history)
     challenger_probability = None
     if challenger:
         components = {"elo": elo_probability, "market": market_probability}
@@ -1308,7 +1373,7 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
             components["serve_return"] = serve_return["probability"]
         used = {name: challenger["weights"][name] for name in components if name in challenger["weights"]}
         challenger_probability = sum(components[name] * weight for name, weight in used.items()) / sum(used.values())
-        if challenger["promoted"]:
+        if challenger["promoted"] and not rollback["model_rollback"]:
             assessed_probability = challenger_probability
             component_weights = "learned:" + ";".join(f"{name}={weight:.3f}" for name, weight in sorted(used.items()))
     assessed_probability, calibration_sample = calibrate_probability(assessed_probability, comparable)
@@ -1335,7 +1400,7 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "raw_probability": raw_probability,
         "challenger_probability": challenger_probability,
         "challenger_sample": challenger["sample"] if challenger else 0,
-        "challenger_promoted": challenger["promoted"] if challenger else False,
+        "challenger_promoted": bool(challenger and challenger["promoted"] and not rollback["model_rollback"]),
         "calibration_sample": calibration_sample,
         "context_penalty": context_penalty,
         "context_reason": context_reason,
@@ -1859,6 +1924,11 @@ def select_portfolio(
     max_bets: int = MAX_DAILY_BETS,
 ) -> list[dict]:
     """Rank independent matches and constrain total planned bankroll exposure."""
+    rollback = automated_rollback_state(load_resolved_predictions())
+    if rollback["policy_rollback"]:
+        max_exposure, max_bets = min(max_exposure, .03), min(max_bets, 1)
+        recommendations = [item for item in recommendations if item.get("grade") == "Top Pick"]
+        log("Policy rollback active: using one-bet Top-Pick-only safe baseline")
     stake_rates = {"Top Pick": 0.03, "Value Pick": 0.02}
     ranked = sorted(
         recommendations,
@@ -2702,6 +2772,7 @@ def finalize_analysis(
     log(f"Validated {len(recommendations)} recommendations")
     authorized = select_portfolio(recommendations)
     append_prediction_audit(date_str, matches, recommendations, authorized)
+    save_rollback_state()
     stage_pending_bets(date_str, authorized, odds_min, odds_max)
 
     final_report = add_validation_summary(report, len(candidates), authorized)

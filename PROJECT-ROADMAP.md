@@ -173,7 +173,7 @@ Status conventions:
 - [x] Add provider-specific circuit breakers.
 - [x] Continue with deterministic Python output when Groq is unavailable.
 - [x] Keep AI output non-authoritative for probabilities and staking.
-- [ ] Add automated model/policy rollback.
+- [x] Add automated model/policy rollback.
 
 ## Testing
 
