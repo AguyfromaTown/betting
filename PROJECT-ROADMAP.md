@@ -166,7 +166,7 @@ Status conventions:
 - [x] Convert CSV state mutations to atomic replacement.
 - [x] Use GitHub concurrency groups to avoid overlapping workflows.
 - [x] Migrate prediction CSV schemas while preserving legacy rows.
-- [ ] Back up state before every schema migration.
+- [x] Back up state before every schema migration.
 - [x] Add explicit interrupted-run recovery.
 - [x] Rotate keys only on authentication/quota failures.
 - [ ] Add exponential retry delays for transient errors.

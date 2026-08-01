@@ -70,6 +70,28 @@ class TennisBotTests(unittest.TestCase):
             self.assertEqual(completed["phase"], "complete")
             self.assertIn("completed_at", completed)
 
+    def test_prediction_schema_migration_creates_exact_versioned_backup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit = root / "predictions-log.csv"
+            backups = root / "state-backups"
+            original = b"DATE,PICK\r\n2026-07-31,Legacy Player\r\n"
+            audit.write_bytes(original)
+
+            with patch.object(bot, "AUDIT_FILE", audit), patch.object(bot, "BACKUPS_DIR", backups):
+                bot.append_prediction_audit("2026-08-01", [], [], [])
+
+            backup_files = list(backups.rglob("*.bak"))
+            metadata_files = list(backups.rglob("*.bak.json"))
+            self.assertEqual(len(backup_files), 1)
+            self.assertEqual(backup_files[0].read_bytes(), original)
+            self.assertEqual(len(metadata_files), 1)
+            metadata = __import__("json").loads(metadata_files[0].read_text(encoding="utf-8"))
+            self.assertEqual(metadata["sha256"], __import__("hashlib").sha256(original).hexdigest())
+            migrated_headers, migrated_rows = bot.read_csv_rows(audit)
+            self.assertIn("MODEL_VERSION", migrated_headers)
+            self.assertEqual(migrated_rows[0]["PICK"], "Legacy Player")
+
     def test_diagnostic_summary_has_no_mutating_actions(self):
         with patch.object(bot, "fetch_matches_from_odds_api", return_value=[]):
             result = bot.run_diagnostic("2026-08-01", 1.5, 1.6, ["key"])

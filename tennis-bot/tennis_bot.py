@@ -7,6 +7,7 @@ Designed for GitHub Actions execution.
 import argparse
 import csv
 import difflib
+import hashlib
 import io
 import json
 import os
@@ -32,6 +33,7 @@ PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
+BACKUPS_DIR = REPO_ROOT / "state-backups"
 REPORTS_DIR = REPO_ROOT / "reports"
 REQUEST_TIMEOUT = 30
 MAX_COMPLETION_TOKENS = 2048
@@ -89,6 +91,20 @@ def atomic_write_text(path: Path, content: str, encoding: str = "utf-8"):
         raise
 
 
+def atomic_write_bytes(path: Path, content: bytes):
+    """Replace a binary file atomically, preserving the exact supplied bytes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content); handle.flush(); os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except Exception:
+        try: os.unlink(temporary)
+        except OSError: pass
+        raise
+
+
 def atomic_write_csv(path: Path, headers: list[str], rows: list, dict_rows: bool = True):
     """Write a complete CSV beside the destination and atomically replace it."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -114,6 +130,27 @@ def read_csv_rows(path: Path) -> tuple[list[str], list[dict]]:
     with path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         return list(reader.fieldnames or []), list(reader)
+
+
+def backup_state_for_migration(path: Path, old_headers: list[str], new_headers: list[str]) -> Path:
+    """Create an exact, versioned backup before replacing a state-file schema."""
+    content = path.read_bytes()
+    digest = hashlib.sha256(content).hexdigest()[:12]
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    backup_dir = BACKUPS_DIR / path.stem
+    backup_path = backup_dir / f"{path.name}.{timestamp}.{digest}.bak"
+    atomic_write_bytes(backup_path, content)
+    metadata = {
+        "source": path.name,
+        "backup": backup_path.name,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "old_headers": old_headers,
+        "new_headers": new_headers,
+    }
+    atomic_write_text(backup_path.with_suffix(backup_path.suffix + ".json"), json.dumps(metadata, indent=2) + "\n")
+    log(f"Backed up {path.name} before schema migration: {backup_path.relative_to(REPO_ROOT) if path.is_relative_to(REPO_ROOT) else backup_path}")
+    return backup_path
 
 
 def save_source_health():
@@ -1798,6 +1835,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
             reader = csv.DictReader(handle)
             old_rows, old_headers = list(reader), reader.fieldnames or []
         if old_headers != headers:
+            backup_state_for_migration(AUDIT_FILE, list(old_headers), headers)
             for row in old_rows:
                 row.setdefault("REASON", "legacy")
                 row.setdefault("QUALITY_GRADE", "legacy")
