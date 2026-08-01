@@ -14,6 +14,68 @@ SPEC.loader.exec_module(bot)
 
 
 class TennisBotTests(unittest.TestCase):
+    def test_optional_notifications_are_disabled_without_configuration(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.dict(bot.os.environ, {}, clear=True), \
+                patch.object(bot, "NOTIFICATION_STATUS_FILE", Path(directory) / "delivery.json"), \
+                patch.object(bot, "send_telegram_notification") as telegram, \
+                patch.object(bot, "send_email_notification") as email:
+            self.assertEqual(bot.deliver_optional_notifications("2026-08-01", "daily"), [])
+            telegram.assert_not_called()
+            email.assert_not_called()
+            self.assertFalse(bot.NOTIFICATION_STATUS_FILE.exists())
+
+    def test_telegram_delivery_status_does_not_persist_secrets(self):
+        environment = {"TELEGRAM_BOT_TOKEN": "super-secret-token", "TELEGRAM_CHAT_ID": "private-chat"}
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.dict(bot.os.environ, environment, clear=True), \
+                patch.object(bot, "NOTIFICATION_STATUS_FILE", Path(directory) / "delivery.json"), \
+                patch.object(bot, "build_notification_message", return_value="safe summary"), \
+                patch.object(bot, "send_telegram_notification") as telegram:
+            results = bot.deliver_optional_notifications("2026-08-01", "daily")
+            persisted = bot.NOTIFICATION_STATUS_FILE.read_text(encoding="utf-8")
+
+        self.assertEqual(results[0]["status"], "delivered")
+        telegram.assert_called_once_with("safe summary", "super-secret-token", "private-chat")
+        self.assertNotIn("super-secret-token", persisted)
+        self.assertNotIn("private-chat", persisted)
+
+    def test_partial_and_failed_notifications_are_nonfatal_and_redacted(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.dict(bot.os.environ, {"TELEGRAM_BOT_TOKEN": "never-persist-me"}, clear=True), \
+                patch.object(bot, "NOTIFICATION_STATUS_FILE", Path(directory) / "partial.json"):
+            partial = bot.deliver_optional_notifications("2026-08-01", "daily")
+            persisted = bot.NOTIFICATION_STATUS_FILE.read_text(encoding="utf-8")
+        self.assertEqual(partial[0]["status"], "configuration_error")
+        self.assertIn("TELEGRAM_CHAT_ID", partial[0]["detail"])
+        self.assertNotIn("never-persist-me", persisted)
+
+        environment = {"TELEGRAM_BOT_TOKEN": "hidden-token", "TELEGRAM_CHAT_ID": "hidden-chat"}
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.dict(bot.os.environ, environment, clear=True), \
+                patch.object(bot, "NOTIFICATION_STATUS_FILE", Path(directory) / "failed.json"), \
+                patch.object(bot, "build_notification_message", return_value="safe summary"), \
+                patch.object(bot, "send_telegram_notification", side_effect=RuntimeError("sensitive detail")):
+            failed = bot.deliver_optional_notifications("2026-08-01", "daily")
+            persisted = bot.NOTIFICATION_STATUS_FILE.read_text(encoding="utf-8")
+        self.assertEqual(failed[0], {"channel": "telegram", "status": "failed", "detail": "RuntimeError"})
+        self.assertNotIn("sensitive detail", persisted)
+        self.assertNotIn("hidden-token", persisted)
+
+    def test_email_credentials_must_be_configured_as_a_pair(self):
+        environment = {
+            "SMTP_HOST": "smtp.example.test", "SMTP_PASSWORD": "password-only",
+            "ALERT_EMAIL_FROM": "bot@example.test", "ALERT_EMAIL_TO": "owner@example.test",
+        }
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.dict(bot.os.environ, environment, clear=True), \
+                patch.object(bot, "NOTIFICATION_STATUS_FILE", Path(directory) / "delivery.json"), \
+                patch.object(bot, "send_email_notification") as sender:
+            results = bot.deliver_optional_notifications("2026-08-01", "daily")
+        self.assertEqual(results[0]["status"], "configuration_error")
+        self.assertIn("SMTP_USERNAME", results[0]["detail"])
+        sender.assert_not_called()
+
     def test_fixed_historical_fixture_runs_validation_through_settlement(self):
         from datetime import datetime
         fixture_paths = sorted((Path(__file__).with_name("fixtures")).glob("historical_lifecycle_*.json"))

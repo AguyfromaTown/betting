@@ -15,6 +15,7 @@ import json
 import math
 import os
 import re
+import smtplib
 import statistics
 import sys
 import tempfile
@@ -23,6 +24,7 @@ import unicodedata
 import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -54,6 +56,7 @@ PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
 ALIAS_REVIEW_FILE = REPO_ROOT / "player-alias-review.csv"
 IDENTITY_QUEUE_REPORT_FILE = REPO_ROOT / "unresolved-player-identities.md"
 OPERATIONS_ALERT_FILE = REPO_ROOT / "operations-alerts.md"
+NOTIFICATION_STATUS_FILE = REPO_ROOT / "notification-delivery.json"
 PLAYER_STATUS_FILE = REPO_ROOT / "verified-player-status.csv"
 TOURNAMENT_LOCATIONS_FILE = REPO_ROOT / "verified-tournament-locations.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
@@ -126,6 +129,108 @@ CIRCUIT_BREAKERS = {}
 
 def log(msg: str):
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
+
+
+def build_notification_message(date_str: str, mode: str) -> str:
+    """Build a bounded operational summary from sanitized local reports."""
+    lines = [f"Tennis Bot - {date_str}", f"Mode: {mode}"]
+    sources = [
+        PERFORMANCE_FILE,
+        OPERATIONS_ALERT_FILE,
+        SETTLEMENT_ALERT_FILE,
+        SOURCE_HEALTH_FILE,
+        IDENTITY_QUEUE_REPORT_FILE,
+        REPORTS_DIR / f"picks-{date_str}.md",
+    ]
+    keywords = ("settled bets:", "profit/loss:", "roi:", "average clv:", "active candidates:",
+                "authorized picks:", "rejections:", "rejection rate:", "pending:", "overdue",
+                "final betting decision:", "python accepted", "abnormal_", "stale cached response")
+    for path in sources:
+        if not path.exists() or not path.stat().st_size:
+            continue
+        for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            clean = re.sub(r"[*_`]", "", raw).strip().lstrip("- ")
+            if clean and any(keyword in clean.casefold() for keyword in keywords):
+                lines.append(clean[:300])
+    deduplicated = list(dict.fromkeys(lines))
+    return "\n".join(deduplicated)[:3500]
+
+
+def send_telegram_notification(message: str, token: str, chat_id: str):
+    started = time.monotonic()
+    response = requests.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        json={"chat_id": chat_id, "text": message, "disable_web_page_preview": True},
+        timeout=REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    record_source_health("api.telegram.org", True, f"HTTP {response.status_code}", started)
+
+
+def send_email_notification(message: str, settings: dict[str, str]):
+    email = EmailMessage()
+    email["Subject"] = settings.get("subject") or "Tennis Bot Update"
+    email["From"] = settings["from"]
+    email["To"] = settings["to"]
+    email.set_content(message)
+    port = int(settings.get("port") or (465 if settings.get("ssl") == "true" else 587))
+    smtp_class = smtplib.SMTP_SSL if settings.get("ssl") == "true" else smtplib.SMTP
+    with smtp_class(settings["host"], port, timeout=REQUEST_TIMEOUT) as client:
+        if settings.get("ssl") != "true" and settings.get("starttls", "true") == "true":
+            client.starttls()
+        if settings.get("username"):
+            client.login(settings["username"], settings["password"])
+        client.send_message(email)
+
+
+def deliver_optional_notifications(date_str: str, mode: str) -> list[dict]:
+    """Deliver opt-in notifications; never expose credentials or interrupt bot state."""
+    telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    telegram_chat = os.environ.get("TELEGRAM_CHAT_ID", "")
+    email_settings = {
+        "host": os.environ.get("SMTP_HOST", ""), "port": os.environ.get("SMTP_PORT", ""),
+        "username": os.environ.get("SMTP_USERNAME", ""), "password": os.environ.get("SMTP_PASSWORD", ""),
+        "from": os.environ.get("ALERT_EMAIL_FROM", ""), "to": os.environ.get("ALERT_EMAIL_TO", ""),
+        "ssl": os.environ.get("SMTP_USE_SSL", "false").casefold(),
+        "starttls": os.environ.get("SMTP_STARTTLS", "true").casefold(),
+        "subject": f"Tennis Bot {mode} - {date_str}",
+    }
+    telegram_requested = bool(telegram_token or telegram_chat)
+    email_requested = any(email_settings[key] for key in ("host", "username", "password", "from", "to"))
+    if not telegram_requested and not email_requested:
+        return []
+    message = build_notification_message(date_str, mode)
+    results = []
+
+    def attempt(channel: str, sender, configured: bool, missing: list[str]):
+        if not configured:
+            results.append({"channel": channel, "status": "configuration_error",
+                            "detail": "missing:" + ",".join(missing)})
+            return
+        try:
+            sender()
+            results.append({"channel": channel, "status": "delivered", "detail": "ok"})
+        except Exception as exc:  # Delivery is deliberately non-fatal after all betting state is saved.
+            results.append({"channel": channel, "status": "failed", "detail": type(exc).__name__})
+            log(f"WARNING: Optional {channel} notification failed ({type(exc).__name__})")
+
+    if telegram_requested:
+        missing = [name for name, value in (("TELEGRAM_BOT_TOKEN", telegram_token),
+                                             ("TELEGRAM_CHAT_ID", telegram_chat)) if not value]
+        attempt("telegram", lambda: send_telegram_notification(message, telegram_token, telegram_chat), not missing, missing)
+    if email_requested:
+        required = (("SMTP_HOST", email_settings["host"]), ("ALERT_EMAIL_FROM", email_settings["from"]),
+                    ("ALERT_EMAIL_TO", email_settings["to"]))
+        if email_settings["username"] and not email_settings["password"]:
+            required += (("SMTP_PASSWORD", ""),)
+        if email_settings["password"] and not email_settings["username"]:
+            required += (("SMTP_USERNAME", ""),)
+        missing = [name for name, value in required if not value]
+        attempt("email", lambda: send_email_notification(message, email_settings), not missing, missing)
+    payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "date": date_str, "mode": mode,
+               "deliveries": results}
+    atomic_write_text(NOTIFICATION_STATUS_FILE, json.dumps(payload, indent=2) + "\n")
+    return results
 
 
 def record_source_health(source: str, ok: bool, detail: str, started: float, *, mode: str = "network",
@@ -5572,6 +5677,8 @@ def main():
 
     if args.settle_only:
         update_run_state("complete", "complete")
+        deliver_optional_notifications(date_str, mode)
+        save_source_health()
         log("Settlement-only run complete")
         return
 
@@ -5579,8 +5686,9 @@ def main():
         revalidate_pending_bets(odds_api_keys)
         update_run_state("revalidation_complete")
         generate_performance_summary()
-        save_source_health()
         update_run_state("complete", "complete")
+        deliver_optional_notifications(date_str, mode)
+        save_source_health()
         log("Revalidation-only run complete")
         return
 
@@ -5608,7 +5716,7 @@ def main():
             title, explanation = "ODDS UNAVAILABLE", "Fixtures existed, but no verified moneyline market could be constructed."
         report = f"# {title}\n\nDate: {date_str}\n\n{explanation}\n\nNo bets were staged and no bankroll was changed.\n"
         log(f"{title}: {explanation}")
-        save_report(date_str, report); save_source_health(); print("\n" + report)
+        save_report(date_str, report); deliver_optional_notifications(date_str, mode); save_source_health(); print("\n" + report)
         update_run_state("no_data_complete", "complete", LAST_FIXTURE_STATUS)
         return
     update_run_state("collection_complete", detail=f"{len(all_matches)} verified matches")
@@ -5665,8 +5773,9 @@ def main():
         odds_max,
         statistical_candidates,
     )
-    save_source_health()
     update_run_state("complete", "complete")
+    deliver_optional_notifications(date_str, mode)
+    save_source_health()
 
 
 if __name__ == "__main__":

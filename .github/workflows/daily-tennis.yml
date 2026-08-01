@@ -92,6 +92,16 @@ jobs:
           ODDS_API_KEY_3: ${{ secrets.ODDS_API_KEY_3 }}
           ODDS_API_KEY_4: ${{ secrets.ODDS_API_KEY_4 }}
           ODDS_API_KEY_5: ${{ secrets.ODDS_API_KEY_5 }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          SMTP_USE_SSL: ${{ secrets.SMTP_USE_SSL }}
+          SMTP_STARTTLS: ${{ secrets.SMTP_STARTTLS }}
         run: |
           ARGS=""
           if [ -n "${{ github.event.inputs.date }}" ]; then

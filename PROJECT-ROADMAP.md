@@ -202,7 +202,7 @@ Status conventions:
 - [x] Monitor CLV and probability calibration deterioration.
 - [x] Alert on abnormal rejection and pick counts.
 - [x] Distinguish provider failure, a valid empty schedule and missing odds in reports.
-- [ ] Add optional Telegram or email delivery without exposing secrets.
+- [x] Add optional Telegram or email delivery without exposing secrets.
 
 ## Dashboard
 
