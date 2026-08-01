@@ -2408,6 +2408,20 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("if: always()", workflow)
         self.assertNotIn("--fix", workflow)
 
+    def test_architecture_documents_authority_state_and_safety_boundaries(self):
+        architecture = MODULE_PATH.parent.parent.joinpath("ARCHITECTURE.md").read_text(encoding="utf-8")
+        for required in (
+            "Deterministic Python calculations are authoritative",
+            "No path from Groq reaches",
+            "pending-bets.csv",
+            "bankroll-transactions.csv",
+            "run-state.json",
+            "Safety invariants",
+            "GitHub automation",
+            "Change protocol",
+        ):
+            self.assertIn(required, architecture)
+
 
 if __name__ == "__main__":
     unittest.main()
