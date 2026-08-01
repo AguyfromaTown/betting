@@ -242,7 +242,7 @@ Status conventions:
 - [x] Document emergency-stop and recovery procedures.
 - [x] Document alias review and API-provider replacement procedures.
 - [x] Maintain a changelog and model/policy release notes.
-- [ ] Provide a one-command local paper run.
+- [x] Provide a one-command local paper run.
 - [x] Add a diagnostic no-write/no-stake/no-AI/no-settlement mode.
 
 ## Production validation

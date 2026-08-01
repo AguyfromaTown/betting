@@ -2561,6 +2561,27 @@ class TennisBotTests(unittest.TestCase):
         ):
             self.assertIn(historical, releases)
 
+    def test_one_command_paper_launcher_is_isolated_and_gated(self):
+        root = MODULE_PATH.parent.parent
+        launcher = root.joinpath("run-paper.ps1").read_text(encoding="utf-8")
+        guide = root.joinpath("LOCAL-PAPER-RUN.md").read_text(encoding="utf-8")
+        for required in (
+            "--paper-trading",
+            "--bankroll",
+            "requirements-test.txt",
+            "coverage report --fail-under=70",
+            "Read-Host",
+            "-AsSecureString",
+            "ODDS_API_KEY_5",
+            "finally",
+        ):
+            self.assertIn(required, launcher)
+        self.assertNotIn("GROQ_API_KEY =", launcher)
+        self.assertNotIn("ODDS_API_KEY = 'gsk_", launcher)
+        self.assertIn(".\\run-paper.ps1", guide)
+        self.assertIn("does not change `bets-log.csv`, `bankroll-transactions.csv`, or `bankroll.txt`", guide)
+        self.assertIn("consumes Odds API quota", guide)
+
 
 if __name__ == "__main__":
     unittest.main()

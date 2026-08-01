@@ -8,7 +8,8 @@ The format follows Keep a Changelog categories: Added, Changed, Deprecated, Remo
 
 ### Added
 
-- No unreleased changes.
+- Added `run-paper.ps1`, a one-command local paper launcher that bootstraps an isolated environment, enforces tests and coverage, accepts a temporary hidden Odds API key, and supplies an explicit virtual bankroll.
+- Added local paper-run usage and safety documentation.
 
 ### Changed
 
