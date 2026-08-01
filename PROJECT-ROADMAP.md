@@ -39,7 +39,7 @@ Status conventions:
 
 - [x] Collect official ranking, overall Elo and surface Elo from Tennis Abstract.
 - [x] Record age when present in the Tennis Abstract leaderboard.
-- [ ] Collect ranking history.
+- [x] Collect ranking history.
 - [ ] Collect handedness and nationality from dependable sources.
 - [x] Track recent results and opponent-adjusted form.
 - [x] Calculate surface-specific form.

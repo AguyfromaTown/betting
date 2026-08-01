@@ -1480,6 +1480,16 @@ def compact_profile_line(player: str, profiles: dict[str, dict]) -> str:
     def shown(value):
         return "N/A" if value is None else f"{value:g}"
 
+    ranking_history = profile.get("ranking_history") or {}
+    ranking_trend = ""
+    if ranking_history:
+        change = ranking_history.get("improvement_90d")
+        ranking_trend = (
+            f"; pre-match rank={shown(ranking_history.get('latest_rank'))}"
+            f" as of {ranking_history.get('latest_date') or 'N/A'}"
+            f"; 90d rank change={change:+g}" if change is not None else
+            f"; pre-match rank={shown(ranking_history.get('latest_rank'))} as of {ranking_history.get('latest_date') or 'N/A'}"
+        )
     return (
         f"- {player}: official rank={shown(profile['official_rank'])}; "
         f"age={shown(profile['age'])}; Elo={shown(profile['elo'])} "
@@ -1489,6 +1499,7 @@ def compact_profile_line(player: str, profiles: dict[str, dict]) -> str:
         f"grass Elo={shown(profile['grass_elo'])}; "
         f"peak Elo={shown(profile['peak_elo'])}"
         f"{' (' + profile['peak_month'] + ')' if profile['peak_month'] else ''}"
+        f"{ranking_trend}"
     )
 
 
@@ -1507,6 +1518,58 @@ def enrich_matches_with_profiles(matches: list[dict]) -> dict[str, dict]:
             match[f"{side}_identity_confidence"] = float(profile.get("identity_confidence", 0.0))
             match[f"{side}_identity_method"] = profile.get("identity_method", "unresolved")
     return profiles
+
+
+def calculate_ranking_history(history: list[dict], player: str, as_of: str) -> dict | None:
+    """Build compact, leakage-safe ranking history from pre-match observations."""
+    player_key = normalize_player_name(player)
+    cutoff = datetime.strptime(as_of, "%Y-%m-%d")
+    observations = {}
+    for row in history:
+        winner_key = normalize_player_name(row.get("winner_name", ""))
+        loser_key = normalize_player_name(row.get("loser_name", ""))
+        if player_key not in {winner_key, loser_key}:
+            continue
+        try:
+            played = datetime.strptime(str(row.get("tourney_date", "")), "%Y%m%d")
+            rank = int(float(row.get("winner_rank") if player_key == winner_key else row.get("loser_rank")))
+        except (TypeError, ValueError):
+            continue
+        if played >= cutoff or rank <= 0:
+            continue
+        observations[played] = rank
+    if not observations:
+        return None
+    ordered = sorted(observations.items())
+    latest_date, latest_rank = ordered[-1]
+
+    def rank_at(days_ago: int) -> tuple[int | None, str | None]:
+        target = cutoff - timedelta(days=days_ago)
+        eligible = [(date, rank) for date, rank in ordered if date <= target]
+        if not eligible:
+            return None, None
+        date, rank = eligible[-1]
+        return rank, date.strftime("%Y-%m-%d")
+
+    rank_30, date_30 = rank_at(30)
+    rank_90, date_90 = rank_at(90)
+    rank_180, date_180 = rank_at(180)
+    recent_year = [(date, rank) for date, rank in ordered if (cutoff - date).days <= 365]
+    return {
+        "latest_rank": latest_rank, "latest_date": latest_date.strftime("%Y-%m-%d"),
+        "latest_age_days": (cutoff - latest_date).days,
+        "rank_30d": rank_30, "rank_30d_date": date_30,
+        "rank_90d": rank_90, "rank_90d_date": date_90,
+        "rank_180d": rank_180, "rank_180d_date": date_180,
+        "improvement_30d": rank_30 - latest_rank if rank_30 is not None else None,
+        "improvement_90d": rank_90 - latest_rank if rank_90 is not None else None,
+        "improvement_180d": rank_180 - latest_rank if rank_180 is not None else None,
+        "best_rank_365d": min((rank for _, rank in recent_year), default=None),
+        "worst_rank_365d": max((rank for _, rank in recent_year), default=None),
+        "samples_365d": len(recent_year),
+        "recent_snapshots": [{"date": date.strftime("%Y-%m-%d"), "rank": rank} for date, rank in ordered[-12:]],
+        "source": "historical_match_rankings",
+    }
 
 
 def calculate_recent_form(history: list[dict], player: str, surface: str | None, as_of: str, limit: int = 20) -> dict | None:
@@ -1670,6 +1733,11 @@ def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
         match["player2_serve_return"] = calculate_serve_return_profile(history, match["player2"], match.get("surface"), date_str)
         match["player1_workload"] = calculate_workload(history, match["player1"], date_str, match.get("tournament", ""))
         match["player2_workload"] = calculate_workload(history, match["player2"], date_str, match.get("tournament", ""))
+        for side in ("player1", "player2"):
+            ranking_history = calculate_ranking_history(history, match[side], date_str)
+            match[f"{side}_ranking_history"] = ranking_history
+            if match.get(f"{side}_profile") is not None:
+                match[f"{side}_profile"]["ranking_history"] = ranking_history
 
 
 def tennis_context_uncertainty(match: dict) -> tuple[float, str]:
@@ -2574,12 +2642,21 @@ def identity_audit_values(match: dict, player: str) -> tuple[float, str, float, 
     return pick_confidence, pick_method, opponent_confidence, opponent_method
 
 
+def ranking_audit_values(match: dict, player: str) -> tuple[dict, dict]:
+    """Return the pick and opponent pre-match ranking histories in row order."""
+    pick_side, opponent_side = ("player1", "player2") if normalize_player_name(player) == normalize_player_name(match.get("player1", "")) else ("player2", "player1")
+    return match.get(f"{pick_side}_ranking_history") or {}, match.get(f"{opponent_side}_ranking_history") or {}
+
+
 def append_prediction_audit(date_str, matches, recommendations, authorized, authorization_block_reason: str = ""):
     """Persist all Elo-modelled singles candidates and final decisions."""
     headers = [
         "DATE", "MODEL_VERSION", "EVENT_ID", "MATCH", "PICK",
         "PICK_IDENTITY_CONFIDENCE", "PICK_IDENTITY_METHOD",
-        "OPPONENT_IDENTITY_CONFIDENCE", "OPPONENT_IDENTITY_METHOD", "OPENING_ODDS",
+        "OPPONENT_IDENTITY_CONFIDENCE", "OPPONENT_IDENTITY_METHOD",
+        "PICK_RANK_AS_OF", "PICK_RANK_DATE", "PICK_RANK_90D", "PICK_RANK_IMPROVEMENT_90D", "PICK_RANK_SAMPLES_365",
+        "OPPONENT_RANK_AS_OF", "OPPONENT_RANK_DATE", "OPPONENT_RANK_90D", "OPPONENT_RANK_IMPROVEMENT_90D", "OPPONENT_RANK_SAMPLES_365",
+        "OPENING_ODDS",
         "MARKET_PROBABILITY", "ELO_PROBABILITY", "MODEL_PROBABILITY",
         "FORM_PROBABILITY", "FORM_SAMPLE", "SERVE_RETURN_PROBABILITY",
         "SERVE_RETURN_SAMPLE", "EXPECTED_HOLD", "OPPONENT_EXPECTED_HOLD",
@@ -2644,11 +2721,16 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
             data_quality = tennis_data_quality(match, baseline, player)
             workload = baseline.get("workload") or {}
             pick_identity, pick_identity_method, opponent_identity, opponent_identity_method = identity_audit_values(match, player)
+            pick_ranking, opponent_ranking = ranking_audit_values(match, player)
             rows.append([
                 date_str, MODEL_VERSION, match.get("event_id", ""),
                 f"{match['player1']} vs {match['player2']}", player,
                 f"{pick_identity:.3f}", pick_identity_method,
                 f"{opponent_identity:.3f}", opponent_identity_method,
+                pick_ranking.get("latest_rank", ""), pick_ranking.get("latest_date", ""),
+                pick_ranking.get("rank_90d", ""), pick_ranking.get("improvement_90d", ""), pick_ranking.get("samples_365d", 0),
+                opponent_ranking.get("latest_rank", ""), opponent_ranking.get("latest_date", ""),
+                opponent_ranking.get("rank_90d", ""), opponent_ranking.get("improvement_90d", ""), opponent_ranking.get("samples_365d", 0),
                 f"{baseline['player_odds']:.3f}",
                 f"{baseline['market_probability']:.6f}",
                 f"{baseline['elo_probability']:.6f}",

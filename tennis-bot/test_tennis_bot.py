@@ -827,6 +827,8 @@ class TennisBotTests(unittest.TestCase):
             "home_odds": 1.6, "away_odds": 2.5, "bookmaker_count": 3, "surface": "hard",
             "player1_profile": {"elo": 1800, "identity_confidence": 1.0, "identity_method": "exact"},
             "player2_profile": {"elo": 1600, "identity_confidence": 0.94, "identity_method": "auto_unique"},
+            "player1_ranking_history": {"latest_rank": 12, "latest_date": "2026-07-28", "rank_90d": 20, "improvement_90d": 8, "samples_365d": 9},
+            "player2_ranking_history": {"latest_rank": 24, "latest_date": "2026-07-27", "rank_90d": 18, "improvement_90d": -6, "samples_365d": 8},
         }
         with tempfile.TemporaryDirectory() as directory:
             audit_file = Path(directory) / "prediction-audit.csv"
@@ -842,6 +844,9 @@ class TennisBotTests(unittest.TestCase):
         second = next(row for row in rows if row["PICK"] == "Player Two")
         self.assertEqual(second["PICK_IDENTITY_METHOD"], "auto_unique")
         self.assertEqual(second["OPPONENT_IDENTITY_METHOD"], "exact")
+        self.assertEqual(second["PICK_RANK_AS_OF"], "24")
+        self.assertEqual(second["PICK_RANK_IMPROVEMENT_90D"], "-6")
+        self.assertEqual(second["OPPONENT_RANK_AS_OF"], "12")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -865,6 +870,31 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(form["sample"], 8)
         self.assertGreater(form["probability"], 0.5)
         self.assertIsNone(bot.calculate_recent_form(history[:7], "Test Player", "clay", "2026-06-01"))
+
+    def test_ranking_history_is_pre_match_and_tracks_improvement(self):
+        history = [
+            {"tourney_date": "20260722", "winner_name": "Test Player", "loser_name": "A", "winner_rank": "50"},
+            {"tourney_date": "20260622", "winner_name": "B", "loser_name": "Test Player", "loser_rank": "70"},
+            {"tourney_date": "20260423", "winner_name": "Test Player", "loser_name": "C", "winner_rank": "100"},
+            {"tourney_date": "20260802", "winner_name": "Test Player", "loser_name": "D", "winner_rank": "1"},
+        ]
+        ranking = bot.calculate_ranking_history(history, "Test Player", "2026-08-01")
+        self.assertEqual(ranking["latest_rank"], 50)
+        self.assertEqual(ranking["rank_30d"], 70)
+        self.assertEqual(ranking["rank_90d"], 100)
+        self.assertEqual(ranking["improvement_90d"], 50)
+        self.assertEqual(ranking["samples_365d"], 3)
+        self.assertNotIn(1, [item["rank"] for item in ranking["recent_snapshots"]])
+
+    def test_ranking_audit_values_follow_evaluated_player(self):
+        match = {
+            "player1": "One", "player2": "Two",
+            "player1_ranking_history": {"latest_rank": 10},
+            "player2_ranking_history": {"latest_rank": 20},
+        }
+        pick, opponent = bot.ranking_audit_values(match, "Two")
+        self.assertEqual(pick["latest_rank"], 20)
+        self.assertEqual(opponent["latest_rank"], 10)
 
     def test_serve_return_profile_requires_points_and_calculates_rates(self):
         history = []
