@@ -24,7 +24,7 @@ Status conventions:
 - [x] Rotate Odds and Groq API keys after quota/authentication failures.
 - [x] Track provider request latency and failures in `source-health.json`.
 - [x] Track API quota consumption.
-- [ ] Add provider schema-change alarms.
+- [x] Add provider schema-change alarms.
 
 ## Player identity
 

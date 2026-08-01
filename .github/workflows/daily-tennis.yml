@@ -88,6 +88,16 @@ jobs:
             cat api-quota.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Publish provider schema health
+        if: always()
+        run: |
+          if [ -f provider-schema-alerts.md ]; then
+            cat provider-schema-alerts.md >> "$GITHUB_STEP_SUMMARY"
+            if grep -q "SCHEMA CHANGE ALERTS" provider-schema-alerts.md; then
+              echo "::warning::A tennis data provider response no longer matches the expected schema"
+            fi
+          fi
+
       - name: Commit results
         if: always()
         run: |

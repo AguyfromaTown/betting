@@ -36,6 +36,7 @@ TRANSACTION_FILE = REPO_ROOT / "bankroll-transactions.csv"
 PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
 SETTLEMENT_ALERT_FILE = REPO_ROOT / "settlement-alerts.md"
 API_QUOTA_FILE = REPO_ROOT / "api-quota.md"
+SCHEMA_ALERT_FILE = REPO_ROOT / "provider-schema-alerts.md"
 MANUAL_KILL_SWITCH_FILE = REPO_ROOT / "kill-switch.json"
 RISK_CONFIG_FILE = REPO_ROOT / "risk-config.json"
 EXTERNAL_CACHE_FILE = REPO_ROOT / "external-cache.json"
@@ -82,6 +83,7 @@ REQUEST_HEADERS = {
 }
 SOURCE_HEALTH = []
 API_QUOTA = []
+SCHEMA_ALERTS = []
 LAST_FIXTURE_STATUS = "not_run"
 DIAGNOSTIC_MODE = False
 PAPER_TRADING_MODE = False
@@ -139,6 +141,64 @@ def save_api_quota_report():
     if not grouped:
         lines.append("| No metered API requests | — | 0 | — | — |")
     atomic_write_text(API_QUOTA_FILE, "\n".join(lines) + "\n")
+
+
+def record_schema_alert(provider: str, endpoint: str, detail: str):
+    alert = {"provider": provider, "endpoint": endpoint, "detail": detail,
+             "timestamp": datetime.now(timezone.utc).isoformat()}
+    if not any(item["provider"] == provider and item["endpoint"] == endpoint and item["detail"] == detail for item in SCHEMA_ALERTS):
+        SCHEMA_ALERTS.append(alert)
+        log(f"WARNING: {provider} schema alert at {endpoint}: {detail}")
+
+
+def normalize_provider_collection(payload, provider: str, endpoint: str) -> list:
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for key in ("events", "data"):
+            if key in payload:
+                if isinstance(payload[key], list):
+                    return payload[key]
+                record_schema_alert(provider, endpoint, f"field '{key}' changed from list to {type(payload[key]).__name__}")
+                return []
+        record_schema_alert(provider, endpoint, "missing events/data collection")
+        return []
+    record_schema_alert(provider, endpoint, f"top-level payload changed to {type(payload).__name__}")
+    return []
+
+
+def validate_odds_event_schema(odds_event: dict) -> bool:
+    bookmakers = odds_event.get("bookmakers")
+    event_id = odds_event.get("id")
+    if event_id is None or str(event_id).strip() == "" or not isinstance(bookmakers, dict):
+        record_schema_alert("Odds-API.io", "/v3/odds/multi", "odds event missing id or bookmakers object")
+        return False
+    for bookmaker, markets in bookmakers.items():
+        if not isinstance(markets, list):
+            record_schema_alert("Odds-API.io", "/v3/odds/multi", f"bookmaker '{bookmaker}' markets changed to {type(markets).__name__}")
+            return False
+        for market in markets:
+            if not isinstance(market, dict):
+                record_schema_alert("Odds-API.io", "/v3/odds/multi", f"bookmaker '{bookmaker}' market changed to {type(market).__name__}")
+                return False
+            if "odds" in market and not isinstance(market["odds"], list):
+                record_schema_alert("Odds-API.io", "/v3/odds/multi", f"bookmaker '{bookmaker}' odds changed to {type(market['odds']).__name__}")
+                return False
+            if any(not isinstance(price, dict) for price in market.get("odds", [])):
+                record_schema_alert("Odds-API.io", "/v3/odds/multi", f"bookmaker '{bookmaker}' price item is not an object")
+                return False
+    return True
+
+
+def save_schema_alert_report():
+    lines = ["# Provider Schema Health", "", f"Updated: {datetime.now(timezone.utc).isoformat()}", ""]
+    if SCHEMA_ALERTS:
+        lines.extend(["## SCHEMA CHANGE ALERTS", "", "| Provider | Endpoint | Detail | Time |", "|---|---|---|---|"])
+        for item in SCHEMA_ALERTS:
+            lines.append(f"| {item['provider']} | {item['endpoint']} | {item['detail']} | {item['timestamp']} |")
+    else:
+        lines.extend(["## OK", "", "No provider schema changes were detected in this run."])
+    atomic_write_text(SCHEMA_ALERT_FILE, "\n".join(lines) + "\n")
 
 
 def transient_retry_delay(attempt: int, response=None) -> float:
@@ -313,9 +373,10 @@ def backup_state_for_migration(path: Path, old_headers: list[str], new_headers: 
 def save_source_health():
     payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "fixture_status": LAST_FIXTURE_STATUS,
                "requests": SOURCE_HEALTH, "failures": sum(not item["ok"] for item in SOURCE_HEALTH),
-               "api_quota": API_QUOTA}
+               "api_quota": API_QUOTA, "schema_alerts": SCHEMA_ALERTS}
     atomic_write_text(REPO_ROOT / "source-health.json", json.dumps(payload, indent=2) + "\n")
     save_api_quota_report()
+    save_schema_alert_report()
 
 
 def load_run_state() -> dict:
@@ -896,6 +957,7 @@ def detect_surface(event: dict, tournament: str) -> str | None:
 def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict]:
     """Fetch verified tennis fixtures and match-winner odds from Odds-API.io."""
     global LAST_FIXTURE_STATUS
+    schema_alert_count_before = len(SCHEMA_ALERTS)
     events_payload, key_index = fetch_odds_json(
         "https://api.odds-api.io/v3/events",
         {"sport": "tennis"},
@@ -906,20 +968,28 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
         LAST_FIXTURE_STATUS = "provider_failure"
         return []
 
-    if isinstance(events_payload, list):
-        events = events_payload
-    else:
-        events = events_payload.get("events") or events_payload.get("data") or []
+    events = normalize_provider_collection(events_payload, "Odds-API.io", "/v3/events")
+    valid_events = []
+    for event in events:
+        if not isinstance(event, dict):
+            record_schema_alert("Odds-API.io", "/v3/events", f"event item changed to {type(event).__name__}")
+            continue
+        missing = [field for field in ("id", "date", "home", "away")
+                   if event.get(field) is None or str(event.get(field)).strip() == ""]
+        if missing:
+            record_schema_alert("Odds-API.io", "/v3/events", f"event missing required field(s): {','.join(missing)}")
+            continue
+        valid_events.append(event)
 
     dated_events = [
-        event for event in events
+        event for event in valid_events
         if str(event.get("date", "")).startswith(date_str)
         and event.get("home")
         and event.get("away")
     ]
     log(f"  Found {len(dated_events)} tennis events from Odds-API.io")
     if not dated_events:
-        LAST_FIXTURE_STATUS = "valid_empty_schedule"
+        LAST_FIXTURE_STATUS = "provider_schema_failure" if len(SCHEMA_ALERTS) > schema_alert_count_before else "valid_empty_schedule"
         return []
 
     events_by_id = {str(event.get("id")): event for event in dated_events}
@@ -935,14 +1005,14 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
             api_keys,
             key_index,
         )
-        if isinstance(payload, list):
-            odds_events = payload
-        elif isinstance(payload, dict):
-            odds_events = payload.get("events") or payload.get("data") or []
-        else:
-            odds_events = []
+        odds_events = normalize_provider_collection(payload, "Odds-API.io", "/v3/odds/multi") if payload is not None else []
 
         for odds_event in odds_events:
+            if not isinstance(odds_event, dict):
+                record_schema_alert("Odds-API.io", "/v3/odds/multi", f"odds item changed to {type(odds_event).__name__}")
+                continue
+            if not validate_odds_event_schema(odds_event):
+                continue
             event = events_by_id.get(str(odds_event.get("id")), odds_event)
             home = event.get("home") or odds_event.get("home")
             away = event.get("away") or odds_event.get("away")
@@ -953,6 +1023,9 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
             if home_odds is None or away_odds is None:
                 continue
             league = event.get("league") or odds_event.get("league") or {}
+            if not isinstance(league, dict):
+                record_schema_alert("Odds-API.io", "/v3/odds/multi", f"league changed to {type(league).__name__}")
+                league = {}
             tournament = league.get("name") or "Tennis"
             matches.append({
                 "event_id": str(event.get("id", odds_event.get("id", ""))),
@@ -3294,7 +3367,7 @@ def main():
     log("Fetching tennis fixtures and odds...")
     all_matches = fetch_matches_from_odds_api(date_str, odds_api_keys)
     if not all_matches:
-        if LAST_FIXTURE_STATUS == "provider_failure":
+        if LAST_FIXTURE_STATUS in {"provider_failure", "provider_schema_failure"}:
             title, explanation = "DATA COLLECTION FAILURE", "The fixture provider failed, so this run is not evidence that no qualifying bets existed."
         elif LAST_FIXTURE_STATUS == "valid_empty_schedule":
             title, explanation = "VALID EMPTY SCHEDULE", "The provider responded successfully but returned no tennis fixtures for the requested date."

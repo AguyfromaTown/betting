@@ -192,6 +192,40 @@ class TennisBotTests(unittest.TestCase):
             bot.fetch_matches_from_odds_api("2026-08-01", ["key"])
             self.assertEqual(bot.LAST_FIXTURE_STATUS, "valid_empty_schedule")
 
+    def test_provider_collection_schema_change_is_alerted(self):
+        bot.SCHEMA_ALERTS.clear()
+        try:
+            events = bot.normalize_provider_collection(
+                {"events": "unexpected"}, "Odds-API.io", "/v3/events"
+            )
+            self.assertEqual(events, [])
+            self.assertIn("changed from list to str", bot.SCHEMA_ALERTS[0]["detail"])
+        finally:
+            bot.SCHEMA_ALERTS.clear()
+
+    def test_malformed_fixture_is_not_reported_as_empty_schedule(self):
+        bot.SCHEMA_ALERTS.clear()
+        malformed = [{"id": "7", "date": "2026-08-01T12:00:00Z", "home": "Player One"}]
+        try:
+            with patch.object(bot, "fetch_odds_json", return_value=(malformed, 0)):
+                matches = bot.fetch_matches_from_odds_api("2026-08-01", ["key"])
+            self.assertEqual(matches, [])
+            self.assertEqual(bot.LAST_FIXTURE_STATUS, "provider_schema_failure")
+            self.assertIn("away", bot.SCHEMA_ALERTS[0]["detail"])
+        finally:
+            bot.SCHEMA_ALERTS.clear()
+
+    def test_nested_odds_schema_change_is_quarantined(self):
+        bot.SCHEMA_ALERTS.clear()
+        try:
+            valid = bot.validate_odds_event_schema({
+                "id": "7", "bookmakers": {"Book": {"name": "ML", "odds": []}}
+            })
+            self.assertFalse(valid)
+            self.assertIn("markets changed to dict", bot.SCHEMA_ALERTS[0]["detail"])
+        finally:
+            bot.SCHEMA_ALERTS.clear()
+
     def test_diagnostic_mode_does_not_save_discovered_alias(self):
         with tempfile.TemporaryDirectory() as directory:
             aliases = Path(directory) / "aliases.csv"
