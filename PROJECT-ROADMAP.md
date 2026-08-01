@@ -74,7 +74,7 @@ Status conventions:
 - [x] Require uncertainty-adjusted EV during final authorization.
 - [x] Calibrate ATP, WTA, Challenger and ITF independently after sufficient samples.
 - [x] Segment historical evaluation by surface and tour/level.
-- [ ] Build separate best-of-three and best-of-five models.
+- [x] Build separate best-of-three and best-of-five models.
 - [ ] Build indoor/outdoor models after sufficient data.
 - [x] Use chronological walk-forward training and holdout evaluation.
 - [x] Exclude future results from decision-time training.

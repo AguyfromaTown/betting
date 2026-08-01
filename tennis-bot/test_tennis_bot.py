@@ -532,6 +532,19 @@ class TennisBotTests(unittest.TestCase):
                  "MODEL_PROBABILITY": ".58"} for index in range(199)]
         self.assertIsNone(bot.learned_component_weights(rows))
 
+    def test_bo3_and_bo5_models_have_independent_maturity(self):
+        bo3 = [{"DATE": f"2026-01-{index:03d}", "RESULT": "W" if index % 2 else "L",
+                "ELO_PROBABILITY": ".60", "MARKET_PROBABILITY": ".55",
+                "MODEL_PROBABILITY": ".58", "BEST_OF": "3"} for index in range(200)]
+        bo5 = [{"DATE": f"2026-02-{index:03d}", "RESULT": "W" if index % 2 else "L",
+                "ELO_PROBABILITY": ".60", "MARKET_PROBABILITY": ".55",
+                "MODEL_PROBABILITY": ".58", "BEST_OF": "5"} for index in range(199)]
+        learned_bo3 = bot.learned_format_component_weights(bo3 + bo5, 3)
+        self.assertIsNotNone(learned_bo3)
+        self.assertEqual(learned_bo3["sample"], 200)
+        self.assertEqual(learned_bo3["format"], "BO3")
+        self.assertIsNone(bot.learned_format_component_weights(bo3 + bo5, 5))
+
     def test_workload_learner_requires_mature_sample(self):
         rows = [{"DATE": f"2026-{index:03d}", "EVENT_ID": str(index), "PICK": "Player",
                  "RESULT": "W", "MODEL_PROBABILITY": ".70", "WORKLOAD_PENALTY": "0",
@@ -1042,6 +1055,9 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["WORKLOAD_POLICY_PROMOTED"], "False")
         self.assertEqual(second["CALIBRATION_SEGMENT"], "ATP")
         self.assertEqual(second["CALIBRATION_APPLIED"], "False")
+        self.assertEqual(second["FORMAT_MODEL"], "BO5")
+        self.assertEqual(second["FORMAT_MODEL_SAMPLE"], "0")
+        self.assertEqual(second["FORMAT_MODEL_PROMOTED"], "False")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1537,8 +1553,8 @@ class TennisBotTests(unittest.TestCase):
 
     def test_backtest_summary_segments_settled_predictions(self):
         rows = [
-            {"DATE": "2026-07-01", "OPENING_ODDS": "1.60", "MODEL_PROBABILITY": "0.65", "EV": "0.04", "RESULT": "W", "CLV": "0.02", "TOUR": "ATP", "SURFACE": "clay", "QUALITY_GRADE": "A", "DECISION": "Top Pick"},
-            {"DATE": "2026-07-02", "OPENING_ODDS": "1.70", "MODEL_PROBABILITY": "0.62", "EV": "0.03", "RESULT": "L", "CLV": "-0.01", "TOUR": "ATP", "SURFACE": "clay", "QUALITY_GRADE": "B", "DECISION": "Value Pick"},
+            {"DATE": "2026-07-01", "OPENING_ODDS": "1.60", "MODEL_PROBABILITY": "0.65", "EV": "0.04", "RESULT": "W", "CLV": "0.02", "TOUR": "ATP", "SURFACE": "clay", "BEST_OF": "3", "QUALITY_GRADE": "A", "DECISION": "Top Pick"},
+            {"DATE": "2026-07-02", "OPENING_ODDS": "1.70", "MODEL_PROBABILITY": "0.62", "EV": "0.03", "RESULT": "L", "CLV": "-0.01", "TOUR": "ATP", "SURFACE": "clay", "BEST_OF": "3", "QUALITY_GRADE": "B", "DECISION": "Value Pick"},
         ]
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "backtest-summary.md"
@@ -1556,6 +1572,9 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("requires at least 200", report)
         self.assertIn("## Tour calibration maturity", report)
         self.assertIn("| ATP | 2 | 2 | collecting data |", report)
+        self.assertIn("## Match format", report)
+        self.assertIn("## Format model maturity", report)
+        self.assertIn("| BO3 | 2 | 0 | shadow/collecting |", report)
 
     def test_walk_forward_staking_compares_fixed_and_capped_kelly(self):
         rows = [

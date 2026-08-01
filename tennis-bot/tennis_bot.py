@@ -87,7 +87,7 @@ OFFICIAL_STATUS_DOMAINS = {
 BLOCKING_PHYSICAL_STATUSES = {"questionable", "injured", "withdrawn", "unavailable", "suspended"}
 MAX_CACHE_ENTRY_BYTES = 2_000_000
 MAX_CACHE_ENTRIES = 20
-MODEL_VERSION = "tennis-2026.08-tour-calibration-v1"
+MODEL_VERSION = "tennis-2026.08-format-models-v1"
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -2330,6 +2330,26 @@ def learned_component_weights(rows: list[dict]) -> dict | None:
             "promoted": bool(active_brier and challenger_brier and challenger_brier <= active_brier * .97)}
 
 
+def canonical_best_of(value) -> int | None:
+    try:
+        best_of = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    return best_of if best_of in {3, 5} else None
+
+
+def learned_format_component_weights(rows: list[dict], best_of: int) -> dict | None:
+    """Train an isolated component-weight challenger for one verified match format."""
+    format_value = canonical_best_of(best_of)
+    if format_value is None:
+        return None
+    format_rows = [row for row in rows if canonical_best_of(row.get("BEST_OF")) == format_value]
+    learned = learned_component_weights(format_rows)
+    if learned:
+        learned = {**learned, "format": f"BO{format_value}", "format_value": format_value}
+    return learned
+
+
 def workload_policy_penalty(values: dict, policy: dict) -> float:
     """Apply a bounded workload policy to either live lower-case or audit upper-case fields."""
     def number(lower: str, upper: str, default=0.0):
@@ -2619,7 +2639,7 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
     decision_date = str(match.get("start_time") or "")[:10] or None
     history = load_resolved_predictions(decision_date)
     comparable = [row for row in history if (row.get("SURFACE") or "Unknown") == (surface or "Unknown")]
-    challenger = learned_component_weights(comparable)
+    challenger = learned_format_component_weights(history, match_best_of)
     rollback = automated_rollback_state(history)
     challenger_probability = None
     if challenger:
@@ -2696,6 +2716,10 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "challenger_probability": challenger_probability,
         "challenger_sample": challenger["sample"] if challenger else 0,
         "challenger_promoted": bool(challenger and challenger["promoted"] and not rollback["model_rollback"]),
+        "format_model": f"BO{match_best_of}",
+        "format_model_sample": challenger["sample"] if challenger else 0,
+        "format_model_holdout": challenger["holdout"] if challenger else 0,
+        "format_model_promoted": bool(challenger and challenger["promoted"] and not rollback["model_rollback"]),
         "calibration_sample": calibration_sample,
         "calibration_segment": calibration["segment"],
         "calibration_applied": calibration["applied"],
@@ -2873,6 +2897,8 @@ def build_prompt(
                     f"  Python baseline for {player}: market fair "
                     f"{baseline['market_probability']:.1%}, Elo "
                     f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, serve/return {serve_text}, H2H {h2h_text}, clutch {clutch_text}, BO5 {bo5_text}, physical status {physical_text}, workload {workload_text}, "
+                    f"format model {baseline.get('format_model', 'unknown')} "
+                    f"(n={baseline.get('format_model_sample', 0)}, promoted={baseline.get('format_model_promoted', False)}), "
                     f"tour calibration {baseline.get('calibration_segment', 'Unknown')} "
                     f"(n={baseline.get('calibration_sample', 0)}, applied={baseline.get('calibration_applied', False)}), blended assessed "
                     f"{baseline['assessed_probability']:.1%}, EV "
@@ -3421,7 +3447,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "BO5_MATCH_WIN_RATE", "BO5_MATCH_SAMPLE", "BO5_SET_WIN_RATE", "BO5_SET_SAMPLE", "BO5_SAME_SURFACE_SAMPLE",
         "BO5_FIVE_SET_WIN_RATE", "BO5_FIVE_SET_SAMPLE", "BO5_COMEBACK_0_2_RATE", "BO5_COMEBACK_0_2_SAMPLE", "BO5_SOURCE",
         "COMPONENT_WEIGHTS", "RAW_PROBABILITY", "CHALLENGER_PROBABILITY",
-        "CHALLENGER_SAMPLE", "CHALLENGER_PROMOTED", "CALIBRATION_SAMPLE", "CALIBRATION_SEGMENT", "CALIBRATION_APPLIED",
+        "CHALLENGER_SAMPLE", "CHALLENGER_PROMOTED", "FORMAT_MODEL", "FORMAT_MODEL_SAMPLE",
+        "FORMAT_MODEL_HOLDOUT", "FORMAT_MODEL_PROMOTED", "CALIBRATION_SAMPLE", "CALIBRATION_SEGMENT", "CALIBRATION_APPLIED",
         "CONTEXT_PENALTY", "CONTEXT_REASON", "WORKLOAD_PENALTY", "STATIC_WORKLOAD_PENALTY",
         "WORKLOAD_POLICY_ID", "WORKLOAD_POLICY_SAMPLE", "WORKLOAD_POLICY_HOLDOUT",
         "WORKLOAD_POLICY_ACTIVE_BRIER", "WORKLOAD_POLICY_CHALLENGER_BRIER", "WORKLOAD_POLICY_PROMOTED", "REST_DAYS",
@@ -3541,6 +3568,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 f"{baseline['raw_probability']:.6f}",
                 f"{baseline['challenger_probability']:.6f}" if baseline.get("challenger_probability") is not None else "",
                 baseline.get("challenger_sample", 0), baseline.get("challenger_promoted", False),
+                baseline.get("format_model", ""), baseline.get("format_model_sample", 0),
+                baseline.get("format_model_holdout", 0), baseline.get("format_model_promoted", False),
                 baseline.get("calibration_sample", 0), baseline.get("calibration_segment", "Unknown"),
                 baseline.get("calibration_applied", False), f"{baseline.get('context_penalty', 0):.6f}", baseline.get("context_reason", "main_draw"),
                 f"{baseline.get('workload_penalty', 0):.6f}", f"{baseline.get('static_workload_penalty', 0):.6f}",
@@ -3923,7 +3952,8 @@ def generate_backtest_summary(resolved: list[dict]):
         ("Negative" if high == 0 else f"{low:.0%}–{high:.0%}" if high < 99 else "10%+", [r for r in resolved if low <= float(r.get("EV") or 0) < high])
         for low, high in ev_bands
     ])
-    for field, title in (("TOUR", "Tour and level"), ("SURFACE", "Surface"), ("QUALITY_GRADE", "Evidence quality")):
+    for field, title in (("TOUR", "Tour and level"), ("SURFACE", "Surface"), ("BEST_OF", "Match format"),
+                         ("QUALITY_GRADE", "Evidence quality")):
         values = sorted({row.get(field) or "Unknown" for row in resolved})
         _append_segment_table(lines, title, [(value, [r for r in resolved if (r.get(field) or "Unknown") == value]) for value in values])
     lines.extend(["", "## Tour calibration maturity", "",
@@ -3936,6 +3966,16 @@ def generate_backtest_summary(resolved: list[dict]):
             bucket_counts.append(sum(low <= float(row.get("MODEL_PROBABILITY") or -1) < low + .1 for row in tour_rows))
         largest = max(bucket_counts, default=0)
         lines.append(f"| {tour} | {len(tour_rows)} | {largest} | {'locally eligible' if largest >= MIN_CALIBRATION_SAMPLE else 'collecting data'} |")
+    lines.extend(["", "## Format model maturity", "",
+                  "BO3 and BO5 component-weight challengers train and pass holdout gates independently.", "",
+                  "| Format | Settled predictions | Holdout | Promotion |", "|---|---:|---:|---|"])
+    for best_of in (3, 5):
+        format_rows = [row for row in resolved if canonical_best_of(row.get("BEST_OF")) == best_of]
+        learned = learned_format_component_weights(resolved, best_of)
+        lines.append(
+            f"| BO{best_of} | {len(format_rows)} | {learned['holdout'] if learned else 0} | "
+            f"{'approved' if learned and learned['promoted'] else 'shadow/collecting'} |"
+        )
     months = sorted({(row.get("DATE") or "")[:7] for row in resolved if row.get("DATE")})
     _append_segment_table(lines, "Monthly performance", [(month, [r for r in resolved if (r.get("DATE") or "").startswith(month)]) for month in months])
     simulation = walk_forward_staking_simulation(resolved)
