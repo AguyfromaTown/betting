@@ -177,7 +177,7 @@ class TennisBotTests(unittest.TestCase):
             self.assertEqual(saved["policy_mode"], "standard")
 
     def test_diagnostic_summary_has_no_mutating_actions(self):
-        with patch.object(bot, "fetch_matches_from_odds_api", return_value=[]):
+        with patch.object(bot, "fetch_verified_matches", return_value=[]):
             result = bot.run_diagnostic("2026-08-01", 1.5, 1.6, ["key"])
         self.assertFalse(result["would_write"])
         self.assertFalse(result["would_settle"])
@@ -225,6 +225,53 @@ class TennisBotTests(unittest.TestCase):
             self.assertIn("markets changed to dict", bot.SCHEMA_ALERTS[0]["detail"])
         finally:
             bot.SCHEMA_ALERTS.clear()
+
+    def test_espn_scoreboard_parses_only_dated_singles_fixtures(self):
+        payload = {"events": [{
+            "name": "ATP Test",
+            "groupings": [
+                {"grouping": {"slug": "mens-doubles"}, "competitions": []},
+                {"grouping": {"slug": "mens-singles"}, "competitions": [
+                    {"id": "42", "startDate": "2026-08-01T12:00Z",
+                     "competitors": [
+                         {"athlete": {"displayName": "Player One"}},
+                         {"athlete": {"displayName": "Player Two"}},
+                     ], "status": {"type": {"state": "pre"}}},
+                    {"id": "43", "startDate": "2026-08-02T12:00Z",
+                     "competitors": [
+                         {"athlete": {"displayName": "Other One"}},
+                         {"athlete": {"displayName": "Other Two"}},
+                     ]},
+                ]},
+            ],
+        }]}
+        fixtures = bot.parse_espn_scoreboard(payload, "2026-08-01", "atp")
+        self.assertEqual(len(fixtures), 1)
+        self.assertEqual(fixtures[0]["event_id"], "espn:atp:42")
+        self.assertEqual(fixtures[0]["status"], "pre")
+
+    def test_independent_fixture_cross_check_is_order_insensitive(self):
+        primary = [
+            {"player1": "Zheng, Michael", "player2": "Arthur Gea"},
+            {"player1": "Unmatched One", "player2": "Unmatched Two"},
+        ]
+        secondary = [{"event_id": "espn:atp:7", "player1": "Arthur Gea", "player2": "Michael Zheng"}]
+        checked = bot.cross_check_fixture_sources(primary, secondary)
+        self.assertTrue(checked[0]["secondary_fixture_confirmed"])
+        self.assertEqual(checked[0]["fixture_sources"], ["Odds-API.io", "ESPN"])
+        self.assertFalse(checked[1]["secondary_fixture_confirmed"])
+
+    def test_verified_match_collection_calls_both_independent_sources(self):
+        primary = [{"player1": "A", "player2": "B"}]
+        secondary = [{"event_id": "espn:atp:1", "player1": "B", "player2": "A"}]
+        with (
+            patch.object(bot, "fetch_secondary_fixtures", return_value=secondary) as second,
+            patch.object(bot, "fetch_matches_from_odds_api", return_value=primary) as first,
+        ):
+            matches = bot.fetch_verified_matches("2026-08-01", ["key"])
+        second.assert_called_once_with("2026-08-01")
+        first.assert_called_once_with("2026-08-01", ["key"])
+        self.assertTrue(matches[0]["secondary_fixture_confirmed"])
 
     def test_diagnostic_mode_does_not_save_discovered_alias(self):
         with tempfile.TemporaryDirectory() as directory:

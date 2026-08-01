@@ -578,21 +578,27 @@ def fetch_json(url: str, params: dict | None = None):
     if not allow_provider_request(provider):
         return None
     for attempt in range(MAX_TRANSIENT_RETRIES + 1):
+        started = time.monotonic()
         try:
             response = requests.get(url, params=params, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
             if response.status_code in TRANSIENT_HTTP_STATUSES and attempt < MAX_TRANSIENT_RETRIES:
+                record_source_health(provider, False, f"HTTP {response.status_code} retry {attempt + 1}", started)
                 wait_before_retry(url.split("/")[2], attempt, response); continue
             response.raise_for_status()
             payload = response.json()
+            record_source_health(provider, True, f"HTTP {response.status_code}", started)
             record_provider_success(provider)
             return payload
         except requests.RequestException as exc:
             if attempt < MAX_TRANSIENT_RETRIES and getattr(exc, "response", None) is None:
+                record_source_health(provider, False, f"{type(exc).__name__} retry {attempt + 1}", started)
                 wait_before_retry(url.split("/")[2], attempt); continue
+            record_source_health(provider, False, type(exc).__name__, started)
             log(f"  API request failed for {url}: {exc}")
             record_provider_failure(provider, type(exc).__name__)
             return None
         except ValueError as exc:
+            record_source_health(provider, False, "invalid_json", started)
             log(f"  API request failed for {url}: {exc}")
             record_provider_failure(provider, "invalid_json")
             return None
@@ -899,6 +905,106 @@ def fetch_matches_all(date_str: str) -> list[dict]:
             unique.append(m)
     log(f"Total unique matches: {len(unique)}")
     return unique
+
+
+def parse_espn_scoreboard(payload, date_str: str, tour: str) -> list[dict]:
+    """Parse singles fixtures from ESPN's structured tennis scoreboard."""
+    events = normalize_provider_collection(payload, "ESPN", f"/{tour}/scoreboard")
+    fixtures = []
+    for event in events:
+        if not isinstance(event, dict):
+            record_schema_alert("ESPN", f"/{tour}/scoreboard", f"event item changed to {type(event).__name__}")
+            continue
+        tournament = str(event.get("name") or event.get("shortName") or f"{tour.upper()} Event")
+        groupings = event.get("groupings")
+        if not isinstance(groupings, list):
+            record_schema_alert("ESPN", f"/{tour}/scoreboard", "event missing groupings list")
+            continue
+        for grouping in groupings:
+            if not isinstance(grouping, dict):
+                record_schema_alert("ESPN", f"/{tour}/scoreboard", "grouping item is not an object")
+                continue
+            grouping_meta = grouping.get("grouping") or {}
+            if not isinstance(grouping_meta, dict):
+                record_schema_alert("ESPN", f"/{tour}/scoreboard", "grouping metadata is not an object")
+                continue
+            if "singles" not in str(grouping_meta.get("slug") or grouping_meta.get("displayName") or "").casefold():
+                continue
+            competitions = grouping.get("competitions")
+            if not isinstance(competitions, list):
+                record_schema_alert("ESPN", f"/{tour}/scoreboard", "singles grouping missing competitions list")
+                continue
+            for competition in competitions:
+                if not isinstance(competition, dict):
+                    record_schema_alert("ESPN", f"/{tour}/scoreboard", "competition item is not an object")
+                    continue
+                start_time = str(competition.get("startDate") or competition.get("date") or "")
+                if not start_time.startswith(date_str):
+                    continue
+                competitors = competition.get("competitors")
+                if not isinstance(competitors, list) or len(competitors) != 2:
+                    record_schema_alert("ESPN", f"/{tour}/scoreboard", "dated singles match does not have two competitors")
+                    continue
+                names = []
+                for competitor in competitors:
+                    athlete = competitor.get("athlete") if isinstance(competitor, dict) else None
+                    name = athlete.get("displayName") if isinstance(athlete, dict) else None
+                    if name:
+                        names.append(str(name).strip())
+                if len(names) != 2:
+                    record_schema_alert("ESPN", f"/{tour}/scoreboard", "competitor displayName is missing")
+                    continue
+                status = competition.get("status") or {}
+                status_type = status.get("type") if isinstance(status, dict) else {}
+                fixtures.append({
+                    "event_id": f"espn:{tour}:{competition.get('id', '')}",
+                    "player1": names[0], "player2": names[1], "tournament": tournament,
+                    "level": tour.upper(), "start_time": start_time,
+                    "status": status_type.get("state", "") if isinstance(status_type, dict) else "",
+                    "fixture_source": "ESPN",
+                })
+    return fixtures
+
+
+def fetch_secondary_fixtures(date_str: str) -> list[dict]:
+    """Fetch an independent, keyless ATP/WTA fixture cross-check."""
+    compact_date = date_str.replace("-", "")
+    fixtures = []
+    for tour in ("atp", "wta"):
+        url = f"https://site.api.espn.com/apis/site/v2/sports/tennis/{tour}/scoreboard"
+        payload = fetch_json(url, {"dates": compact_date})
+        if payload is not None:
+            fixtures.extend(parse_espn_scoreboard(payload, date_str, tour))
+    log(f"  Found {len(fixtures)} independent fixtures from ESPN")
+    return fixtures
+
+
+def cross_check_fixture_sources(matches: list[dict], secondary: list[dict]) -> list[dict]:
+    """Annotate primary priced fixtures when the independent feed confirms the pairing."""
+    secondary_by_pair = {
+        frozenset((normalize_player_name(item.get("player1", "")), normalize_player_name(item.get("player2", "")))): item
+        for item in secondary
+        if item.get("player1") and item.get("player2")
+    }
+    confirmed = 0
+    for match in matches:
+        pair = frozenset((normalize_player_name(match.get("player1", "")), normalize_player_name(match.get("player2", ""))))
+        corroborating = secondary_by_pair.get(pair)
+        match["fixture_sources"] = ["Odds-API.io"]
+        match["secondary_fixture_confirmed"] = bool(corroborating)
+        if corroborating:
+            match["fixture_sources"].append("ESPN")
+            match["secondary_event_id"] = corroborating.get("event_id", "")
+            confirmed += 1
+    log(f"  Independently confirmed {confirmed}/{len(matches)} priced fixtures")
+    return matches
+
+
+def fetch_verified_matches(date_str: str, api_keys: list[str]) -> list[dict]:
+    """Collect priced fixtures and independently cross-check ATP/WTA coverage."""
+    secondary = fetch_secondary_fixtures(date_str)
+    primary = fetch_matches_from_odds_api(date_str, api_keys)
+    return cross_check_fixture_sources(primary, secondary)
 
 
 def extract_moneyline_odds(payload: dict) -> tuple[float | None, float | None, str | None]:
@@ -2379,7 +2485,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "UNCERTAINTY_MARGIN", "RISK_ADJUSTED_EV", "KILL_SWITCH", "KILL_SWITCH_REASON",
         "SEGMENT_SAMPLE", "SEGMENT_ROI", "SEGMENT_CLV", "SEGMENT_SUSPENDED",
         "EV", "SCORE", "EVIDENCE", "QUALITY_SCORE", "QUALITY_GRADE",
-        "TOUR", "SURFACE", "BOOKMAKERS", "DECISION", "REASON", "RESULT",
+        "TOUR", "SURFACE", "BOOKMAKERS", "FIXTURE_SOURCES", "SECONDARY_FIXTURE_CONFIRMED",
+        "DECISION", "REASON", "RESULT",
         "CLOSING_ODDS", "CLV",
     ]
     if AUDIT_FILE.exists() and AUDIT_FILE.stat().st_size:
@@ -2458,6 +2565,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 "reliable" if tennis_baseline_is_reliable(baseline) else "insufficient",
                 quality_score, quality_grade, match.get("level") or "Unknown",
                 match.get("surface") or "Unknown", match.get("bookmaker_count") or 0,
+                ";".join(match.get("fixture_sources") or ["Odds-API.io"]),
+                match.get("secondary_fixture_confirmed", False),
                 decision, reason, "", "", "",
             ])
     if not rows:
@@ -2962,7 +3071,7 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
         bankroll = reconcile_bankroll(bankroll)
     authorized_recs, authorized_matches = [], []
     for date_str, candidates in ready_by_date.items():
-        fresh = fetch_matches_from_odds_api(date_str, api_keys)
+        fresh = fetch_verified_matches(date_str, api_keys)
         wanted_ids = {row.get("EVENT_ID") for row in candidates}
         wanted_pairs = [{normalize_player_name(row["PLAYER1"]), normalize_player_name(row["PLAYER2"])} for row in candidates]
         matches = [m for m in fresh if m.get("event_id") in wanted_ids or {normalize_player_name(m["player1"]), normalize_player_name(m["player2"])} in wanted_pairs]
@@ -3280,7 +3389,7 @@ def finalize_analysis(
 
 def run_diagnostic(date_str: str, odds_min: float, odds_max: float, api_keys: list[str]) -> dict:
     """Exercise collection and deterministic validation without mutating project state."""
-    matches = fetch_matches_from_odds_api(date_str, api_keys)
+    matches = fetch_verified_matches(date_str, api_keys)
     qualified = attach_odds(matches, odds_min, odds_max)
     if qualified:
         enrich_matches_with_profiles(qualified)
@@ -3365,7 +3474,7 @@ def main():
 
     # Stage 1: Collect verified matches and odds
     log("Fetching tennis fixtures and odds...")
-    all_matches = fetch_matches_from_odds_api(date_str, odds_api_keys)
+    all_matches = fetch_verified_matches(date_str, odds_api_keys)
     if not all_matches:
         if LAST_FIXTURE_STATUS in {"provider_failure", "provider_schema_failure"}:
             title, explanation = "DATA COLLECTION FAILURE", "The fixture provider failed, so this run is not evidence that no qualifying bets existed."

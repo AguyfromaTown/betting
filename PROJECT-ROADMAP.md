@@ -11,7 +11,7 @@ Status conventions:
 
 ## Data acquisition
 
-- [ ] Use at least two independent fixture sources.
+- [x] Use at least two independent fixture sources.
 - [x] Collect prices from multiple bookmakers.
 - [x] Retain timestamped pre-match price snapshots in `price-history.csv`.
 - [x] Detect malformed and isolated bookmaker outlier prices.
