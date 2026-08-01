@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-08-01T19:03:19.670591+00:00",
+  "generated_at": "2026-08-01T19:06:56.672137+00:00",
   "date": "2026-08-01",
   "mode": "revalidation",
   "deliveries": [
     {
       "channel": "telegram",
-      "status": "configuration_error",
-      "detail": "missing:TELEGRAM_BOT_TOKEN"
+      "status": "delivered",
+      "detail": "ok"
     }
   ]
 }
