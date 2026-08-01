@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-08-01T13:03:39.563199+00:00",
+  "fixture_status": "not_run",
+  "requests": [
+    {
+      "source": "api.odds-api.io",
+      "ok": true,
+      "detail": "HTTP 200 key 1",
+      "latency_ms": 496,
+      "timestamp": "2026-08-01T13:03:39.304518+00:00"
+    },
+    {
+      "source": "api.odds-api.io",
+      "ok": true,
+      "detail": "HTTP 200 key 1",
+      "latency_ms": 231,
+      "timestamp": "2026-08-01T13:03:39.536045+00:00"
+    }
+  ],
+  "failures": 0
+}

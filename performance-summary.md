@@ -7,6 +7,7 @@
 - Brier score: N/A
 - Shadow challenger Brier: N/A
 - Average CLV: N/A
+- Settled counterfactual decisions: 0
 
 ## Calibration
 
