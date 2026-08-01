@@ -20,7 +20,7 @@ Status conventions:
 - [x] Record indoor/outdoor metadata when supplied by the provider.
 - [x] Detect best-of-three and best-of-five formats conservatively.
 - [x] Classify ATP, WTA, Challenger and ITF events.
-- [ ] Add persistent external-response caching.
+- [x] Add persistent external-response caching.
 - [x] Rotate Odds and Groq API keys after quota/authentication failures.
 - [x] Track provider request latency and failures in `source-health.json`.
 - [ ] Track API quota consumption.

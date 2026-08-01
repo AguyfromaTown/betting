@@ -5,6 +5,7 @@ Designed for GitHub Actions execution.
 """
 
 import argparse
+import base64
 import csv
 import difflib
 import hashlib
@@ -16,6 +17,7 @@ import sys
 import tempfile
 import time
 import unicodedata
+import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -35,6 +37,7 @@ PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
 SETTLEMENT_ALERT_FILE = REPO_ROOT / "settlement-alerts.md"
 MANUAL_KILL_SWITCH_FILE = REPO_ROOT / "kill-switch.json"
 RISK_CONFIG_FILE = REPO_ROOT / "risk-config.json"
+EXTERNAL_CACHE_FILE = REPO_ROOT / "external-cache.json"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
@@ -66,6 +69,8 @@ MAX_PRICE_MOVEMENT = 0.10
 MAX_BOOKMAKER_DISPERSION = 0.12
 MAX_BETS_PER_TOURNAMENT = 2
 DEFAULT_TOUR_EXPOSURE_CAPS = {"ATP": .08, "WTA": .08, "Challenger": .05, "ITF": .03, "Unknown": .03}
+MAX_CACHE_ENTRY_BYTES = 2_000_000
+MAX_CACHE_ENTRIES = 20
 MODEL_VERSION = "tennis-2026.08-quality-v2"
 REQUEST_HEADERS = {
     "User-Agent": (
@@ -143,6 +148,48 @@ def allow_provider_request(provider: str) -> bool:
     state = CIRCUIT_BREAKERS.get(provider, {})
     log(f"  {provider} circuit is open; skipping request ({state.get('last_error', 'provider failure')})")
     return False
+
+
+def external_cache_key(namespace: str, url: str) -> str:
+    return hashlib.sha256(f"{namespace}|{url}".encode("utf-8")).hexdigest()
+
+
+def load_external_cache() -> dict:
+    if not EXTERNAL_CACHE_FILE.exists():
+        return {"version": 1, "entries": {}}
+    try:
+        payload = json.loads(EXTERNAL_CACHE_FILE.read_text(encoding="utf-8"))
+        if payload.get("version") != 1 or not isinstance(payload.get("entries"), dict):
+            raise ValueError("unsupported cache schema")
+        return payload
+    except (OSError, ValueError, TypeError):
+        return {"version": 1, "entries": {}}
+
+
+def get_cached_response(namespace: str, url: str, max_age_seconds: int) -> str | None:
+    entry = load_external_cache()["entries"].get(external_cache_key(namespace, url))
+    if not entry or time.time() - float(entry.get("cached_at", 0)) > max_age_seconds:
+        return None
+    try:
+        return zlib.decompress(base64.b64decode(entry["content"])).decode("utf-8")
+    except (KeyError, TypeError, ValueError, zlib.error, UnicodeDecodeError):
+        return None
+
+
+def cache_external_response(namespace: str, url: str, content: str):
+    raw = content.encode("utf-8")
+    if not raw or len(raw) > MAX_CACHE_ENTRY_BYTES:
+        return
+    payload = load_external_cache()
+    entries = payload["entries"]
+    key = external_cache_key(namespace, url)
+    entries[key] = {"namespace": namespace, "url": url, "cached_at": time.time(),
+                    "content": base64.b64encode(zlib.compress(raw, 9)).decode("ascii")}
+    if len(entries) > MAX_CACHE_ENTRIES:
+        oldest = sorted(entries, key=lambda item: float(entries[item].get("cached_at", 0)))
+        for stale_key in oldest[:len(entries) - MAX_CACHE_ENTRIES]:
+            entries.pop(stale_key, None)
+    atomic_write_text(EXTERNAL_CACHE_FILE, json.dumps(payload, separators=(",", ":")) + "\n")
 
 
 def atomic_write_text(path: Path, content: str, encoding: str = "utf-8"):
@@ -332,9 +379,16 @@ def tour_exposure_bucket(match: dict) -> str:
     return "Unknown"
 
 
-def fetch(url: str) -> str | None:
+def fetch(url: str, cache_ttl: int = 0, stale_if_error: int = 0) -> str | None:
     provider = url.split("/")[2]
+    if cache_ttl:
+        cached = get_cached_response("direct", url, cache_ttl)
+        if cached is not None:
+            log(f"  Using fresh cached response for {provider}")
+            return cached
     if not allow_provider_request(provider):
+        if stale_if_error:
+            return get_cached_response("direct", url, stale_if_error)
         return None
     for attempt in range(MAX_TRANSIENT_RETRIES + 1):
         started = time.monotonic()
@@ -346,6 +400,8 @@ def fetch(url: str) -> str | None:
             resp.raise_for_status()
             record_source_health(provider, True, f"HTTP {resp.status_code}", started)
             record_provider_success(provider)
+            if cache_ttl:
+                cache_external_response("direct", url, resp.text)
             return resp.text
         except requests.RequestException as exc:
             if attempt < MAX_TRANSIENT_RETRIES and getattr(exc, "response", None) is None:
@@ -353,11 +409,16 @@ def fetch(url: str) -> str | None:
             record_source_health(provider, False, type(exc).__name__, started)
             record_provider_failure(provider, type(exc).__name__)
             log(f"  Failed to fetch {url}: {exc}")
+            if stale_if_error:
+                cached = get_cached_response("direct", url, stale_if_error)
+                if cached is not None:
+                    log(f"  Using stale cached response for {provider} after provider failure")
+                    return cached
             return None
     return None
 
 
-def fetch_reader(target_url: str) -> str | None:
+def fetch_reader(target_url: str, cache_ttl: int = 0, stale_if_error: int = 0) -> str | None:
     """Fetch a page through Jina Reader using API headers, not browser headers."""
     reader_headers = {
         "Accept": "text/plain",
@@ -369,7 +430,14 @@ def fetch_reader(target_url: str) -> str | None:
         targets.append("http://" + target_url.removeprefix("https://"))
 
     provider = "r.jina.ai"
+    if cache_ttl:
+        cached = get_cached_response("reader", target_url, cache_ttl)
+        if cached is not None:
+            log("  Using fresh cached Jina Reader response")
+            return cached
     if not allow_provider_request(provider):
+        if stale_if_error:
+            return get_cached_response("reader", target_url, stale_if_error)
         return None
     for target in targets:
         reader_url = f"https://r.jina.ai/{target}"
@@ -381,6 +449,8 @@ def fetch_reader(target_url: str) -> str | None:
                 response.raise_for_status()
                 if response.text.strip():
                     record_provider_success(provider)
+                    if cache_ttl:
+                        cache_external_response("reader", target_url, response.text)
                     return response.text
                 break
             except requests.RequestException as exc:
@@ -389,6 +459,11 @@ def fetch_reader(target_url: str) -> str | None:
                 log(f"  Reader request failed for {target}: {exc}")
                 record_provider_failure(provider, type(exc).__name__)
                 break
+    if stale_if_error:
+        cached = get_cached_response("reader", target_url, stale_if_error)
+        if cached is not None:
+            log("  Using stale cached Jina Reader response after provider failure")
+            return cached
     return None
 
 
@@ -1063,11 +1138,11 @@ def fetch_tennis_abstract_profiles(matches: list[dict]) -> dict[str, dict]:
         ("ATP", "https://tennisabstract.com/reports/atp_elo_ratings.html"),
         ("WTA", "https://tennisabstract.com/reports/wta_elo_ratings.html"),
     ):
-        html = fetch(url)
+        html = fetch(url, cache_ttl=43_200, stale_if_error=604_800)
         tour_profiles = parse_tennis_abstract_elo(html) if html else {}
         if not tour_profiles:
             log(f"  Direct Tennis Abstract {tour} access unavailable; trying reader")
-            reader_text = fetch_reader(url)
+            reader_text = fetch_reader(url, cache_ttl=43_200, stale_if_error=604_800)
             tour_profiles = (
                 parse_tennis_abstract_reader(reader_text)
                 if reader_text

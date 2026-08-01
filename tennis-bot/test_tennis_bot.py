@@ -269,6 +269,33 @@ class TennisBotTests(unittest.TestCase):
                 selected = bot.select_portfolio(recommendations, max_exposure=.08, max_bets=4)
         self.assertEqual([item["player"] for item in selected], ["A", "E"])
 
+    def test_persistent_external_cache_avoids_repeat_network_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "external-cache.json"
+            url = "https://tennisabstract.com/reports/atp_elo_ratings.html"
+            with patch.object(bot, "EXTERNAL_CACHE_FILE", cache), patch.object(bot.time, "time", return_value=1000.0):
+                bot.cache_external_response("direct", url, "cached leaderboard")
+                with patch.object(bot.requests, "get") as get:
+                    result = bot.fetch(url, cache_ttl=3600, stale_if_error=7200)
+            self.assertEqual(result, "cached leaderboard")
+            get.assert_not_called()
+
+    def test_stale_external_cache_is_used_only_after_provider_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "external-cache.json"
+            url = "https://tennisabstract.com/reports/wta_elo_ratings.html"
+            with patch.object(bot, "EXTERNAL_CACHE_FILE", cache), patch.object(bot.time, "time", return_value=1000.0):
+                bot.cache_external_response("direct", url, "older leaderboard")
+            with (
+                patch.object(bot, "EXTERNAL_CACHE_FILE", cache),
+                patch.object(bot.time, "time", return_value=5000.0),
+                patch.object(bot.time, "sleep"),
+                patch.object(bot.requests, "get", side_effect=bot.requests.ConnectionError("offline")) as get,
+            ):
+                result = bot.fetch(url, cache_ttl=60, stale_if_error=7200)
+            self.assertEqual(result, "older leaderboard")
+            self.assertEqual(get.call_count, bot.MAX_TRANSIENT_RETRIES + 1)
+
     def test_calibration_requires_mature_probability_bucket(self):
         rows = [{"MODEL_PROBABILITY": ".60", "RESULT": "W"} for _ in range(99)]
         self.assertEqual(bot.calibrate_probability(.60, rows), (.60, 99))
