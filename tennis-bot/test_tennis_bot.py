@@ -104,7 +104,8 @@ class TennisBotTests(unittest.TestCase):
                     with (patch.object(bot, "fetch_verified_matches", return_value=[match]),
                           patch.object(bot, "enrich_matches_with_profiles"), patch.object(bot, "enrich_matches_with_recent_form")):
                         authorized, cancelled = bot.revalidate_pending_bets(["fixture-key"], datetime.fromisoformat(fixture["revalidation_time"]))
-                    with patch.object(bot, "fetch_odds_json", side_effect=[([fixture["settled_event"]], 0), ([fixture["closing_market"]], 0)]):
+                    with (patch.object(bot, "fetch_odds_json", side_effect=[([fixture["settled_event"]], 0), ([fixture["closing_market"]], 0)]),
+                          patch.object(bot, "fetch_selected_bookmakers", return_value={0: "Bet365"})):
                         bot.settle_pending_bets(["fixture-key"])
                     _, bet_rows = bot.read_csv_rows(root / "bets-log.csv"); _, pending_rows = bot.read_csv_rows(root / "pending-bets.csv")
 
@@ -448,6 +449,7 @@ class TennisBotTests(unittest.TestCase):
                 patch.object(bot, "BANKROLL_FILE", root / "bankroll.txt"),
                 patch.object(bot, "SETTLEMENT_ALERT_FILE", root / "settlement-alerts.md"),
                 patch.object(bot, "fetch_odds_json", side_effect=[([event], 0), ([odds_event], 0)]),
+                patch.object(bot, "fetch_selected_bookmakers", return_value={0: "Bet365"}),
             ):
                 bot.settle_pending_bets(["key"])
             _, rows = bot.read_csv_rows(policy)
@@ -1017,6 +1019,7 @@ class TennisBotTests(unittest.TestCase):
                   patch.object(bot, "TRANSACTION_FILE", root / "transactions.csv"), patch.object(bot, "RISK_CONFIG_FILE", config),
                   patch.object(bot, "SETTLEMENT_ALERT_FILE", root / "alerts.md"),
                   patch.object(bot, "fetch_odds_json", side_effect=[([event], 0), ([], 0)]),
+                  patch.object(bot, "fetch_selected_bookmakers", return_value={0: "Bet365"}),
                   patch.object(bot, "update_audit_result")):
                 bot.settle_pending_bets(["key"])
             _, rows = bot.read_csv_rows(log_path)
@@ -1172,6 +1175,7 @@ class TennisBotTests(unittest.TestCase):
                 patch.object(bot, "TRANSACTION_FILE", transaction_path),
                 patch.object(bot, "SETTLEMENT_ALERT_FILE", root / "settlement-alerts.md"),
                 patch.object(bot, "fetch_odds_json", side_effect=[([event], 0), ([], 0)]),
+                patch.object(bot, "fetch_selected_bookmakers", return_value={0: "Bet365"}),
                 patch.object(bot, "update_audit_result"),
             ):
                 settled = bot.settle_pending_bets(["key"])
@@ -1239,6 +1243,7 @@ class TennisBotTests(unittest.TestCase):
                 patch.object(bot, "POLICY_FILE", root / "policy.csv"),
                 patch.object(bot, "SETTLEMENT_ALERT_FILE", root / "settlement-alerts.md"),
                 patch.object(bot, "fetch_odds_json", side_effect=[([event], 0), ([], 0)]),
+                patch.object(bot, "fetch_selected_bookmakers", return_value={0: "Bet365"}),
                 patch.object(bot, "update_audit_result"),
             ):
                 settled = bot.settle_pending_bets(["key"])
@@ -2296,8 +2301,9 @@ class TennisBotTests(unittest.TestCase):
         self.assertAlmostEqual(result["kelly"]["ending_bankroll"], 103.0)
         self.assertEqual(result["kelly"]["max_drawdown"], 0)
 
+    @patch.object(bot, "fetch_selected_bookmakers", return_value={0: "Bet365"})
     @patch.object(bot, "fetch_odds_json")
-    def test_odds_api_uses_batches_of_ten(self, fetch_odds_json):
+    def test_odds_api_uses_batches_of_ten(self, fetch_odds_json, selected):
         events = [
             {
                 "id": event_id,
@@ -2343,6 +2349,61 @@ class TennisBotTests(unittest.TestCase):
             bulk_calls[0].args[1]["eventIds"],
             "0,1,2,3,4,5,6,7,8,9",
         )
+        self.assertEqual(bulk_calls[0].args[4], {0: "Bet365"})
+
+    @patch.object(bot.requests, "get")
+    def test_selected_bookmakers_are_discovered_per_rotating_key(self, get):
+        first = unittest.mock.Mock(status_code=200)
+        first.raise_for_status.return_value = None
+        first.json.return_value = {"bookmakers": [{"name": "Bet365", "active": True},
+                                                    {"name": "Unibet", "active": False}]}
+        second = unittest.mock.Mock(status_code=200)
+        second.raise_for_status.return_value = None
+        second.json.return_value = {"selected": ["Pinnacle", "Betway"]}
+        get.side_effect = [first, second]
+
+        result = bot.fetch_selected_bookmakers(["key-one", "key-two"])
+
+        self.assertEqual(result, {0: "Bet365", 1: "Pinnacle,Betway"})
+        self.assertEqual(get.call_args_list[0].kwargs["params"], {"apiKey": "key-one"})
+        self.assertEqual(get.call_args_list[1].kwargs["params"], {"apiKey": "key-two"})
+
+    @patch.object(bot.requests, "get")
+    def test_http_400_does_not_open_provider_circuit_or_retry_same_key(self, get):
+        rejected = unittest.mock.Mock(status_code=400)
+        rejected.json.return_value = {"message": "bookmaker not selected"}
+        get.side_effect = [rejected, rejected]
+        bot.CIRCUIT_BREAKERS.clear()
+
+        payload, key_index = bot.fetch_odds_json(
+            "https://api.odds-api.io/v3/odds/multi",
+            {"eventIds": "1", "bookmakers": "unused"},
+            ["first", "second"], 0, {0: "Bet365", 1: "Pinnacle"},
+        )
+
+        self.assertIsNone(payload)
+        self.assertEqual(key_index, 0)
+        self.assertEqual(get.call_count, 2)
+        self.assertFalse(bot.provider_circuit_open("api.odds-api.io"))
+
+    @patch.object(bot.requests, "get")
+    def test_rotated_odds_key_uses_its_own_selected_bookmakers(self, get):
+        exhausted = unittest.mock.Mock(status_code=429)
+        working = unittest.mock.Mock(status_code=200)
+        working.raise_for_status.return_value = None
+        working.json.return_value = [{"id": 1}]
+        get.side_effect = [exhausted, working]
+
+        payload, key_index = bot.fetch_odds_json(
+            "https://api.odds-api.io/v3/odds/multi",
+            {"eventIds": "1", "bookmakers": "unused"},
+            ["first", "second"], 0, {0: "Bet365", 1: "Pinnacle,Betway"},
+        )
+
+        self.assertEqual(payload, [{"id": 1}])
+        self.assertEqual(key_index, 1)
+        self.assertEqual(get.call_args_list[0].kwargs["params"]["bookmakers"], "Bet365")
+        self.assertEqual(get.call_args_list[1].kwargs["params"]["bookmakers"], "Pinnacle,Betway")
 
     @patch.object(bot.requests, "get")
     def test_odds_api_rotates_key_after_429(self, get):

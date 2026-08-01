@@ -1049,6 +1049,7 @@ def fetch_odds_json(
     params: dict,
     api_keys: list[str],
     key_index: int,
+    bookmakers_by_key: dict[int, str] | None = None,
 ) -> tuple[object | None, int]:
     """Fetch Odds-API.io JSON, rotating keys on quota or authentication errors."""
     if not api_keys:
@@ -1060,6 +1061,11 @@ def fetch_odds_json(
     for offset in range(len(api_keys)):
         candidate_index = (key_index + offset) % len(api_keys)
         request_params = {**params, "apiKey": api_keys[candidate_index]}
+        if "bookmakers" in request_params and bookmakers_by_key is not None:
+            selected = bookmakers_by_key.get(candidate_index)
+            if not selected:
+                continue
+            request_params["bookmakers"] = selected
         for attempt in range(MAX_TRANSIENT_RETRIES + 1):
             try:
                 started = time.monotonic()
@@ -1076,6 +1082,12 @@ def fetch_odds_json(
                         f"  Odds API key {candidate_index + 1}/{len(api_keys)} "
                         f"unavailable ({response.status_code}); rotating"
                     )
+                    break
+                if response.status_code == 400:
+                    detail = safe_odds_api_error(response)
+                    record_source_health("api.odds-api.io", False, f"HTTP 400 request rejected: {detail}", started,
+                                         mode="request_validation")
+                    log(f"  Odds API rejected request parameters (key {candidate_index + 1}): {detail}")
                     break
                 if response.status_code in TRANSIENT_HTTP_STATUSES and attempt < MAX_TRANSIENT_RETRIES:
                     record_source_health("api.odds-api.io", False, f"HTTP {response.status_code} retry {attempt + 1}", started)
@@ -1103,8 +1115,82 @@ def fetch_odds_json(
                 record_provider_failure(provider, "invalid_json")
                 return None, candidate_index
 
-    log("  All configured Odds API keys are unavailable or out of quota")
+    log("  No configured Odds API key completed the request")
     return None, key_index
+
+
+def safe_odds_api_error(response) -> str:
+    """Extract a bounded provider error without echoing credentials or request URLs."""
+    detail = "invalid request"
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            value = payload.get("message") or payload.get("error") or payload.get("detail")
+            if isinstance(value, dict):
+                value = value.get("message") or value.get("detail")
+            if value:
+                detail = str(value)
+    except (AttributeError, TypeError, ValueError):
+        pass
+    detail = re.sub(r"(?i)(apiKey[=:\s]+)[^\s,&]+", r"\1[REDACTED]", detail)
+    return detail.replace("\n", " ")[:240]
+
+
+def normalize_selected_bookmakers(payload) -> list[str]:
+    """Accept documented and observed selected-bookmaker response envelopes."""
+    if isinstance(payload, dict):
+        for field in ("bookmakers", "selected", "selectedBookmakers", "data"):
+            if field in payload:
+                return normalize_selected_bookmakers(payload[field])
+        payload = [
+            {"name": name, "active": value if isinstance(value, bool) else value.get("active", True)}
+            for name, value in payload.items() if isinstance(value, (bool, dict))
+        ]
+    if not isinstance(payload, list):
+        return []
+    names = []
+    for item in payload:
+        if isinstance(item, str):
+            name, active = item, True
+        elif isinstance(item, dict):
+            name = item.get("name") or item.get("bookmaker")
+            active = item.get("active", item.get("selected", True))
+        else:
+            continue
+        if name and active is not False:
+            names.append(str(name).strip())
+    return list(dict.fromkeys(name for name in names if name))[:30]
+
+
+def fetch_selected_bookmakers(api_keys: list[str]) -> dict[int, str]:
+    """Discover each account's enabled bookmakers so rotated keys remain compatible."""
+    selections = {}
+    provider = "api.odds-api.io"
+    if not allow_provider_request(provider):
+        return selections
+    url = "https://api.odds-api.io/v3/bookmakers/selected"
+    for index, api_key in enumerate(api_keys):
+        started = time.monotonic()
+        try:
+            response = requests.get(url, params={"apiKey": api_key}, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
+            record_api_quota("Odds-API.io", response, f"key-{index + 1}")
+            if response.status_code in {401, 403, 429}:
+                record_source_health(provider, False, f"selected bookmakers HTTP {response.status_code} key {index + 1}", started)
+                continue
+            if response.status_code == 400:
+                record_source_health(provider, False, "selected bookmakers HTTP 400", started, mode="request_validation")
+                continue
+            response.raise_for_status()
+            names = normalize_selected_bookmakers(response.json())
+            if names:
+                selections[index] = ",".join(names)
+                record_source_health(provider, True, f"loaded {len(names)} selected bookmaker(s) for key {index + 1}", started)
+            else:
+                record_source_health(provider, False, f"no selected bookmakers for key {index + 1}", started)
+        except (requests.RequestException, ValueError) as exc:
+            record_source_health(provider, False, f"selected bookmakers {type(exc).__name__}", started)
+    log(f"  Loaded account-specific bookmaker selections for {len(selections)}/{len(api_keys)} key(s)")
+    return selections
 
 
 def parse_args():
@@ -1854,6 +1940,11 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
         LAST_FIXTURE_STATUS = "provider_schema_failure" if len(SCHEMA_ALERTS) > schema_alert_count_before else "valid_empty_schedule"
         return []
 
+    bookmakers_by_key = fetch_selected_bookmakers(api_keys)
+    if not bookmakers_by_key:
+        log("  No account-specific bookmaker selections were available; refusing unverifiable odds requests")
+        LAST_FIXTURE_STATUS = "provider_failure"
+        return []
     events_by_id = {str(event.get("id")): event for event in dated_events}
     matches = []
     for start in range(0, len(dated_events), 10):
@@ -1866,6 +1957,7 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
             },
             api_keys,
             key_index,
+            bookmakers_by_key,
         )
         odds_events = normalize_provider_collection(payload, "Odds-API.io", "/v3/odds/multi") if payload is not None else []
 
@@ -4802,6 +4894,7 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
         return 0
     events = []
     key_index = 0
+    bookmakers_by_key = fetch_selected_bookmakers(api_keys)
     for date in dates:
         payload, key_index = fetch_odds_json(
             "https://api.odds-api.io/v3/events",
@@ -4817,6 +4910,7 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
             "https://api.odds-api.io/v3/odds/multi",
             {"eventIds": ",".join(event_ids[start:start + 10]), "bookmakers": "Bet365,Unibet"},
             api_keys, key_index,
+            bookmakers_by_key,
         )
         odds_events = payload if isinstance(payload, list) else []
         for odds_event in odds_events:

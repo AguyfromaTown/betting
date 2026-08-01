@@ -87,6 +87,8 @@ Parameters:
 
 ```text
 eventIds=<comma-separated IDs, maximum batch size 10>
+
+Before requesting odds, the bot calls authenticated `GET /v3/bookmakers/selected` for each configured key. Every rotated key uses only that account's selected bookmakers; a fixed bookmaker list must not be assumed across accounts. HTTP 400 is treated as a non-retriable request-validation failure, recorded with a redacted bounded message, and does not open the provider availability circuit.
 bookmakers=Bet365,Unibet,Pinnacle,William Hill,Betway
 apiKey=<secret>
 ```
