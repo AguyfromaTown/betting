@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
 from contextlib import ExitStack
@@ -2369,6 +2370,21 @@ class TennisBotTests(unittest.TestCase):
         self.assertNotIn("localstorage", lowered)
         self.assertNotIn("copy-csv", lowered)
         self.assertNotIn("showresultpicker", lowered)
+
+    def test_secret_scanning_covers_history_with_pinned_actions(self):
+        workflow = MODULE_PATH.parent.parent.joinpath(".github", "workflows", "secret-scan.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("push:", workflow)
+        self.assertIn("pull_request:", workflow)
+        self.assertIn("schedule:", workflow)
+        self.assertIn("fetch-depth: 0", workflow)
+        self.assertIn("persist-credentials: false", workflow)
+        self.assertIn("gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7", workflow)
+        self.assertIn("GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false", workflow)
+        action_refs = re.findall(r"uses:\s*[^@\s]+@([^\s#]+)", workflow)
+        self.assertTrue(action_refs)
+        self.assertTrue(all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in action_refs))
 
 
 if __name__ == "__main__":

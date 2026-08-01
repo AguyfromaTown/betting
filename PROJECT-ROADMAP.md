@@ -226,7 +226,7 @@ Status conventions:
 - [ ] Rotate every API key previously exposed outside GitHub Secrets.
 - [x] Read production credentials from GitHub Secrets/environment variables.
 - [x] Avoid printing API-key values in logs.
-- [ ] Add automated secret scanning to CI.
+- [x] Add automated secret scanning to CI.
 - [x] Use limited GitHub workflow permissions.
 - [ ] Pin GitHub Actions by immutable commit SHA.
 - [x] Escape externally sourced dashboard content.
