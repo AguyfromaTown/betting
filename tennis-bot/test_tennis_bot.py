@@ -2489,6 +2489,28 @@ class TennisBotTests(unittest.TestCase):
         ):
             self.assertIn(required, reference)
 
+    def test_emergency_runbook_documents_stop_recovery_and_ledger_safety(self):
+        runbook = MODULE_PATH.parent.parent.joinpath("EMERGENCY-RUNBOOK.md").read_text(encoding="utf-8")
+        for required in (
+            "kill-switch.json",
+            '"active": true',
+            "Settle Tennis Bets",
+            "run-state.json",
+            "--diagnostic",
+            "would_write",
+            "--backtest-only",
+            "bankroll-transactions.csv",
+            "hash-linked",
+            "state-backups/",
+            "Provider, quota, and schema incidents",
+            "Automated stops and rollback",
+            "Settlement incident procedure",
+            "Reopening live authorization",
+        ):
+            self.assertIn(required, runbook)
+        self.assertIn("Never change only `bankroll.txt`", runbook)
+        self.assertIn("do not manually clear `model-policy-state.json`", runbook.casefold())
+
 
 if __name__ == "__main__":
     unittest.main()

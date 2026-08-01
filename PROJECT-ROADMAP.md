@@ -239,7 +239,7 @@ Status conventions:
 - [x] Document the current betting and risk policy in `how i bet.txt`.
 - [x] Document every model formula and weight in a technical reference.
 - [x] Document threshold sample requirements in one configuration reference.
-- [ ] Document emergency-stop and recovery procedures.
+- [x] Document emergency-stop and recovery procedures.
 - [ ] Document alias review and API-provider replacement procedures.
 - [ ] Maintain a changelog and model/policy release notes.
 - [ ] Provide a one-command local paper run.
