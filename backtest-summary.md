@@ -94,3 +94,14 @@ Bets are sized from the bankroll available before that match date; outcomes from
 ## Workload threshold challenger
 
 The workload learner remains inactive: it requires at least 200 chronologically settled prediction rows with usable pre-match workload fields.
+
+## Tour movement/dispersion limit challengers
+
+Limits are learned independently by tour, can only tighten the static safety limits, and require chronological holdout improvement.
+
+| Tour | Sample | Holdout | Movement limit | Dispersion limit | Holdout Brier | Promotion |
+|---|---:|---:|---:|---:|---|---|
+| ATP | 0 | 0 | 10.0% | 12.0% | N/A | collecting data |
+| WTA | 0 | 0 | 10.0% | 12.0% | N/A | collecting data |
+| Challenger | 0 | 0 | 10.0% | 12.0% | N/A | collecting data |
+| ITF | 0 | 0 | 10.0% | 12.0% | N/A | collecting data |
