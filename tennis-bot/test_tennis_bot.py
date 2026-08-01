@@ -442,10 +442,17 @@ class TennisBotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             audit = Path(directory) / "audit.csv"
             headers = ["DATE", "PICK", "DECISION", "REASON", "PRICE_SNAPSHOT_COUNT",
-                       "PRICE_VELOCITY_PER_HOUR", "PRICE_ACCELERATION_PER_HOUR2", "PRICE_AGE_MINUTES", "PRICE_STALE"]
+                       "PRICE_VELOCITY_PER_HOUR", "PRICE_ACCELERATION_PER_HOUR2", "PRICE_AGE_MINUTES", "PRICE_STALE",
+                       "AUTH_PRICE_MOVEMENT", "AUTH_MARKET_DISPERSION", "MARKET_LIMIT_POLICY_ID",
+                       "MARKET_LIMIT_POLICY_SAMPLE", "MARKET_LIMIT_POLICY_HOLDOUT", "MARKET_LIMIT_MOVEMENT",
+                       "MARKET_LIMIT_DISPERSION", "MARKET_LIMIT_PROMOTED"]
             bot.atomic_write_csv(audit, headers, [{"DATE": "2026-08-01", "PICK": "A"}])
             dynamics = {"snapshot_count": 3, "velocity_per_hour": -.15, "acceleration_per_hour2": -.05,
-                        "price_age_minutes": 2.5, "stale": False}
+                        "price_age_minutes": 2.5, "stale": False, "authorization_price_movement": .04,
+                        "authorization_market_dispersion": .03, "market_limit_policy_id": "atp-move0.060-disp0.080",
+                        "market_limit_policy_sample": 240, "market_limit_policy_holdout": 72,
+                        "market_limit_movement": .06, "market_limit_dispersion": .08,
+                        "market_limit_promoted": True}
             with patch.object(bot, "AUDIT_FILE", audit):
                 bot.update_audit_lifecycle("2026-08-01", "A", "Authorized", "pre_match_validated", dynamics)
             _, rows = bot.read_csv_rows(audit)
@@ -454,6 +461,10 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(rows[0]["PRICE_ACCELERATION_PER_HOUR2"], "-0.050000")
         self.assertEqual(rows[0]["PRICE_AGE_MINUTES"], "2.500")
         self.assertEqual(rows[0]["PRICE_STALE"], "False")
+        self.assertEqual(rows[0]["AUTH_PRICE_MOVEMENT"], "0.040000")
+        self.assertEqual(rows[0]["AUTH_MARKET_DISPERSION"], "0.030000")
+        self.assertEqual(rows[0]["MARKET_LIMIT_POLICY_ID"], "atp-move0.060-disp0.080")
+        self.assertEqual(rows[0]["MARKET_LIMIT_PROMOTED"], "True")
 
     def test_stale_price_uses_provider_quote_timestamp(self):
         from datetime import datetime, timedelta, timezone
@@ -692,6 +703,34 @@ class TennisBotTests(unittest.TestCase):
         self.assertGreaterEqual(learned["holdout_triggered"], 20)
         self.assertLess(learned["challenger_holdout_brier"], learned["active_holdout_brier"])
         self.assertLessEqual(bot.workload_policy_penalty({"matches_7": 9, "sets_7": 20, "rest_days": 0}, learned["policy"]), .03)
+
+    def test_market_limit_learner_requires_mature_tour_specific_sample(self):
+        rows = [{"DATE": f"2026-{index:03d}", "EVENT_ID": str(index), "PICK": "Player",
+                 "TOUR": "ATP", "RESULT": "W", "MODEL_PROBABILITY": ".70",
+                 "AUTH_PRICE_MOVEMENT": ".02", "AUTH_MARKET_DISPERSION": ".02"}
+                for index in range(bot.MIN_MARKET_LIMIT_TRAINING_SAMPLE - 1)]
+        self.assertIsNone(bot.learned_market_limits(rows, "ATP"))
+        self.assertIsNone(bot.learned_market_limits(rows, "WTA"))
+
+    def test_market_limit_learner_promotes_stricter_limits_after_holdout_gain(self):
+        rows = []
+        for index in range(300):
+            risk_type = index % 3
+            rows.append({
+                "DATE": f"2026-{index:03d}", "EVENT_ID": str(index), "PICK": "Player", "TOUR": "ATP",
+                "RESULT": "W" if risk_type == 0 else "L", "MODEL_PROBABILITY": ".70",
+                "AUTH_PRICE_MOVEMENT": ".09" if risk_type == 1 else ".02",
+                "AUTH_MARKET_DISPERSION": ".11" if risk_type == 2 else ".02",
+            })
+        learned = bot.learned_market_limits(rows, "ATP")
+        self.assertIsNotNone(learned)
+        self.assertTrue(learned["promoted"])
+        self.assertEqual(learned["holdout"], 90)
+        self.assertGreaterEqual(learned["holdout_rejected"], 20)
+        self.assertLess(learned["policy"]["movement_limit"], bot.MAX_PRICE_MOVEMENT)
+        self.assertLess(learned["policy"]["dispersion_limit"], bot.MAX_BOOKMAKER_DISPERSION)
+        self.assertLess(learned["challenger_holdout_brier"], learned["active_holdout_brier"])
+        self.assertIsNone(bot.learned_market_limits(rows, "WTA"))
 
     def test_stage_pending_does_not_log_or_deduct(self):
         rec = {"player": "Player One", "grade": "Value Pick", "odds": 1.55,
@@ -1731,6 +1770,8 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("## Walk-forward staking comparison", report)
         self.assertIn("Capped quarter-Kelly", report)
         self.assertIn("## Workload threshold challenger", report)
+        self.assertIn("## Tour movement/dispersion limit challengers", report)
+        self.assertIn("| ATP | 2 | 0 | 10.0% | 12.0% | N/A | collecting data |", report)
         self.assertIn("requires at least 200", report)
         self.assertIn("## Tour calibration maturity", report)
         self.assertIn("| ATP | 2 | 2 | collecting data |", report)

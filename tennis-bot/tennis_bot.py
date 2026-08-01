@@ -76,6 +76,8 @@ MIN_SEGMENT_SAMPLE = 30
 MIN_WEIGHT_TRAINING_SAMPLE = 200
 MIN_WORKLOAD_TRAINING_SAMPLE = 200
 MIN_WORKLOAD_TRIGGER_SAMPLE = 30
+MIN_MARKET_LIMIT_TRAINING_SAMPLE = 200
+MIN_MARKET_LIMIT_TRIGGER_SAMPLE = 30
 KELLY_FRACTION = 0.25
 MIN_STAKE_RATE = 0.005
 MAX_PRICE_MOVEMENT = 0.10
@@ -90,7 +92,7 @@ OFFICIAL_STATUS_DOMAINS = {
 BLOCKING_PHYSICAL_STATUSES = {"questionable", "injured", "withdrawn", "unavailable", "suspended"}
 MAX_CACHE_ENTRY_BYTES = 2_000_000
 MAX_CACHE_ENTRIES = 20
-MODEL_VERSION = "tennis-2026.08-price-freshness-v1"
+MODEL_VERSION = "tennis-2026.08-tour-market-limits-v1"
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -435,6 +437,8 @@ def save_prediction_snapshot(date_str: str, match: dict, player: str, baseline: 
         "minimum_weight_training_sample": MIN_WEIGHT_TRAINING_SAMPLE,
         "minimum_workload_training_sample": MIN_WORKLOAD_TRAINING_SAMPLE,
         "minimum_workload_trigger_sample": MIN_WORKLOAD_TRIGGER_SAMPLE,
+        "minimum_market_limit_training_sample": MIN_MARKET_LIMIT_TRAINING_SAMPLE,
+        "minimum_market_limit_trigger_sample": MIN_MARKET_LIMIT_TRIGGER_SAMPLE,
         "maximum_market_overround": MAX_MARKET_OVERROUND,
         "maximum_elo_market_gap": MAX_ELO_MARKET_GAP,
         "maximum_bookmaker_dispersion": MAX_BOOKMAKER_DISPERSION,
@@ -2675,6 +2679,72 @@ def learned_workload_policy(rows: list[dict]) -> dict | None:
             "challenger_holdout_brier": holdout_brier, "promoted": promoted}
 
 
+def learned_market_limits(rows: list[dict], tour: str | None) -> dict | None:
+    """Learn stricter movement/dispersion limits within one tour using chronological holdout evidence."""
+    segment = canonical_tour(tour)
+    if segment == "Unknown":
+        return None
+    usable = []
+    for row in sorted(rows, key=lambda item: (item.get("DATE", ""), item.get("EVENT_ID", ""), item.get("PICK", ""))):
+        if canonical_tour(row.get("TOUR")) != segment or row.get("RESULT") not in {"W", "L"}:
+            continue
+        try:
+            movement = abs(float(row.get("AUTH_PRICE_MOVEMENT") or ""))
+            dispersion = float(row.get("AUTH_MARKET_DISPERSION") or "")
+            probability = float(row.get("MODEL_PROBABILITY") or "")
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(movement) and math.isfinite(dispersion) and 0 <= probability <= 1):
+            continue
+        usable.append({**row, "_MOVEMENT": movement, "_DISPERSION": dispersion})
+    if len(usable) < MIN_MARKET_LIMIT_TRAINING_SAMPLE:
+        return None
+    split = max(140, int(len(usable) * .7))
+    training, holdout = usable[:split], usable[split:]
+    if len(holdout) < 60:
+        return None
+
+    candidates = [
+        {"movement_limit": movement_limit, "dispersion_limit": dispersion_limit}
+        for movement_limit in (.04, .06, .08, MAX_PRICE_MOVEMENT)
+        for dispersion_limit in (.04, .06, .08, .10, MAX_BOOKMAKER_DISPERSION)
+    ]
+
+    def score(sample: list[dict], policy: dict) -> tuple[float | None, int, int]:
+        accepted = [row for row in sample if row["_MOVEMENT"] <= policy["movement_limit"] and
+                    row["_DISPERSION"] <= policy["dispersion_limit"]]
+        rejected = len(sample) - len(accepted)
+        return brier_score(accepted, "MODEL_PROBABILITY"), len(accepted), rejected
+
+    eligible = []
+    for policy in candidates:
+        candidate_brier, accepted, rejected = score(training, policy)
+        if candidate_brier is not None and accepted >= 60 and rejected >= MIN_MARKET_LIMIT_TRIGGER_SAMPLE:
+            eligible.append((candidate_brier, policy, accepted, rejected))
+    if not eligible:
+        return None
+    training_brier, policy, training_accepted, training_rejected = min(
+        eligible, key=lambda item: (item[0], -item[1]["movement_limit"], -item[1]["dispersion_limit"])
+    )
+    holdout_brier, holdout_accepted, holdout_rejected = score(holdout, policy)
+    active_training_brier = brier_score(training, "MODEL_PROBABILITY")
+    active_holdout_brier = brier_score(holdout, "MODEL_PROBABILITY")
+    promoted = bool(
+        active_training_brier is not None and active_holdout_brier is not None and holdout_brier is not None
+        and training_rejected >= MIN_MARKET_LIMIT_TRIGGER_SAMPLE and holdout_rejected >= 20
+        and holdout_accepted >= 30
+        and training_brier <= active_training_brier * .97
+        and holdout_brier <= active_holdout_brier * .97
+    )
+    policy_id = f"{segment.casefold()}-move{policy['movement_limit']:.3f}-disp{policy['dispersion_limit']:.3f}"
+    return {"tour": segment, "policy": policy, "policy_id": policy_id, "sample": len(usable),
+            "training": len(training), "holdout": len(holdout), "training_accepted": training_accepted,
+            "training_rejected": training_rejected, "holdout_accepted": holdout_accepted,
+            "holdout_rejected": holdout_rejected, "active_training_brier": active_training_brier,
+            "challenger_training_brier": training_brier, "active_holdout_brier": active_holdout_brier,
+            "challenger_holdout_brier": holdout_brier, "promoted": promoted}
+
+
 def calibrate_probability(probability: float, rows: list[dict]) -> tuple[float, int]:
     """Apply a shrunk empirical correction only when the local probability bin is mature."""
     bucket = []
@@ -3716,7 +3786,10 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "PREVIOUS_TOURNAMENT_DAYS_AGO", "CURRENT_SURFACE", "SURFACE_CHANGE", "SURFACE_TRANSITION_SOURCE",
         "TRAVEL_DISTANCE_KM", "TIMEZONE_CHANGE_HOURS", "TRAVEL_SOURCE",
         "BEST_OF", "INDOOR",
-        "MARKET_DISPERSION", "PRICE_SNAPSHOT_COUNT", "PRICE_VELOCITY_PER_HOUR",
+        "MARKET_DISPERSION", "AUTH_PRICE_MOVEMENT", "AUTH_MARKET_DISPERSION",
+        "MARKET_LIMIT_POLICY_ID", "MARKET_LIMIT_POLICY_SAMPLE", "MARKET_LIMIT_POLICY_HOLDOUT",
+        "MARKET_LIMIT_MOVEMENT", "MARKET_LIMIT_DISPERSION", "MARKET_LIMIT_PROMOTED",
+        "PRICE_SNAPSHOT_COUNT", "PRICE_VELOCITY_PER_HOUR",
         "PRICE_ACCELERATION_PER_HOUR2", "PRICE_AGE_MINUTES", "PRICE_STALE",
         "DATA_QUALITY_SCORE", "DATA_QUALITY_GRADE",
         "UNCERTAINTY_MARGIN", "RISK_ADJUSTED_EV", "KILL_SWITCH", "KILL_SWITCH_REASON",
@@ -3860,7 +3933,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 workload.get("travel_source", ""),
                 baseline.get("best_of", 3), baseline.get("indoor", ""),
                 f"{data_quality['dispersion']:.6f}" if data_quality.get("dispersion") is not None else "",
-                "", "", "", "", "",
+                "", "", "", "", "", "", "", "", "", "", "", "", "",
                 data_quality["score"], data_quality["grade"], f"{baseline['uncertainty_margin']:.6f}",
                 f"{baseline['risk_adjusted_ev']:.6f}", baseline.get("kill_switch", False), baseline.get("kill_switch_reason", ""),
                 baseline.get("segment_sample", 0),
@@ -4286,6 +4359,21 @@ def generate_backtest_summary(resolved: list[dict]):
             f"- Holdout Brier: active {workload_policy['active_holdout_brier']:.4f}, challenger {workload_policy['challenger_holdout_brier']:.4f}",
             f"- Promotion: {'approved' if workload_policy['promoted'] else 'shadow only'}",
         ])
+    lines.extend(["", "## Tour movement/dispersion limit challengers", "",
+                  "Limits are learned independently by tour, can only tighten the static safety limits, and require chronological holdout improvement.", "",
+                  "| Tour | Sample | Holdout | Movement limit | Dispersion limit | Holdout Brier | Promotion |",
+                  "|---|---:|---:|---:|---:|---|---|"])
+    for tour in ("ATP", "WTA", "Challenger", "ITF"):
+        learned = learned_market_limits(resolved, tour)
+        if learned is None:
+            sample = sum(canonical_tour(row.get("TOUR")) == tour for row in resolved)
+            lines.append(f"| {tour} | {sample} | 0 | {MAX_PRICE_MOVEMENT:.1%} | {MAX_BOOKMAKER_DISPERSION:.1%} | N/A | collecting data |")
+            continue
+        policy = learned["policy"]
+        comparison = f"{learned['active_holdout_brier']:.4f} / {learned['challenger_holdout_brier']:.4f}"
+        lines.append(f"| {tour} | {learned['sample']} | {learned['holdout']} | {policy['movement_limit']:.1%} | "
+                     f"{policy['dispersion_limit']:.1%} | {comparison} | "
+                     f"{'approved' if learned['promoted'] else 'shadow only'} |")
     atomic_write_text(BACKTEST_FILE, "\n".join(lines) + "\n")
     log(f"Backtest summary saved: {BACKTEST_FILE.name}")
 
@@ -4298,6 +4386,9 @@ PENDING_HEADERS = [
     "FINAL_BOOKMAKERS", "FINAL_SOURCE", "REVALIDATED_AT", "PRICE_MOVEMENT",
     "PRICE_VELOCITY_PER_HOUR", "PRICE_ACCELERATION_PER_HOUR2", "PRICE_SNAPSHOT_COUNT",
     "PRICE_AGE_MINUTES", "PRICE_STALE",
+    "AUTH_MARKET_DISPERSION", "MARKET_LIMIT_POLICY_ID", "MARKET_LIMIT_POLICY_SAMPLE",
+    "MARKET_LIMIT_POLICY_HOLDOUT", "MARKET_LIMIT_MOVEMENT", "MARKET_LIMIT_DISPERSION",
+    "MARKET_LIMIT_PROMOTED",
 ]
 
 
@@ -4358,6 +4449,16 @@ def update_audit_lifecycle(date_str: str, pick: str, decision: str, reason: str,
                                              if price_dynamics.get("price_age_minutes") is not None else "")
                 row["PRICE_STALE"] = (price_dynamics.get("stale")
                                       if price_dynamics.get("stale") is not None else "")
+                row["AUTH_PRICE_MOVEMENT"] = (f"{price_dynamics['authorization_price_movement']:.6f}"
+                                                if price_dynamics.get("authorization_price_movement") is not None else "")
+                row["AUTH_MARKET_DISPERSION"] = (f"{price_dynamics['authorization_market_dispersion']:.6f}"
+                                                  if price_dynamics.get("authorization_market_dispersion") is not None else "")
+                row["MARKET_LIMIT_POLICY_ID"] = price_dynamics.get("market_limit_policy_id", "")
+                row["MARKET_LIMIT_POLICY_SAMPLE"] = price_dynamics.get("market_limit_policy_sample", 0)
+                row["MARKET_LIMIT_POLICY_HOLDOUT"] = price_dynamics.get("market_limit_policy_holdout", 0)
+                row["MARKET_LIMIT_MOVEMENT"] = f"{price_dynamics.get('market_limit_movement', MAX_PRICE_MOVEMENT):.6f}"
+                row["MARKET_LIMIT_DISPERSION"] = f"{price_dynamics.get('market_limit_dispersion', MAX_BOOKMAKER_DISPERSION):.6f}"
+                row["MARKET_LIMIT_PROMOTED"] = price_dynamics.get("market_limit_promoted", False)
             changed = True
     if changed:
         atomic_write_csv(AUDIT_FILE, list(headers or []), rows)
@@ -4527,6 +4628,8 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
         bankroll = reconcile_bankroll(bankroll)
     authorized_recs, authorized_matches = [], []
     for date_str, candidates in ready_by_date.items():
+        market_limit_history = load_resolved_predictions(date_str)
+        rollback = automated_rollback_state(market_limit_history)
         fresh = fetch_verified_matches(date_str, api_keys)
         wanted_ids = {row.get("EVENT_ID") for row in candidates}
         wanted_pairs = [{normalize_player_name(row["PLAYER1"]), normalize_player_name(row["PLAYER2"])} for row in candidates]
@@ -4552,6 +4655,33 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
             status = str((match or {}).get("status") or "").casefold()
             quality = tennis_data_quality(match, baseline, row["PICK"]) if match and baseline else None
             movement = baseline["player_odds"] / float(row["DISCOVERY_ODDS"]) - 1 if baseline else None
+            market_challenger = learned_market_limits(market_limit_history, (match or {}).get("level"))
+            market_promoted = bool(market_challenger and market_challenger["promoted"] and not rollback["policy_rollback"])
+            market_policy = market_challenger["policy"] if market_promoted else {
+                "movement_limit": MAX_PRICE_MOVEMENT,
+                "dispersion_limit": MAX_BOOKMAKER_DISPERSION,
+            }
+            price_dynamics.update({
+                "authorization_price_movement": movement,
+                "authorization_market_dispersion": quality.get("dispersion") if quality else None,
+                "market_limit_policy_id": market_challenger["policy_id"] if market_promoted else "static-market-v1",
+                "market_limit_policy_sample": market_challenger["sample"] if market_challenger else 0,
+                "market_limit_policy_holdout": market_challenger["holdout"] if market_challenger else 0,
+                "market_limit_movement": market_policy["movement_limit"],
+                "market_limit_dispersion": market_policy["dispersion_limit"],
+                "market_limit_promoted": market_promoted,
+            })
+            row.update({
+                "PRICE_MOVEMENT": f"{movement:.6f}" if movement is not None else "",
+                "AUTH_MARKET_DISPERSION": (f"{quality['dispersion']:.6f}"
+                                           if quality and quality.get("dispersion") is not None else ""),
+                "MARKET_LIMIT_POLICY_ID": price_dynamics["market_limit_policy_id"],
+                "MARKET_LIMIT_POLICY_SAMPLE": price_dynamics["market_limit_policy_sample"],
+                "MARKET_LIMIT_POLICY_HOLDOUT": price_dynamics["market_limit_policy_holdout"],
+                "MARKET_LIMIT_MOVEMENT": f"{market_policy['movement_limit']:.6f}",
+                "MARKET_LIMIT_DISPERSION": f"{market_policy['dispersion_limit']:.6f}",
+                "MARKET_LIMIT_PROMOTED": market_promoted,
+            })
             if any(token in status for token in ("cancel", "postpon", "settled", "live", "inplay", "in-play", "withdraw", "walkover", "retir", "suspend")):
                 reason = "event_not_pre_match"
             elif price_dynamics.get("stale"):
@@ -4560,11 +4690,11 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
                 reason = "market_or_model_unavailable"
             elif int(match.get("bookmaker_count") or 0) < 2:
                 reason = "insufficient_bookmakers"
-            elif quality and quality["dispersion"] is not None and quality["dispersion"] > MAX_BOOKMAKER_DISPERSION:
+            elif quality and quality["dispersion"] is not None and quality["dispersion"] > market_policy["dispersion_limit"]:
                 reason = "bookmaker_conflict"
             elif quality and quality["score"] < 5:
                 reason = "data_quality_too_low"
-            elif movement is not None and abs(movement) > MAX_PRICE_MOVEMENT:
+            elif movement is not None and abs(movement) > market_policy["movement_limit"]:
                 reason = "extreme_price_movement"
             elif row.get("SURFACE") and match.get("surface") and row["SURFACE"] != match["surface"]:
                 reason = "surface_changed"

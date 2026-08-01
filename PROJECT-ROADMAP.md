@@ -97,7 +97,7 @@ Status conventions:
 - [x] Distinguish broad market movement from isolated price errors.
 - [x] Require at least two bookmakers at authorization.
 - [x] Store opening/authorization/closing prices when available.
-- [ ] Learn movement and dispersion limits by tour after adequate samples.
+- [x] Learn movement and dispersion limits by tour after adequate samples.
 
 ## Decision policy
 
