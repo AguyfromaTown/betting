@@ -2655,8 +2655,10 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("group.latest.metrics", dashboard)
         self.assertIn("localstorage", lowered)
         self.assertIn("edgebook-tennis-manual-results-v1", lowered)
-        self.assertIn('class="result-select"', lowered)
-        self.assertIn('resultsource: automaticresult ? "automatic"', lowered)
+        self.assertIn('class="result-select ${tone}"', lowered)
+        self.assertIn('resultsource: manualresult ? "manual"', lowered)
+        self.assertIn('automatic: ${r.automaticresult', lowered)
+        self.assertIn("local override - choose automatic to reset", lowered)
         self.assertNotIn("copy-csv", lowered)
         self.assertNotIn("showresultpicker", lowered)
 

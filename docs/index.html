@@ -506,11 +506,7 @@
         const automaticResult = ["w","win","won"].includes(value) ? "win" : ["l","loss","lost"].includes(value) ? "loss" : "";
         const key = betRowKey(row);
         const manualResult = ["win", "loss"].includes(manualResults[key]) ? manualResults[key] : "";
-        if (automaticResult && manualResults[key]) {
-          delete manualResults[key];
-          saveManualResults();
-        }
-        const resolvedResult = automaticResult || manualResult;
+        const resolvedResult = manualResult || automaticResult;
         return {
           key: key,
           date: row.date || "",
@@ -519,8 +515,10 @@
           odds: odds,
           stake: stake,
           result: resolvedResult,
-          resultSource: automaticResult ? "automatic" : manualResult ? "manual" : "open",
-          ret: automaticResult ? (Number.parseFloat(row.return) || 0) : manualResult === "win" ? stake * odds : 0,
+          automaticResult: automaticResult,
+          automaticReturn: Number.parseFloat(row.return) || 0,
+          resultSource: manualResult ? "manual" : automaticResult ? "automatic" : "open",
+          ret: manualResult ? (manualResult === "win" ? stake * odds : 0) : (Number.parseFloat(row.return) || 0),
           balance: Number.parseFloat(row["starting balance"] || row.balance),
         };
       }).filter(row => row.date || row.match || row.bet);
@@ -577,26 +575,18 @@
         const parts = r.match.match(/^(.*?)\s*(\([^)]*\))$/);
         const retDisplay = r.ret ? money(r.ret) : "—";
 
-        let resultCell;
-        if (won) {
-          resultCell = `<span class="badge win">Won</span>`;
-        } else if (lost) {
-          resultCell = `<span class="badge loss">Lost</span>`;
-        } else {
-          resultCell = `<select class="result-select" data-row-key="${safe(r.key)}" aria-label="Set a local result for ${safe(r.match)}">
-            <option value="" selected>Open</option>
-            <option value="win">Won</option>
-            <option value="loss">Lost</option>
-          </select><span class="result-note">Saved on this device</span>`;
-        }
-        if (r.resultSource === "manual") {
-          const tone = won ? "manual-win" : "manual-loss";
-          resultCell = `<select class="result-select ${tone}" data-row-key="${safe(r.key)}" aria-label="Change the local result for ${safe(r.match)}">
-            <option value="">Open</option>
-            <option value="win" ${won ? "selected" : ""}>Won</option>
-            <option value="loss" ${lost ? "selected" : ""}>Lost</option>
-          </select><span class="result-note">Local until auto-settled</span>`;
-        }
+        const tone = won ? "manual-win" : lost ? "manual-loss" : "";
+        const defaultLabel = r.automaticResult
+          ? `Automatic: ${r.automaticResult === "win" ? "Won" : "Lost"}`
+          : "Open";
+        const note = r.resultSource === "manual"
+          ? "Local override - choose Automatic to reset"
+          : r.resultSource === "automatic" ? "Automatically settled" : "Saved on this device";
+        const resultCell = `<select class="result-select ${tone}" data-row-key="${safe(r.key)}" aria-label="Set or override the result for ${safe(r.match)}">
+            <option value="">${defaultLabel}</option>
+            <option value="win" ${r.resultSource === "manual" && won ? "selected" : ""}>Won</option>
+            <option value="loss" ${r.resultSource === "manual" && lost ? "selected" : ""}>Lost</option>
+          </select><span class="result-note">${note}</span>`;
 
         return `<tr>
           <td class="mono">${safe(r.date || "—")}</td>
@@ -933,13 +923,13 @@
       const picker = event.target.closest(".result-select");
       if (!picker) return;
       const row = allRows.find(item => item.key === picker.dataset.rowKey);
-      if (!row || row.resultSource === "automatic") return;
+      if (!row) return;
       const result = ["win", "loss"].includes(picker.value) ? picker.value : "";
       if (result) manualResults[row.key] = result; else delete manualResults[row.key];
       saveManualResults();
-      row.result = result;
-      row.resultSource = result ? "manual" : "open";
-      row.ret = result === "win" ? row.stake * row.odds : 0;
+      row.result = result || row.automaticResult;
+      row.resultSource = result ? "manual" : row.automaticResult ? "automatic" : "open";
+      row.ret = result ? (result === "win" ? row.stake * row.odds : 0) : row.automaticReturn;
       refreshAll();
       updateSearch();
     });

@@ -24,7 +24,7 @@ The format follows Keep a Changelog categories: Added, Changed, Deprecated, Remo
 
 ### Fixed
 
-- The dashboard's Open result badge is now an accessible Open/Won/Lost selector; manual choices persist on the current device, update displayed returns and metrics immediately, and yield permanently to authoritative automated settlements instead of overwriting ledger data.
+- Every dashboard result is now selectable: automated settlements remain the default, while a local Won/Lost override persists on the current device, updates displayed returns and metrics immediately, and can be reset to the automated value without changing ledger data.
 - Telegram and email updates are now mode-specific: revalidation messages clearly distinguish picks authorized or cancelled now, candidates still waiting, historical performance, and unresolved player identities that are not bets.
 - Groq analysis prompts are now dynamically bounded below the 12,000-token TPM ceiling, with a conservative UTF-8 estimate, completion reserve, lowest-value-match trimming, and a final pre-request guard.
 - Missing Tennis Abstract profiles now produce an insufficient-evidence rejection instead of crashing statistical candidate construction.
