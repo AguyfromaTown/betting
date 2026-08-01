@@ -339,7 +339,20 @@
       </div>
     </section>
 
-    <footer class="footer"><span>Edgebook performance dashboard</span><span>Synced from bets-log.csv, predictions-log.csv and bankroll.txt</span></footer>
+    <section class="card table-card" style="margin-top:12px">
+      <div class="table-toolbar">
+        <div><h2 class="panel-title">Counterfactual results by rejection rule</h2><div class="panel-kicker">What happened to settled candidates rejected by the active policy; hypothetical flat-unit results never affect bankroll</div></div>
+        <span class="count" id="counterfactual-row-count">0 settled rejections</span>
+      </div>
+      <div class="table-scroll">
+        <table id="counterfactual-table">
+          <thead><tr><th>Rejection rule</th><th>Decisions</th><th>Record</th><th>Flat-unit ROI</th><th>Average CLV</th><th>CLV sample</th><th>Brier</th><th>Reliability</th></tr></thead>
+          <tbody id="counterfactual-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="footer"><span>Edgebook performance dashboard</span><span>Synced from betting, prediction and counterfactual ledgers</span></footer>
 
   </main>
 
@@ -350,9 +363,11 @@
     const BANKROLL_URL = RAW_ROOT + "bankroll.txt";
     const PERFORMANCE_URL = RAW_ROOT + "performance-summary.md";
     const PENDING_URL = RAW_ROOT + "pending-bets.csv";
+    const POLICY_URL = RAW_ROOT + "counterfactual-log.csv";
     let allRows = [];
     let pendingRows = [];
     let auditRows = [];
+    let policyRows = [];
     let currentBankroll = null;
     let performanceText = "";
 
@@ -558,6 +573,31 @@
       el("model-row-count").textContent = challenger.length ? `${challenger.length} comparable results` : "No mature comparison";
     }
 
+    function renderCounterfactualByRule(rows) {
+      const settled = rows.filter(row => {
+        const result = String(row.result || "").trim().toLowerCase();
+        const role = String(row.policy_role || "active").trim().toLowerCase();
+        return role === "active" && String(row.decision || "").trim().toLowerCase() === "cancelled"
+          && ["w", "l", "win", "loss", "won", "lost"].includes(result);
+      });
+      const rules = [...new Set(settled.map(row => String(row.rule || "unknown").trim() || "unknown"))].sort();
+      el("counterfactual-body").innerHTML = rules.map(rule => {
+        const group = settled.filter(row => (String(row.rule || "unknown").trim() || "unknown") === rule);
+        const wins = group.filter(row => ["w", "win", "won"].includes(String(row.result).toLowerCase())).length;
+        const returns = group.map(row => String(row.flat_return || "").trim()).filter(Boolean).map(Number).filter(Number.isFinite);
+        const roi = returns.length ? returns.reduce((sum, value) => sum + value, 0) / returns.length : null;
+        const clv = group.map(row => String(row.clv || "").trim()).filter(Boolean).map(Number).filter(Number.isFinite);
+        const brier = group.map(row => String(row.brier_score || "").trim()).filter(Boolean).map(Number).filter(Number.isFinite);
+        const averageClv = clv.length ? clv.reduce((sum, value) => sum + value, 0) / clv.length : null;
+        const averageBrier = brier.length ? brier.reduce((sum, value) => sum + value, 0) / brier.length : null;
+        const reliability = group.length >= 100 ? "Usable" : group.length >= 30 ? "Developing" : "Small sample";
+        const tone = roi === null ? "" : roi > 0 ? "positive" : roi < 0 ? "negative" : "";
+        return `<tr><td>${safe(rule.replaceAll("_", " "))}</td><td>${group.length}</td><td>${wins}-${group.length - wins}</td><td class="${tone}">${roi === null ? "—" : (roi * 100).toFixed(1) + "%"}</td><td>${averageClv === null ? "—" : (averageClv * 100).toFixed(1) + "%"}</td><td>${clv.length}/${group.length}</td><td>${averageBrier === null ? "—" : averageBrier.toFixed(4)}</td><td>${reliability}</td></tr>`;
+      }).join("");
+      el("counterfactual-table").style.display = rules.length ? "table" : "none";
+      el("counterfactual-row-count").textContent = `${settled.length} settled ${settled.length === 1 ? "rejection" : "rejections"}`;
+    }
+
     function refreshAll() {
       const rows = allRows.map(row => ({ ...row }));
       renderStats(rows);
@@ -565,6 +605,7 @@
       renderAudit(auditRows);
       renderBacktest(auditRows);
       renderModelComparison(auditRows);
+      renderCounterfactualByRule(policyRows);
       renderPending(pendingRows);
       drawChart(allRows);
       updateStatus(allRows);
@@ -634,10 +675,11 @@
         if (!required[1].ok) throw new Error(`bankroll.txt returned ${required[1].status}`);
         allRows = normalizeRows(await required[0].text());
         currentBankroll = Number.parseFloat((await required[1].text()).trim());
-        const optional = await Promise.all([fetch(AUDIT_URL), fetch(PERFORMANCE_URL), fetch(PENDING_URL)]);
+        const optional = await Promise.all([fetch(AUDIT_URL), fetch(PERFORMANCE_URL), fetch(PENDING_URL), fetch(POLICY_URL)]);
         auditRows = optional[0].ok ? parseCSV(await optional[0].text()) : [];
         performanceText = optional[1].ok ? await optional[1].text() : "";
         pendingRows = optional[2].ok ? parseCSV(await optional[2].text()) : [];
+        policyRows = optional[3].ok ? parseCSV(await optional[3].text()) : [];
         refreshAll();
         el("status-text").textContent = "Automated data synced";
       } catch (error) {

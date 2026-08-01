@@ -213,7 +213,7 @@ Status conventions:
 - [x] Show evidence and data-quality grades.
 - [x] Show raw, active and challenger probabilities.
 - [x] Compare active and shadow model Brier scores.
-- [ ] Display counterfactual results by rejection rule.
+- [x] Display counterfactual results by rejection rule.
 - [x] Show performance by odds range.
 - [ ] Add complete performance segmentation by tour, surface and level.
 - [ ] Display model/policy version and emergency-stop state prominently.
