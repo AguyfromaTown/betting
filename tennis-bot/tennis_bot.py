@@ -36,6 +36,10 @@ RUN_STATE_FILE = REPO_ROOT / "run-state.json"
 BACKUPS_DIR = REPO_ROOT / "state-backups"
 REPORTS_DIR = REPO_ROOT / "reports"
 REQUEST_TIMEOUT = 30
+MAX_TRANSIENT_RETRIES = 2
+RETRY_BASE_SECONDS = 0.5
+MAX_RETRY_DELAY_SECONDS = 8.0
+TRANSIENT_HTTP_STATUSES = {408, 425, 500, 502, 503, 504}
 MAX_COMPLETION_TOKENS = 2048
 GROQ_MODEL = "llama-3.3-70b-versatile"
 MAX_AI_MATCHES = 20
@@ -75,6 +79,24 @@ def record_source_health(source: str, ok: bool, detail: str, started: float):
     SOURCE_HEALTH.append({"source": source, "ok": ok, "detail": detail,
                           "latency_ms": round((time.monotonic() - started) * 1000),
                           "timestamp": datetime.now(timezone.utc).isoformat()})
+
+
+def transient_retry_delay(attempt: int, response=None) -> float:
+    """Return a bounded exponential delay, honoring numeric Retry-After hints."""
+    delay = RETRY_BASE_SECONDS * (2 ** attempt)
+    retry_after = getattr(response, "headers", {}).get("Retry-After") if response is not None else None
+    try:
+        if retry_after is not None:
+            delay = max(delay, float(retry_after))
+    except (TypeError, ValueError):
+        pass
+    return min(delay, MAX_RETRY_DELAY_SECONDS)
+
+
+def wait_before_retry(provider: str, attempt: int, response=None):
+    delay = transient_retry_delay(attempt, response)
+    log(f"  {provider} transient failure; retrying in {delay:.1f}s ({attempt + 1}/{MAX_TRANSIENT_RETRIES})")
+    time.sleep(delay)
 
 
 def atomic_write_text(path: Path, content: str, encoding: str = "utf-8"):
@@ -213,16 +235,23 @@ def update_run_state(phase: str, status: str = "running", detail: str = ""):
 
 
 def fetch(url: str) -> str | None:
-    started = time.monotonic()
-    try:
-        resp = requests.get(url, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        record_source_health(url.split("/")[2], True, f"HTTP {resp.status_code}", started)
-        return resp.text
-    except requests.RequestException as e:
-        record_source_health(url.split("/")[2], False, type(e).__name__, started)
-        log(f"  Failed to fetch {url}: {e}")
-        return None
+    for attempt in range(MAX_TRANSIENT_RETRIES + 1):
+        started = time.monotonic()
+        try:
+            resp = requests.get(url, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
+            if resp.status_code in TRANSIENT_HTTP_STATUSES and attempt < MAX_TRANSIENT_RETRIES:
+                record_source_health(url.split("/")[2], False, f"HTTP {resp.status_code} retry {attempt + 1}", started)
+                wait_before_retry(url.split("/")[2], attempt, resp); continue
+            resp.raise_for_status()
+            record_source_health(url.split("/")[2], True, f"HTTP {resp.status_code}", started)
+            return resp.text
+        except requests.RequestException as exc:
+            if attempt < MAX_TRANSIENT_RETRIES and getattr(exc, "response", None) is None:
+                wait_before_retry(url.split("/")[2], attempt); continue
+            record_source_health(url.split("/")[2], False, type(exc).__name__, started)
+            log(f"  Failed to fetch {url}: {exc}")
+            return None
+    return None
 
 
 def fetch_reader(target_url: str) -> str | None:
@@ -238,34 +267,41 @@ def fetch_reader(target_url: str) -> str | None:
 
     for target in targets:
         reader_url = f"https://r.jina.ai/{target}"
-        try:
-            response = requests.get(
-                reader_url,
-                headers=reader_headers,
-                timeout=REQUEST_TIMEOUT,
-            )
-            response.raise_for_status()
-            if response.text.strip():
-                return response.text
-        except requests.RequestException as exc:
-            log(f"  Reader request failed for {target}: {exc}")
+        for attempt in range(MAX_TRANSIENT_RETRIES + 1):
+            try:
+                response = requests.get(reader_url, headers=reader_headers, timeout=REQUEST_TIMEOUT)
+                if response.status_code in TRANSIENT_HTTP_STATUSES and attempt < MAX_TRANSIENT_RETRIES:
+                    wait_before_retry("Jina Reader", attempt, response); continue
+                response.raise_for_status()
+                if response.text.strip():
+                    return response.text
+                break
+            except requests.RequestException as exc:
+                if attempt < MAX_TRANSIENT_RETRIES and getattr(exc, "response", None) is None:
+                    wait_before_retry("Jina Reader", attempt); continue
+                log(f"  Reader request failed for {target}: {exc}")
+                break
     return None
 
 
 def fetch_json(url: str, params: dict | None = None):
     """Fetch JSON while keeping API keys out of log output."""
-    try:
-        response = requests.get(
-            url,
-            params=params,
-            headers=REQUEST_HEADERS,
-            timeout=REQUEST_TIMEOUT,
-        )
-        response.raise_for_status()
-        return response.json()
-    except (requests.RequestException, ValueError) as exc:
-        log(f"  API request failed for {url}: {exc}")
-        return None
+    for attempt in range(MAX_TRANSIENT_RETRIES + 1):
+        try:
+            response = requests.get(url, params=params, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
+            if response.status_code in TRANSIENT_HTTP_STATUSES and attempt < MAX_TRANSIENT_RETRIES:
+                wait_before_retry(url.split("/")[2], attempt, response); continue
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as exc:
+            if attempt < MAX_TRANSIENT_RETRIES and getattr(exc, "response", None) is None:
+                wait_before_retry(url.split("/")[2], attempt); continue
+            log(f"  API request failed for {url}: {exc}")
+            return None
+        except ValueError as exc:
+            log(f"  API request failed for {url}: {exc}")
+            return None
+    return None
 
 
 def fetch_odds_json(
@@ -281,30 +317,43 @@ def fetch_odds_json(
     for offset in range(len(api_keys)):
         candidate_index = (key_index + offset) % len(api_keys)
         request_params = {**params, "apiKey": api_keys[candidate_index]}
-        try:
-            started = time.monotonic()
-            response = requests.get(
-                url,
-                params=request_params,
-                headers=REQUEST_HEADERS,
-                timeout=REQUEST_TIMEOUT,
-            )
-            if response.status_code in {401, 403, 429}:
-                record_source_health("api.odds-api.io", False, f"HTTP {response.status_code} key {candidate_index + 1}", started)
-                log(
-                    f"  Odds API key {candidate_index + 1}/{len(api_keys)} "
-                    f"unavailable ({response.status_code}); rotating"
+        for attempt in range(MAX_TRANSIENT_RETRIES + 1):
+            try:
+                started = time.monotonic()
+                response = requests.get(
+                    url,
+                    params=request_params,
+                    headers=REQUEST_HEADERS,
+                    timeout=REQUEST_TIMEOUT,
                 )
-                continue
-            response.raise_for_status()
-            record_source_health("api.odds-api.io", True, f"HTTP {response.status_code} key {candidate_index + 1}", started)
-            return response.json(), candidate_index
-        except (requests.RequestException, ValueError) as exc:
-            record_source_health("api.odds-api.io", False, type(exc).__name__, started)
-            status = getattr(getattr(exc, "response", None), "status_code", None)
-            detail = f"HTTP {status}" if status else type(exc).__name__
-            log(f"  Odds API request failed for {url}: {detail}")
-            return None, candidate_index
+                if response.status_code in {401, 403, 429}:
+                    record_source_health("api.odds-api.io", False, f"HTTP {response.status_code} key {candidate_index + 1}", started)
+                    log(
+                        f"  Odds API key {candidate_index + 1}/{len(api_keys)} "
+                        f"unavailable ({response.status_code}); rotating"
+                    )
+                    break
+                if response.status_code in TRANSIENT_HTTP_STATUSES and attempt < MAX_TRANSIENT_RETRIES:
+                    record_source_health("api.odds-api.io", False, f"HTTP {response.status_code} retry {attempt + 1}", started)
+                    wait_before_retry("Odds API", attempt, response)
+                    continue
+                response.raise_for_status()
+                record_source_health("api.odds-api.io", True, f"HTTP {response.status_code} key {candidate_index + 1}", started)
+                return response.json(), candidate_index
+            except requests.RequestException as exc:
+                if attempt < MAX_TRANSIENT_RETRIES and getattr(exc, "response", None) is None:
+                    record_source_health("api.odds-api.io", False, f"{type(exc).__name__} retry {attempt + 1}", started)
+                    wait_before_retry("Odds API", attempt)
+                    continue
+                record_source_health("api.odds-api.io", False, type(exc).__name__, started)
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                detail = f"HTTP {status}" if status else type(exc).__name__
+                log(f"  Odds API request failed for {url}: {detail}")
+                return None, candidate_index
+            except ValueError as exc:
+                record_source_health("api.odds-api.io", False, type(exc).__name__, started)
+                log(f"  Odds API request failed for {url}: invalid JSON")
+                return None, candidate_index
 
     log("  All configured Odds API keys are unavailable or out of quota")
     return None, key_index
@@ -1507,32 +1556,43 @@ def call_ai(prompt: str, api_keys: list[str]) -> str:
             f"Calling Groq API ({GROQ_MODEL}, "
             f"key {key_index + 1}/{len(api_keys)})..."
         )
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=120,
-        )
-        last_response = response
-        if response.status_code in {401, 403, 429} and key_index < len(api_keys) - 1:
-            log(
-                f"  Groq key unavailable ({response.status_code}); "
-                "rotating to next key"
-            )
+        rotate_key = False
+        for attempt in range(MAX_TRANSIENT_RETRIES + 1):
+            try:
+                response = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                    timeout=120,
+                )
+                last_response = response
+                if response.status_code in {401, 403, 429} and key_index < len(api_keys) - 1:
+                    log(f"  Groq key unavailable ({response.status_code}); rotating to next key")
+                    rotate_key = True
+                    break
+                if response.status_code in TRANSIENT_HTTP_STATUSES and attempt < MAX_TRANSIENT_RETRIES:
+                    wait_before_retry("Groq", attempt, response)
+                    continue
+                response.raise_for_status()
+                content = response.json()["choices"][0]["message"]["content"]
+                log(f"Groq response: {len(content)} chars")
+                return content
+            except requests.RequestException as exc:
+                if attempt < MAX_TRANSIENT_RETRIES and getattr(exc, "response", None) is None:
+                    wait_before_retry("Groq", attempt)
+                    continue
+                log(f"Groq API error: {exc}")
+                if exc.response is not None:
+                    log(f"Response body: {exc.response.text[:500]}")
+                raise
+            except (KeyError, IndexError, ValueError) as exc:
+                log(f"Groq API error: {exc}")
+                raise
+        if rotate_key:
             continue
-        try:
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
-            log(f"Groq response: {len(content)} chars")
-            return content
-        except (requests.RequestException, KeyError, IndexError, ValueError) as exc:
-            log(f"Groq API error: {exc}")
-            if isinstance(exc, requests.RequestException) and exc.response is not None:
-                log(f"Response body: {exc.response.text[:500]}")
-            raise
 
     if last_response is not None:
         last_response.raise_for_status()

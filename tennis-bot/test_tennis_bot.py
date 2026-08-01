@@ -712,6 +712,24 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(get.call_args_list[0].kwargs["params"]["apiKey"], "first-key")
         self.assertEqual(get.call_args_list[1].kwargs["params"]["apiKey"], "second-key")
 
+    @patch.object(bot.time, "sleep")
+    @patch.object(bot.requests, "get")
+    def test_odds_api_retries_transient_error_without_rotating_key(self, get, sleep):
+        unavailable = unittest.mock.Mock(status_code=503, headers={})
+        working = unittest.mock.Mock(status_code=200, headers={})
+        working.raise_for_status.return_value = None
+        working.json.return_value = [{"id": 7}]
+        get.side_effect = [unavailable, working]
+
+        payload, key_index = bot.fetch_odds_json(
+            "https://api.odds-api.io/v3/events", {"sport": "tennis"}, ["same-key"], 0
+        )
+
+        self.assertEqual(payload, [{"id": 7}])
+        self.assertEqual(key_index, 0)
+        self.assertEqual([call.kwargs["params"]["apiKey"] for call in get.call_args_list], ["same-key", "same-key"])
+        sleep.assert_called_once_with(bot.RETRY_BASE_SECONDS)
+
     @patch.object(bot.requests, "post")
     def test_call_ai_uses_groq_contract(self, post):
         response = post.return_value
@@ -757,6 +775,23 @@ class TennisBotTests(unittest.TestCase):
             post.call_args_list[1].kwargs["headers"]["Authorization"],
             "Bearer second-key",
         )
+
+    @patch.object(bot.time, "sleep")
+    @patch.object(bot.requests, "post")
+    def test_call_ai_retries_transient_error_with_exponential_delay(self, post, sleep):
+        first = unittest.mock.Mock(status_code=503, headers={})
+        second = unittest.mock.Mock(status_code=502, headers={})
+        working = unittest.mock.Mock(status_code=200, headers={})
+        working.raise_for_status.return_value = None
+        working.json.return_value = {"choices": [{"message": {"content": "recovered"}}]}
+        post.side_effect = [first, second, working]
+
+        result = bot.call_ai("prompt", ["same-key"])
+
+        self.assertEqual(result, "recovered")
+        self.assertEqual(post.call_count, 3)
+        self.assertEqual(sleep.call_args_list, [unittest.mock.call(.5), unittest.mock.call(1.0)])
+        self.assertTrue(all(call.kwargs["headers"]["Authorization"] == "Bearer same-key" for call in post.call_args_list))
 
     def test_dashboard_uses_automated_data_sources_and_wl_results(self):
         dashboard = MODULE_PATH.parent.parent.joinpath("docs", "index.html").read_text(

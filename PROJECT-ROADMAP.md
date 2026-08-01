@@ -169,7 +169,7 @@ Status conventions:
 - [x] Back up state before every schema migration.
 - [x] Add explicit interrupted-run recovery.
 - [x] Rotate keys only on authentication/quota failures.
-- [ ] Add exponential retry delays for transient errors.
+- [x] Add exponential retry delays for transient errors.
 - [ ] Add provider-specific circuit breakers.
 - [x] Continue with deterministic Python output when Groq is unavailable.
 - [x] Keep AI output non-authoritative for probabilities and staking.
