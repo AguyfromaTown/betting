@@ -88,6 +88,12 @@ jobs:
       - name: Publish alias review queue
         if: always()
         run: |
+          if [ -f unresolved-player-identities.md ]; then
+            cat unresolved-player-identities.md >> "$GITHUB_STEP_SUMMARY"
+            if grep -q "OVERDUE UNRESOLVED IDENTITIES" unresolved-player-identities.md; then
+              echo "::warning::One or more unresolved tennis player identities are overdue for review"
+            fi
+          fi
           if [ -f player-alias-review.csv ]; then
             PENDING=$(python -c "import csv; print(sum((r.get('STATUS') or '').strip().lower() == 'pending' for r in csv.DictReader(open('player-alias-review.csv', encoding='utf-8'))))")
             echo "## Player alias review" >> "$GITHUB_STEP_SUMMARY"

@@ -671,7 +671,8 @@ class TennisBotTests(unittest.TestCase):
             bot.SOURCE_HEALTH[:] = events
             try:
                 with (patch.object(bot, "REPO_ROOT", root), patch.object(bot, "SOURCE_HEALTH_FILE", root / "source-health.md"),
-                      patch.object(bot, "save_api_quota_report"), patch.object(bot, "save_schema_alert_report")):
+                      patch.object(bot, "save_api_quota_report"), patch.object(bot, "save_schema_alert_report"),
+                      patch.object(bot, "save_identity_queue_report")):
                     bot.save_source_health()
                 report = (root / "source-health.md").read_text(encoding="utf-8")
                 payload = json.loads((root / "source-health.json").read_text(encoding="utf-8"))
@@ -1319,6 +1320,31 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(rows[0]["STATUS"], "pending")
         self.assertEqual(rows[0]["REASON"], "ambiguous_high_confidence")
         self.assertIn("Smith", rows[0]["SUGGESTED_CANONICAL"])
+
+    def test_unresolved_identity_report_is_dedicated_pending_queue(self):
+        from datetime import datetime, timezone
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); review_file = root / "player-alias-review.csv"
+            headers = ["PROVIDER_NAME", "NORMALIZED_NAME", "SUGGESTED_CANONICAL", "SUGGESTED_CONFIDENCE",
+                       "ALTERNATIVES", "REASON", "STATUS", "REVIEWED_CANONICAL", "CREATED_AT", "UPDATED_AT"]
+            bot.atomic_write_csv(review_file, headers, [
+                {"PROVIDER_NAME": "Ann Smith", "SUGGESTED_CANONICAL": "Anna Smith", "SUGGESTED_CONFIDENCE": ".880",
+                 "ALTERNATIVES": "Anne Smith (0.870)", "REASON": "ambiguous_high_confidence", "STATUS": "pending",
+                 "CREATED_AT": "2026-07-28T00:00:00+00:00"},
+                {"PROVIDER_NAME": "A. Zverev", "SUGGESTED_CANONICAL": "Alexander Zverev", "STATUS": "approved",
+                 "REVIEWED_CANONICAL": "Alexander Zverev", "CREATED_AT": "2026-07-29T00:00:00+00:00"},
+            ])
+            report_file = root / "unresolved-player-identities.md"
+            with (patch.object(bot, "ALIAS_REVIEW_FILE", review_file),
+                  patch.object(bot, "IDENTITY_QUEUE_REPORT_FILE", report_file)):
+                pending = bot.save_identity_queue_report(datetime(2026, 8, 1, tzinfo=timezone.utc), overdue_hours=72)
+            report = report_file.read_text(encoding="utf-8")
+        self.assertEqual(pending, 1)
+        self.assertIn("## OVERDUE UNRESOLVED IDENTITIES", report)
+        self.assertIn("| Ann Smith | Anna Smith | .880 | Anne Smith (0.870)", report)
+        self.assertNotIn("| A. Zverev |", report)
+        self.assertIn("Approved/applied: 1", report)
+        self.assertIn("Resolution procedure", report)
 
     def test_manually_approved_review_resolves_profile_identity(self):
         profiles = {bot.normalize_player_name("Alexander Zverev"): {"name": "Alexander Zverev"}}

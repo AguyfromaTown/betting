@@ -51,6 +51,7 @@ PREDICTION_SNAPSHOTS_DIR = REPO_ROOT / "prediction-snapshots"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
 ALIAS_REVIEW_FILE = REPO_ROOT / "player-alias-review.csv"
+IDENTITY_QUEUE_REPORT_FILE = REPO_ROOT / "unresolved-player-identities.md"
 PLAYER_STATUS_FILE = REPO_ROOT / "verified-player-status.csv"
 TOURNAMENT_LOCATIONS_FILE = REPO_ROOT / "verified-tournament-locations.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
@@ -564,6 +565,7 @@ def save_source_health():
     atomic_write_text(SOURCE_HEALTH_FILE, "\n".join(lines) + "\n")
     save_api_quota_report()
     save_schema_alert_report()
+    save_identity_queue_report()
 
 
 def load_run_state() -> dict:
@@ -1685,6 +1687,57 @@ def queue_alias_review(player: str, candidates: list[tuple[float, str, str]], re
     })
     atomic_write_csv(ALIAS_REVIEW_FILE, headers, rows)
     log(f"  Queued player identity for manual review: {player}")
+
+
+def save_identity_queue_report(as_of: datetime | None = None, overdue_hours: int = 72) -> int:
+    """Render pending identity reviews as a dedicated, human-actionable queue."""
+    as_of = as_of or datetime.now(timezone.utc)
+    _, rows = read_csv_rows(ALIAS_REVIEW_FILE)
+    pending = [row for row in rows if str(row.get("STATUS") or "pending").strip().casefold() == "pending"]
+
+    def age_hours(row: dict) -> float | None:
+        raw = row.get("CREATED_AT") or ""
+        try:
+            created = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            return max(0.0, (as_of - created.astimezone(timezone.utc)).total_seconds() / 3600)
+        except (TypeError, ValueError):
+            return None
+
+    pending.sort(key=lambda row: (row.get("CREATED_AT") or "", row.get("PROVIDER_NAME") or ""))
+    overdue = sum((age_hours(row) or 0) >= overdue_hours for row in pending)
+    status_counts = {}
+    for row in rows:
+        status = str(row.get("STATUS") or "pending").strip().casefold()
+        status_counts[status] = status_counts.get(status, 0) + 1
+    lines = ["# Unresolved Tennis Player Identities", "", f"Updated: {as_of.isoformat()}", "",
+             f"- Pending: {len(pending)}", f"- Overdue (at least {overdue_hours} hours): {overdue}",
+             f"- Approved/applied: {status_counts.get('approved', 0) + status_counts.get('applied', 0)}",
+             f"- Rejected: {status_counts.get('rejected', 0)}", ""]
+    if overdue:
+        lines.extend(["## OVERDUE UNRESOLVED IDENTITIES", "",
+                      "These rows are old enough to require operator review before affected players can receive profile-backed analysis.", ""])
+    lines.extend(["## Pending review queue", "",
+                  "| Provider name | Suggested canonical | Confidence | Alternatives | Reason | Age | Created |",
+                  "|---|---|---:|---|---|---:|---|"])
+    for row in pending:
+        age = age_hours(row)
+        age_text = f"{age / 24:.1f} d" if age is not None else "unknown"
+        safe = lambda value: str(value or "").replace("|", "\\|").replace("\n", " ")
+        lines.append(f"| {safe(row.get('PROVIDER_NAME'))} | {safe(row.get('SUGGESTED_CANONICAL')) or 'none'} | "
+                     f"{safe(row.get('SUGGESTED_CONFIDENCE')) or 'N/A'} | {safe(row.get('ALTERNATIVES')) or 'none'} | "
+                     f"{safe(row.get('REASON')) or 'unspecified'} | {age_text} | {safe(row.get('CREATED_AT')) or 'unknown'} |")
+    if not pending:
+        lines.append("| No unresolved identities | none | N/A | none | none | N/A | N/A |")
+    lines.extend(["", "## Resolution procedure", "",
+                  f"1. Open `{ALIAS_REVIEW_FILE.name}`.",
+                  "2. Verify the player against an authoritative profile source.",
+                  "3. For approval, set `STATUS` to `approved` and enter the exact canonical name in `REVIEWED_CANONICAL`.",
+                  "4. For a false match, set `STATUS` to `rejected`; never approve only because names look similar.",
+                  "5. Run the bot again. Approved identities are loaded with manual-review confidence and provenance."])
+    atomic_write_text(IDENTITY_QUEUE_REPORT_FILE, "\n".join(lines) + "\n")
+    return len(pending)
 
 
 def save_player_alias(provider_name: str, canonical_name: str, confidence: float):

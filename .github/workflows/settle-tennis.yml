@@ -79,6 +79,15 @@ jobs:
               echo "::warning::The tennis bot used one or more stale cached source responses"
             fi
           fi
+      - name: Publish unresolved player identities
+        if: always()
+        run: |
+          if [ -f unresolved-player-identities.md ]; then
+            cat unresolved-player-identities.md >> "$GITHUB_STEP_SUMMARY"
+            if grep -q "OVERDUE UNRESOLVED IDENTITIES" unresolved-player-identities.md; then
+              echo "::warning::One or more unresolved tennis player identities are overdue for review"
+            fi
+          fi
       - name: Publish provider schema health
         if: always()
         run: |
