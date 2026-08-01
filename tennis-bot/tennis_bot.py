@@ -2300,6 +2300,41 @@ def brier_score(rows: list[dict], probability_field: str) -> float | None:
     return sum(usable) / len(usable) if usable else None
 
 
+def probability_metrics(rows: list[dict], probability_field: str = "MODEL_PROBABILITY", bins: int = 10) -> dict:
+    """Return proper scoring and fixed-bin calibration metrics for settled predictions."""
+    usable = []
+    for row in rows:
+        if row.get("RESULT") not in {"W", "L"}:
+            continue
+        try:
+            probability = float(row.get(probability_field) or "")
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(probability) or not 0 <= probability <= 1:
+            continue
+        usable.append((probability, 1.0 if row["RESULT"] == "W" else 0.0))
+    if not usable:
+        return {"sample": 0, "brier": None, "log_loss": None, "ece": None, "bins": bins}
+    epsilon = 1e-15
+    brier = sum((probability - outcome) ** 2 for probability, outcome in usable) / len(usable)
+    log_loss = -sum(
+        outcome * math.log(min(1 - epsilon, max(epsilon, probability))) +
+        (1 - outcome) * math.log(min(1 - epsilon, max(epsilon, 1 - probability)))
+        for probability, outcome in usable
+    ) / len(usable)
+    calibration_error = 0.0
+    for index in range(bins):
+        low, high = index / bins, (index + 1) / bins
+        bucket = [(probability, outcome) for probability, outcome in usable
+                  if low <= probability < high or (index == bins - 1 and probability == 1)]
+        if bucket:
+            mean_probability = sum(item[0] for item in bucket) / len(bucket)
+            observed_rate = sum(item[1] for item in bucket) / len(bucket)
+            calibration_error += len(bucket) / len(usable) * abs(mean_probability - observed_rate)
+    return {"sample": len(usable), "brier": brier, "log_loss": log_loss,
+            "ece": calibration_error, "bins": bins}
+
+
 def learned_component_weights(rows: list[dict]) -> dict | None:
     """Walk-forward challenger weights: train chronologically, require holdout improvement."""
     rows = sorted(rows, key=lambda row: row.get("DATE", ""))
@@ -3897,9 +3932,11 @@ def generate_performance_summary():
         with open(AUDIT_FILE, newline="", encoding="utf-8") as handle:
             audit = list(csv.DictReader(handle))
     resolved = [row for row in audit if row.get("RESULT") in {"W", "L"} and row.get("MODEL_PROBABILITY")]
-    brier = sum((float(row["MODEL_PROBABILITY"]) - (row["RESULT"] == "W")) ** 2 for row in resolved) / len(resolved) if resolved else None
+    active_metrics = probability_metrics(resolved)
+    brier = active_metrics["brier"]
     challenger_rows = [row for row in resolved if row.get("CHALLENGER_PROBABILITY")]
-    challenger_brier = brier_score(challenger_rows, "CHALLENGER_PROBABILITY")
+    challenger_metrics = probability_metrics(challenger_rows, "CHALLENGER_PROBABILITY")
+    challenger_brier = challenger_metrics["brier"]
     clv = [float(row["CLV"]) for row in resolved if row.get("CLV")]
     policy = []
     if POLICY_FILE.exists() and POLICY_FILE.stat().st_size:
@@ -3912,7 +3949,11 @@ def generate_performance_summary():
         f"- Profit/loss: €{profit:.2f}",
         f"- ROI: {profit / stakes:.2%}" if stakes else "- ROI: N/A",
         f"- Brier score: {brier:.4f}" if brier is not None else "- Brier score: N/A",
+        f"- Log loss: {active_metrics['log_loss']:.4f}" if active_metrics["log_loss"] is not None else "- Log loss: N/A",
+        f"- Expected calibration error (10 bins): {active_metrics['ece']:.2%}" if active_metrics["ece"] is not None else "- Expected calibration error (10 bins): N/A",
         f"- Shadow challenger Brier: {challenger_brier:.4f}" if challenger_brier is not None else "- Shadow challenger Brier: N/A",
+        f"- Shadow challenger log loss: {challenger_metrics['log_loss']:.4f}" if challenger_metrics["log_loss"] is not None else "- Shadow challenger log loss: N/A",
+        f"- Shadow challenger ECE (10 bins): {challenger_metrics['ece']:.2%}" if challenger_metrics["ece"] is not None else "- Shadow challenger ECE (10 bins): N/A",
         f"- Average CLV: {sum(clv) / len(clv):.2%}" if clv else "- Average CLV: N/A",
         f"- Settled counterfactual decisions: {len(policy_resolved)}",
         "", "## Calibration", "",
@@ -3935,30 +3976,29 @@ def generate_performance_summary():
     log(f"Performance summary saved: {PERFORMANCE_FILE.name}")
 
 
-def _segment_metrics(rows: list[dict]) -> tuple[int, float, float, float, float | None]:
+def _segment_metrics(rows: list[dict]) -> tuple[int, float, float, float, float, float, float | None]:
     count = len(rows)
     if not count:
-        return 0, 0.0, 0.0, 0.0, None
+        return 0, 0.0, 0.0, 0.0, 0.0, 0.0, None
     wins = sum(row.get("RESULT") == "W" for row in rows)
     profit = sum(
         (float(row.get("OPENING_ODDS") or 0) - 1) if row.get("RESULT") == "W" else -1
         for row in rows
     )
-    brier = sum(
-        (float(row["MODEL_PROBABILITY"]) - (row.get("RESULT") == "W")) ** 2
-        for row in rows
-    ) / count
+    metrics = probability_metrics(rows)
     clv_values = [float(row["CLV"]) for row in rows if row.get("CLV")]
-    return count, wins / count, profit / count, brier, (sum(clv_values) / len(clv_values) if clv_values else None)
+    return (count, wins / count, profit / count, metrics["brier"] or 0.0,
+            metrics["log_loss"] or 0.0, metrics["ece"] or 0.0,
+            (sum(clv_values) / len(clv_values) if clv_values else None))
 
 
 def _append_segment_table(lines: list[str], title: str, groups: list[tuple[str, list[dict]]]):
-    lines.extend(["", f"## {title}", "", "| Segment | Bets | Win rate | Flat-unit ROI | Brier | Avg CLV | Reliability |", "|---|---:|---:|---:|---:|---:|---|"])
+    lines.extend(["", f"## {title}", "", "| Segment | Bets | Win rate | Flat-unit ROI | Brier | Log loss | ECE | Avg CLV | Reliability |", "|---|---:|---:|---:|---:|---:|---:|---:|---|"])
     for label, rows in groups:
-        count, win_rate, roi, brier, clv = _segment_metrics(rows)
+        count, win_rate, roi, brier, log_loss, ece, clv = _segment_metrics(rows)
         reliability = "usable" if count >= 100 else "developing" if count >= 30 else "small sample"
         clv_text = f"{clv:.2%}" if clv is not None else "N/A"
-        lines.append(f"| {label} | {count} | {win_rate:.1%} | {roi:.2%} | {brier:.4f} | {clv_text} | {reliability} |")
+        lines.append(f"| {label} | {count} | {win_rate:.1%} | {roi:.2%} | {brier:.4f} | {log_loss:.4f} | {ece:.2%} | {clv_text} | {reliability} |")
 
 
 def walk_forward_staking_simulation(rows: list[dict], starting_bankroll: float = 100.0) -> dict:

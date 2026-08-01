@@ -81,7 +81,7 @@ Status conventions:
 - [x] Require minimum sample sizes before learned weights activate.
 - [x] Keep challengers in shadow mode until holdout improvement is demonstrated.
 - [x] Track Brier score, ROI and CLV.
-- [ ] Add log loss and expected calibration error to tennis reporting.
+- [x] Add log loss and expected calibration error to tennis reporting.
 - [x] Store immutable model versions with predictions and policy decisions.
 - [ ] Store enough source snapshots to reproduce every historical prediction exactly.
 

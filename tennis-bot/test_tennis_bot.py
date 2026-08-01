@@ -496,6 +496,41 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(sample, 100)
         self.assertGreater(probability, .60)
 
+    def test_log_loss_and_expected_calibration_error(self):
+        rows = [
+            {"MODEL_PROBABILITY": ".90", "RESULT": "W"},
+            {"MODEL_PROBABILITY": ".10", "RESULT": "L"},
+            {"MODEL_PROBABILITY": "invalid", "RESULT": "W"},
+            {"MODEL_PROBABILITY": ".50", "RESULT": "V"},
+        ]
+        metrics = bot.probability_metrics(rows)
+        self.assertEqual(metrics["sample"], 2)
+        self.assertAlmostEqual(metrics["brier"], .01)
+        self.assertAlmostEqual(metrics["log_loss"], -__import__("math").log(.9))
+        self.assertAlmostEqual(metrics["ece"], .10)
+        self.assertEqual(metrics["bins"], 10)
+
+    def test_log_loss_clamps_extreme_probabilities(self):
+        metrics = bot.probability_metrics([{"MODEL_PROBABILITY": "1", "RESULT": "L"}])
+        self.assertTrue(__import__("math").isfinite(metrics["log_loss"]))
+        self.assertEqual(metrics["ece"], 1.0)
+
+    def test_performance_report_publishes_log_loss_and_ece(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit = root / "predictions.csv"
+            audit.write_text("MODEL_PROBABILITY,CHALLENGER_PROBABILITY,RESULT\n0.9,0.8,W\n0.1,0.2,L\n", encoding="utf-8")
+            performance = root / "performance.md"
+            with (patch.object(bot, "AUDIT_FILE", audit), patch.object(bot, "LOG_FILE", root / "bets.csv"),
+                  patch.object(bot, "POLICY_FILE", root / "policy.csv"), patch.object(bot, "PERFORMANCE_FILE", performance),
+                  patch.object(bot, "BACKTEST_FILE", root / "backtest.md"), patch.object(bot, "REPO_ROOT", root)):
+                bot.generate_performance_summary()
+            report = performance.read_text(encoding="utf-8")
+        self.assertIn("- Log loss: 0.1054", report)
+        self.assertIn("- Expected calibration error (10 bins): 10.00%", report)
+        self.assertIn("- Shadow challenger log loss: 0.2231", report)
+        self.assertIn("- Shadow challenger ECE (10 bins): 20.00%", report)
+
     def test_tour_calibration_never_borrows_other_tours(self):
         rows = ([{"MODEL_PROBABILITY": ".60", "RESULT": "W", "TOUR": "ATP"} for _ in range(99)] +
                 [{"MODEL_PROBABILITY": ".60", "RESULT": "L", "TOUR": "WTA"} for _ in range(100)])
@@ -1590,6 +1625,7 @@ class TennisBotTests(unittest.TestCase):
             report = output.read_text(encoding="utf-8")
 
         self.assertIn("## Odds bands", report)
+        self.assertIn("| Log loss | ECE |", report)
         self.assertIn("1.50–1.75 | 2 | 50.0%", report)
         self.assertIn("## Surface", report)
         self.assertIn("## Monthly performance", report)
