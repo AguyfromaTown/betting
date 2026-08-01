@@ -15,6 +15,7 @@ import json
 import math
 import os
 import re
+import statistics
 import sys
 import tempfile
 import time
@@ -52,6 +53,7 @@ BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
 ALIAS_REVIEW_FILE = REPO_ROOT / "player-alias-review.csv"
 IDENTITY_QUEUE_REPORT_FILE = REPO_ROOT / "unresolved-player-identities.md"
+OPERATIONS_ALERT_FILE = REPO_ROOT / "operations-alerts.md"
 PLAYER_STATUS_FILE = REPO_ROOT / "verified-player-status.csv"
 TOURNAMENT_LOCATIONS_FILE = REPO_ROOT / "verified-tournament-locations.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
@@ -4504,6 +4506,87 @@ def generate_monthly_policy_report(policy_rows: list[dict], output_file: Path | 
     atomic_write_text(output_file, "\n".join(lines) + "\n")
 
 
+def detect_abnormal_policy_counts(policy_rows: list[dict], target_date: str | None = None,
+                                  min_history_days: int = 7) -> dict:
+    """Compare active-policy counts with robust historical daily baselines."""
+    active = [row for row in policy_rows if (row.get("POLICY_ROLE") or "active") == "active" and row.get("DATE")]
+    dates = sorted({row["DATE"] for row in active})
+    target_date = target_date or (dates[-1] if dates else "")
+
+    def summarize(date_str: str) -> dict:
+        rows = [row for row in active if row["DATE"] == date_str]
+        candidates = len(rows); authorized = sum(row.get("DECISION") == "authorized" for row in rows)
+        rejected = sum(row.get("DECISION") == "cancelled" for row in rows)
+        return {"date": date_str, "candidates": candidates, "authorized": authorized, "rejected": rejected,
+                "rejection_rate": rejected / candidates if candidates else None}
+
+    current = summarize(target_date) if target_date else summarize("")
+    history = [summarize(date_str) for date_str in dates if date_str < target_date]
+
+    def robust_baseline(field: str) -> dict:
+        values = [float(day[field]) for day in history if day[field] is not None]
+        if not values:
+            return {"median": None, "mad": None}
+        median = statistics.median(values)
+        return {"median": median, "mad": statistics.median(abs(value - median) for value in values)}
+
+    baselines = {field: robust_baseline(field) for field in ("candidates", "authorized", "rejected", "rejection_rate")}
+    alerts = []
+    mature = len(history) >= min_history_days
+    if mature and current["candidates"]:
+        for field, label in (("candidates", "candidate count"), ("authorized", "authorized pick count"),
+                             ("rejected", "rejection count")):
+            baseline = baselines[field]; median, mad = baseline["median"], baseline["mad"]
+            threshold = max(3.0, 3.0 * max(float(mad or 0), 1.0))
+            if median is not None and abs(float(current[field]) - median) > threshold:
+                alerts.append({"code": f"abnormal_{field}", "message":
+                               f"{label} is {current[field]} versus historical median {median:.1f} (MAD {mad:.1f})"})
+        rate_baseline = baselines["rejection_rate"]
+        if current["candidates"] >= 5 and current["rejection_rate"] is not None and rate_baseline["median"] is not None:
+            rate_threshold = max(.25, 3 * max(float(rate_baseline["mad"] or 0), .05))
+            if abs(current["rejection_rate"] - rate_baseline["median"]) > rate_threshold:
+                alerts.append({"code": "abnormal_rejection_rate", "message":
+                               f"rejection rate is {current['rejection_rate']:.1%} versus historical median {rate_baseline['median']:.1%}"})
+        if current["authorized"] == 0 and current["candidates"] >= 5 and (baselines["authorized"]["median"] or 0) >= 2:
+            alerts.append({"code": "zero_authorized_picks", "message":
+                           f"zero picks were authorized from {current['candidates']} candidates"})
+    return {"target_date": target_date, "current": current, "history_days": len(history), "mature": mature,
+            "minimum_history_days": min_history_days, "baselines": baselines, "alerts": alerts}
+
+
+def generate_operations_alert_report(policy_rows: list[dict], output_file: Path | None = None,
+                                     target_date: str | None = None) -> dict:
+    output_file = output_file or OPERATIONS_ALERT_FILE
+    result = detect_abnormal_policy_counts(policy_rows, target_date)
+    current = result["current"]
+    lines = ["# Tennis Operations Count Health", "", f"Date: `{result['target_date'] or 'N/A'}`", "",
+             f"- Active candidates: {current['candidates']}", f"- Authorized picks: {current['authorized']}",
+             f"- Rejections: {current['rejected']}",
+             (f"- Rejection rate: {current['rejection_rate']:.1%}" if current["rejection_rate"] is not None else "- Rejection rate: N/A"),
+             f"- Historical days: {result['history_days']} (minimum {result['minimum_history_days']})", ""]
+    if result["alerts"]:
+        lines.extend(["## ABNORMAL REJECTION OR PICK COUNTS", ""])
+        lines.extend(f"- `{alert['code']}`: {alert['message']}" for alert in result["alerts"])
+    elif result["mature"]:
+        lines.extend(["## OK", "", "Candidate, rejection and authorized-pick counts are within robust historical limits."])
+    else:
+        lines.extend(["## COLLECTING BASELINE", "",
+                      "No anomaly decision is made until enough prior active-policy days are available."])
+    lines.extend(["", "## Historical baseline", "",
+                  "| Metric | Median | MAD |", "|---|---:|---:|"])
+    for field, label in (("candidates", "Candidates"), ("authorized", "Authorized picks"),
+                         ("rejected", "Rejections"), ("rejection_rate", "Rejection rate")):
+        baseline = result["baselines"][field]
+        if baseline["median"] is None:
+            lines.append(f"| {label} | N/A | N/A |")
+        elif field == "rejection_rate":
+            lines.append(f"| {label} | {baseline['median']:.1%} | {baseline['mad']:.1%} |")
+        else:
+            lines.append(f"| {label} | {baseline['median']:.1f} | {baseline['mad']:.1f} |")
+    atomic_write_text(output_file, "\n".join(lines) + "\n")
+    return result
+
+
 def generate_performance_summary():
     bets = []
     if LOG_FILE.exists() and LOG_FILE.stat().st_size:
@@ -4528,6 +4611,7 @@ def generate_performance_summary():
     if POLICY_FILE.exists() and POLICY_FILE.stat().st_size:
         with POLICY_FILE.open(newline="", encoding="utf-8") as handle: policy = list(csv.DictReader(handle))
     policy_resolved = [row for row in policy if row.get("RESULT") in {"W", "L"}]
+    generate_operations_alert_report(policy, REPO_ROOT / "operations-alerts.md")
     lines = [
         "# Tennis Bot Performance", "",
         f"- Settled bets: {len(settled)}",

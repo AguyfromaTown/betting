@@ -200,7 +200,7 @@ Status conventions:
 - [x] Publish authorization and cancellation reasons in GitHub Actions summaries.
 - [x] Add settlement-failure alerts.
 - [x] Monitor CLV and probability calibration deterioration.
-- [ ] Alert on abnormal rejection and pick counts.
+- [x] Alert on abnormal rejection and pick counts.
 - [x] Distinguish provider failure, a valid empty schedule and missing odds in reports.
 - [ ] Add optional Telegram or email delivery without exposing secrets.
 

@@ -810,6 +810,38 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("collecting data", report)
         self.assertIn("never alter live thresholds automatically", report)
 
+    def test_abnormal_rejection_and_zero_pick_counts_use_mature_robust_baseline(self):
+        rows = []
+        for day in range(1, 8):
+            for index in range(10):
+                rows.append({"DATE": f"2026-07-{day:02d}", "POLICY_ROLE": "active",
+                             "DECISION": "authorized" if index < 5 else "cancelled"})
+        for index in range(10):
+            rows.append({"DATE": "2026-07-08", "POLICY_ROLE": "active", "DECISION": "cancelled"})
+        result = bot.detect_abnormal_policy_counts(rows, "2026-07-08")
+        codes = {alert["code"] for alert in result["alerts"]}
+        self.assertTrue(result["mature"])
+        self.assertIn("abnormal_authorized", codes)
+        self.assertIn("abnormal_rejected", codes)
+        self.assertIn("abnormal_rejection_rate", codes)
+        self.assertIn("zero_authorized_picks", codes)
+
+    def test_count_alerts_wait_for_history_and_report_operator_warning(self):
+        immature = [{"DATE": "2026-07-01", "POLICY_ROLE": "active", "DECISION": "cancelled"} for _ in range(20)]
+        self.assertFalse(bot.detect_abnormal_policy_counts(immature, "2026-07-01")["alerts"])
+        rows = []
+        for day in range(1, 8):
+            rows.extend({"DATE": f"2026-07-{day:02d}", "POLICY_ROLE": "active",
+                         "DECISION": "authorized" if index < 5 else "cancelled"} for index in range(10))
+        rows.extend({"DATE": "2026-07-08", "POLICY_ROLE": "active", "DECISION": "cancelled"} for _ in range(10))
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "operations.md"
+            bot.generate_operations_alert_report(rows, output, "2026-07-08")
+            report = output.read_text(encoding="utf-8")
+        self.assertIn("## ABNORMAL REJECTION OR PICK COUNTS", report)
+        self.assertIn("zero picks were authorized from 10 candidates", report)
+        self.assertIn("| Authorized picks | 5.0 | 0.0 |", report)
+
     def test_tour_calibration_never_borrows_other_tours(self):
         rows = ([{"MODEL_PROBABILITY": ".60", "RESULT": "W", "TOUR": "ATP"} for _ in range(99)] +
                 [{"MODEL_PROBABILITY": ".60", "RESULT": "L", "TOUR": "WTA"} for _ in range(100)])

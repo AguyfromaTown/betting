@@ -76,6 +76,15 @@ jobs:
               echo "::warning::The tennis bot used one or more stale cached source responses"
             fi
           fi
+      - name: Publish rejection and pick count health
+        if: always()
+        run: |
+          if [ -f operations-alerts.md ]; then
+            cat operations-alerts.md >> "$GITHUB_STEP_SUMMARY"
+            if grep -q "ABNORMAL REJECTION OR PICK COUNTS" operations-alerts.md; then
+              echo "::warning::Tennis rejection or authorized-pick counts are outside robust historical limits"
+            fi
+          fi
       - name: Publish provider schema health
         if: always()
         run: |
