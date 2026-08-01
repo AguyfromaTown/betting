@@ -94,7 +94,8 @@ OFFICIAL_STATUS_DOMAINS = {
 BLOCKING_PHYSICAL_STATUSES = {"questionable", "injured", "withdrawn", "unavailable", "suspended"}
 MAX_CACHE_ENTRY_BYTES = 2_000_000
 MAX_CACHE_ENTRIES = 20
-MODEL_VERSION = "tennis-2026.08-monthly-policy-report-v1"
+MODEL_VERSION = "tennis-2026.08-bookmaker-retirement-rules-v1"
+RETIREMENT_POLICIES = {"void", "action_after_first_set", "official_result"}
 THRESHOLD_CHALLENGER_POLICIES = (
     {"id": "threshold-conservative-v1", "movement": .06, "dispersion": .08, "quality": 7, "risk_ev": .07},
     {"id": "threshold-standard-v1", "movement": .10, "dispersion": .12, "quality": 5, "risk_ev": .05},
@@ -607,6 +608,43 @@ def load_tour_exposure_caps() -> dict[str, float]:
     except (OSError, TypeError, ValueError) as exc:
         log(f"WARNING: Invalid risk-config.json; using conservative defaults ({exc})")
         return dict(DEFAULT_TOUR_EXPOSURE_CAPS)
+
+
+def load_retirement_settlement_rules() -> dict:
+    """Load bookmaker-specific retirement rules; invalid or unknown rules fail safely to void."""
+    defaults = {"default": "void", "bookmakers": {}}
+    if not RISK_CONFIG_FILE.exists():
+        return defaults
+    try:
+        payload = json.loads(RISK_CONFIG_FILE.read_text(encoding="utf-8"))
+        configured = payload.get("retirement_settlement", {})
+        if not isinstance(configured, dict):
+            raise ValueError("retirement_settlement must be an object")
+        default = str(configured.get("default") or "void").strip().casefold()
+        if default not in RETIREMENT_POLICIES:
+            raise ValueError(f"unsupported default retirement policy: {default}")
+        bookmakers = configured.get("bookmakers", {})
+        if not isinstance(bookmakers, dict):
+            raise ValueError("retirement_settlement.bookmakers must be an object")
+        normalized = {}
+        for bookmaker, value in bookmakers.items():
+            policy = str(value.get("policy") if isinstance(value, dict) else value).strip().casefold()
+            if policy not in RETIREMENT_POLICIES:
+                raise ValueError(f"unsupported retirement policy for {bookmaker}: {policy}")
+            normalized[normalize_bookmaker_name(bookmaker)] = policy
+        return {"default": default, "bookmakers": normalized}
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        log(f"WARNING: Invalid retirement settlement configuration; all retirements void ({exc})")
+        return defaults
+
+
+def normalize_bookmaker_name(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+
+
+def retirement_policy_for_bookmaker(bookmaker: str | None) -> str:
+    rules = load_retirement_settlement_rules()
+    return rules["bookmakers"].get(normalize_bookmaker_name(bookmaker), rules["default"])
 
 
 def tour_exposure_bucket(match: dict) -> str:
@@ -1163,7 +1201,9 @@ def extract_moneyline_market(payload: dict) -> dict:
                 if home > 1 and away > 1:
                     prices_found.append((home, away, bookmaker))
     if not prices_found:
-        return {"best_home": None, "best_away": None, "consensus_home": None, "consensus_away": None, "source": None, "bookmaker_count": 0, "home_dispersion": None, "away_dispersion": None, "quotes": []}
+        return {"best_home": None, "best_away": None, "consensus_home": None, "consensus_away": None,
+                "source": None, "home_source": None, "away_source": None, "bookmaker_count": 0,
+                "home_dispersion": None, "away_dispersion": None, "quotes": []}
     homes, aways = sorted(p[0] for p in prices_found), sorted(p[1] for p in prices_found)
     midpoint = len(homes) // 2
     median_home = homes[midpoint] if len(homes) % 2 else (homes[midpoint - 1] + homes[midpoint]) / 2
@@ -1173,7 +1213,8 @@ def extract_moneyline_market(payload: dict) -> dict:
     best_home = max(eligible_home, key=lambda p: p[0])
     best_away = max(eligible_away, key=lambda p: p[1])
     source = best_home[2] if best_home[2] == best_away[2] else f"{best_home[2]}/{best_away[2]}"
-    return {"best_home": best_home[0], "best_away": best_away[1], "consensus_home": median_home, "consensus_away": median_away, "source": source, "bookmaker_count": len(prices_found),
+    return {"best_home": best_home[0], "best_away": best_away[1], "consensus_home": median_home, "consensus_away": median_away,
+            "source": source, "home_source": best_home[2], "away_source": best_away[2], "bookmaker_count": len(prices_found),
             "home_dispersion": (max(homes) - min(homes)) / median_home,
             "away_dispersion": (max(aways) - min(aways)) / median_away,
             "quotes": [{"home": home, "away": away, "bookmaker": bookmaker}
@@ -1328,6 +1369,8 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
                 "consensus_home_odds": market["consensus_home"],
                 "consensus_away_odds": market["consensus_away"],
                 "odds_source": bookmaker or "Odds-API.io",
+                "home_odds_source": market["home_source"] or bookmaker or "Odds-API.io",
+                "away_odds_source": market["away_source"] or bookmaker or "Odds-API.io",
                 "bookmaker_count": market["bookmaker_count"],
                 "home_dispersion": market["home_dispersion"],
                 "away_dispersion": market["away_dispersion"],
@@ -3998,6 +4041,42 @@ def tennis_void_reason(event: dict) -> str | None:
     return None
 
 
+def tennis_retirement_detected(event: dict) -> bool:
+    detail = " ".join(str(event.get(key) or "") for key in ("result", "reason", "note", "score", "scores")).casefold()
+    return bool(event.get("retired") or any(token in detail for token in ("retired", "retirement")))
+
+
+def tennis_walkover_detected(event: dict) -> bool:
+    detail = " ".join(str(event.get(key) or "") for key in ("result", "reason", "note", "score", "scores")).casefold()
+    return bool(event.get("walkover") or "walkover" in detail or "w/o" in detail)
+
+
+def retirement_settlement_rule(event: dict, bookmaker: str | None) -> tuple[bool, str]:
+    """Return whether a retirement is void and the auditable rule applied."""
+    policy = retirement_policy_for_bookmaker(bookmaker)
+    if policy == "void":
+        return True, "retirement:void"
+    if policy == "action_after_first_set":
+        scores = event.get("scores") or {}
+        try:
+            completed_sets = float(scores.get("home") or 0) + float(scores.get("away") or 0)
+        except (TypeError, ValueError, AttributeError):
+            completed_sets = 0
+        return completed_sets < 1, f"retirement:action_after_first_set:{'void' if completed_sets < 1 else 'grade'}"
+    return False, "retirement:official_result"
+
+
+def bookmaker_for_pick(match: dict | None, player: str) -> str:
+    if not match:
+        return ""
+    pick = normalize_player_name(player)
+    if pick == normalize_player_name(match.get("player1", "")):
+        return str(match.get("home_odds_source") or match.get("odds_source") or "")
+    if pick == normalize_player_name(match.get("player2", "")):
+        return str(match.get("away_odds_source") or match.get("odds_source") or "")
+    return str(match.get("odds_source") or "")
+
+
 def unresolved_alert_hours() -> int:
     try:
         return max(1, int(os.environ.get("TENNIS_UNRESOLVED_HOURS", DEFAULT_UNRESOLVED_ALERT_HOURS)))
@@ -4095,8 +4174,17 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
                       and normalize_player_name(str(e.get("away", ""))) in label), None)
         if not event:
             continue
+        bookmaker = row.get("BOOKMAKER", "")
+        retirement = tennis_retirement_detected(event)
+        settlement_rule = "standard_completed_match"
+        if retirement:
+            retirement_void, settlement_rule = retirement_settlement_rule(event, bookmaker)
+        else:
+            retirement_void = False
         void_reason = tennis_void_reason(event)
-        if void_reason:
+        must_void = bool(void_reason and (not retirement or retirement_void or tennis_walkover_detected(event)))
+        row["SETTLEMENT_RULE"] = settlement_rule if retirement else (void_reason or settlement_rule)
+        if must_void:
             stake = float(row.get("STAKE") or 0)
             row["RESULT"], row["RETURN"] = "V", f"{stake:.2f}"
             if not is_paper: credited += stake
@@ -4124,13 +4212,13 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
         else: settled += 1
         update_audit_result(row.get("DATE", ""), pick, row["RESULT"], closing)
     if settled:
-        headers = ["DATE", "MATCH", "BET", "ODDS", "STAKE", "RESULT", "RETURN", "STARTING BALANCE"]
+        headers = ["DATE", "MATCH", "BET", "ODDS", "BOOKMAKER", "STAKE", "RESULT", "RETURN", "STARTING BALANCE", "SETTLEMENT_RULE"]
         atomic_write_csv(LOG_FILE, headers, rows)
         balance = reconcile_bankroll()
         log(f"Settled {settled} bet(s); credited €{credited:.2f}")
         log(f"Bankroll reconciled to ledger: €{balance:.2f}")
     if paper_settled:
-        headers = ["DATE", "MATCH", "BET", "ODDS", "STAKE", "RESULT", "RETURN", "STARTING BALANCE"]
+        headers = ["DATE", "MATCH", "BET", "ODDS", "BOOKMAKER", "STAKE", "RESULT", "RETURN", "STARTING BALANCE", "SETTLEMENT_RULE"]
         atomic_write_csv(PAPER_LOG_FILE, headers, paper_rows)
         log(f"Settled {paper_settled} paper bet(s); real bankroll unchanged")
     policy_settled = 0
@@ -4141,7 +4229,16 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
                        {normalize_player_name(str(event.get("home", ""))), normalize_player_name(str(event.get("away", "")))} ==
                        {normalize_player_name(row.get("PLAYER1", "")), normalize_player_name(row.get("PLAYER2", ""))})), None)
         if not event: continue
-        if tennis_void_reason(event):
+        bookmaker = row.get("BOOKMAKER", "")
+        retirement = tennis_retirement_detected(event)
+        if retirement:
+            retirement_void, settlement_rule = retirement_settlement_rule(event, bookmaker)
+        else:
+            retirement_void, settlement_rule = False, "standard_completed_match"
+        void_reason = tennis_void_reason(event)
+        must_void = bool(void_reason and (not retirement or retirement_void or tennis_walkover_detected(event)))
+        row["SETTLEMENT_RULE"] = settlement_rule if retirement else (void_reason or settlement_rule)
+        if must_void:
             row.update({"RESULT": "V", "FLAT_RETURN": "0.000", "CLOSING_ODDS": "", "CLV": "", "BRIER_SCORE": ""})
             policy_settled += 1
             continue
@@ -4722,7 +4819,7 @@ def append_price_snapshot(now: datetime, row: dict, match: dict | None, baseline
 
 
 POLICY_HEADERS = ["DATE", "MODEL_VERSION", "POLICY_ID", "POLICY_ROLE", "THRESHOLDS", "EVENT_ID", "MATCH", "PLAYER1", "PLAYER2", "PICK", "DECISION", "RULE",
-                  "ODDS", "PROBABILITY", "EV", "TIMESTAMP", "RESULT", "FLAT_RETURN", "CLOSING_ODDS", "CLV", "BRIER_SCORE"]
+                  "ODDS", "BOOKMAKER", "PROBABILITY", "EV", "TIMESTAMP", "RESULT", "FLAT_RETURN", "CLOSING_ODDS", "CLV", "BRIER_SCORE", "SETTLEMENT_RULE"]
 
 
 def record_policy_decision(now: datetime, row: dict, match: dict | None, baseline: dict | None, decision: str, rule: str,
@@ -4738,9 +4835,11 @@ def record_policy_decision(now: datetime, row: dict, match: dict | None, baselin
                  "EVENT_ID": row.get("EVENT_ID", ""),
                  "MATCH": row.get("MATCH", ""), "PLAYER1": row.get("PLAYER1", ""), "PLAYER2": row.get("PLAYER2", ""),
                  "PICK": row.get("PICK", ""), "DECISION": decision, "RULE": rule,
-                 "ODDS": f"{baseline['player_odds']:.3f}" if baseline else "", "PROBABILITY": f"{baseline['assessed_probability']:.6f}" if baseline else "",
+                 "ODDS": f"{baseline['player_odds']:.3f}" if baseline else "",
+                 "BOOKMAKER": bookmaker_for_pick(match, row.get("PICK", "")),
+                 "PROBABILITY": f"{baseline['assessed_probability']:.6f}" if baseline else "",
                  "EV": f"{baseline['ev']:.6f}" if baseline else "", "TIMESTAMP": now.isoformat(), "RESULT": "", "FLAT_RETURN": "",
-                 "CLOSING_ODDS": "", "CLV": "", "BRIER_SCORE": ""})
+                 "CLOSING_ODDS": "", "CLV": "", "BRIER_SCORE": "", "SETTLEMENT_RULE": ""})
     atomic_write_csv(POLICY_FILE, POLICY_HEADERS, rows)
 
 
@@ -4963,7 +5062,7 @@ def log_bets(
     current_balance = bankroll
     total_stake = 0.0
     existing_bets = set()
-    if file_exists and LOG_FILE.stat().st_size > 0:
+    if file_exists and target_log.stat().st_size > 0:
         with open(target_log, newline="", encoding="utf-8") as existing_file:
             for row in csv.DictReader(existing_file):
                 existing_bets.add((
@@ -5017,6 +5116,7 @@ def log_bets(
             "match": match_label,
             "bet": bet_label,
             "odds": odds_str,
+            "bookmaker": bookmaker_for_pick(match_info, rec["player"]),
             "stake": stake_str,
             "result": "",
             "return": "",
@@ -5031,12 +5131,12 @@ def log_bets(
         log("No bets to log.")
         return total_stake
 
-    headers = ["DATE", "MATCH", "BET", "ODDS", "STAKE", "RESULT", "RETURN", "STARTING BALANCE"]
+    headers = ["DATE", "MATCH", "BET", "ODDS", "BOOKMAKER", "STAKE", "RESULT", "RETURN", "STARTING BALANCE", "SETTLEMENT_RULE"]
     _, existing_rows = read_csv_rows(target_log)
     existing_rows.extend({
-        "DATE": row["date"], "MATCH": row["match"], "BET": row["bet"], "ODDS": row["odds"],
+        "DATE": row["date"], "MATCH": row["match"], "BET": row["bet"], "ODDS": row["odds"], "BOOKMAKER": row["bookmaker"],
         "STAKE": row["stake"], "RESULT": row["result"], "RETURN": row["return"],
-        "STARTING BALANCE": row["starting_balance"],
+        "STARTING BALANCE": row["starting_balance"], "SETTLEMENT_RULE": "",
     } for row in rows_to_append)
     atomic_write_csv(target_log, headers, existing_rows)
 

@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -765,6 +766,56 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(bot.tennis_void_reason({"status": "cancelled"}), "cancelled")
         self.assertEqual(bot.tennis_void_reason({"result": "Player retired"}), "walkover_or_retirement")
         self.assertIsNone(bot.tennis_void_reason({"status": "settled", "result": "2-0"}))
+
+    def test_bookmaker_retirement_rules_are_configurable_and_safe_by_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "risk-config.json"
+            config.write_text(json.dumps({"retirement_settlement": {
+                "default": "void", "bookmakers": {
+                    "Book A": "official_result", "Book B": "action_after_first_set"
+                }}}), encoding="utf-8")
+            retired_after_set = {"retired": True, "scores": {"home": 1, "away": 0}}
+            retired_before_set = {"retired": True, "scores": {"home": 0, "away": 0}}
+            with patch.object(bot, "RISK_CONFIG_FILE", config):
+                self.assertEqual(bot.retirement_settlement_rule(retired_after_set, "Book A"),
+                                 (False, "retirement:official_result"))
+                self.assertEqual(bot.retirement_settlement_rule(retired_after_set, "Book B"),
+                                 (False, "retirement:action_after_first_set:grade"))
+                self.assertEqual(bot.retirement_settlement_rule(retired_before_set, "Book B"),
+                                 (True, "retirement:action_after_first_set:void"))
+                self.assertEqual(bot.retirement_settlement_rule(retired_after_set, "Unknown"),
+                                 (True, "retirement:void"))
+
+    def test_invalid_retirement_configuration_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "risk-config.json"
+            config.write_text('{"retirement_settlement":{"default":"invented"}}', encoding="utf-8")
+            with patch.object(bot, "RISK_CONFIG_FILE", config):
+                self.assertEqual(bot.retirement_policy_for_bookmaker("Any Book"), "void")
+
+    def test_retired_match_can_be_graded_under_recorded_bookmaker_rule(self):
+        event = {"id": 7, "date": "2026-08-01T12:00:00Z", "status": "settled", "retired": True,
+                 "home": "A", "away": "B", "scores": {"home": 2, "away": 0}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log_path = root / "bets.csv"
+            log_path.write_text(
+                "DATE,MATCH,BET,ODDS,BOOKMAKER,STAKE,RESULT,RETURN,STARTING BALANCE,SETTLEMENT_RULE\n"
+                "2026-08-01,A vs B,A to win,2.00,Book A,3.00,,,100.00,\n", encoding="utf-8")
+            config = root / "risk-config.json"
+            config.write_text('{"retirement_settlement":{"default":"void","bookmakers":{"Book A":"official_result"}}}', encoding="utf-8")
+            (root / "bankroll.txt").write_text("97.00", encoding="utf-8")
+            with (patch.object(bot, "LOG_FILE", log_path), patch.object(bot, "PAPER_LOG_FILE", root / "paper.csv"),
+                  patch.object(bot, "POLICY_FILE", root / "policy.csv"), patch.object(bot, "BANKROLL_FILE", root / "bankroll.txt"),
+                  patch.object(bot, "TRANSACTION_FILE", root / "transactions.csv"), patch.object(bot, "RISK_CONFIG_FILE", config),
+                  patch.object(bot, "SETTLEMENT_ALERT_FILE", root / "alerts.md"),
+                  patch.object(bot, "fetch_odds_json", side_effect=[([event], 0), ([], 0)]),
+                  patch.object(bot, "update_audit_result")):
+                bot.settle_pending_bets(["key"])
+            _, rows = bot.read_csv_rows(log_path)
+        self.assertEqual(rows[0]["RESULT"], "W")
+        self.assertEqual(rows[0]["RETURN"], "6.00")
+        self.assertEqual(rows[0]["SETTLEMENT_RULE"], "retirement:official_result")
 
     def test_walk_forward_weights_stay_shadow_without_enough_history(self):
         rows = [{"DATE": f"2026-01-{(index % 28) + 1:02d}", "RESULT": "W",
@@ -1744,6 +1795,11 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(market["best_away"], 2.6)
         self.assertEqual(market["consensus_home"], 1.55)
         self.assertEqual(market["consensus_away"], 2.5)
+        self.assertEqual(market["home_source"], "B")
+        self.assertEqual(market["away_source"], "A")
+        sourced_match = {"player1": "Home", "player2": "Away", "home_odds_source": "B", "away_odds_source": "A"}
+        self.assertEqual(bot.bookmaker_for_pick(sourced_match, "Home"), "B")
+        self.assertEqual(bot.bookmaker_for_pick(sourced_match, "Away"), "A")
         self.assertEqual(market["quotes"], [
             {"home": 1.5, "away": 2.6, "bookmaker": "A"},
             {"home": 1.6, "away": 2.4, "bookmaker": "B"},

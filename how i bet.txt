@@ -19,7 +19,10 @@ hard maximums, and the minimum authorized stake is 0.5% of bankroll:
 Daily discovery only stages a candidate. No stake is logged or deducted until
 the scheduled workflow rechecks it within 90 minutes of match time. Odds, EV,
 bookmaker coverage, surface and model agreement must still pass. Withdrawals,
-walkovers and retirements are treated as void/refunded rather than model losses.
+walkovers are treated as void/refunded rather than model losses. Retirement settlement follows
+the actual selected bookmaker recorded with the bet and the policy in risk-config.json. The safe
+default is void; supported explicit policies are void, action_after_first_set and official_result.
+Changing this configuration must reflect the bookmaker's current published house rules.
 
 Learning is guarded: calibration needs at least 100 comparable settled
 predictions; learned component weights need at least 200 observations and a 3%

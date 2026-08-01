@@ -5,5 +5,15 @@
     "Challenger": 0.05,
     "ITF": 0.03,
     "Unknown": 0.03
+  },
+  "retirement_settlement": {
+    "default": "void",
+    "bookmakers": {
+      "Bet365": "void",
+      "Unibet": "void",
+      "Pinnacle": "void",
+      "William Hill": "void",
+      "Betway": "void"
+    }
   }
 }
