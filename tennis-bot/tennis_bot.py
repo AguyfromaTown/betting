@@ -1739,6 +1739,9 @@ def calculate_serve_return_profile(history: list[dict], player: str, surface: st
                 except (TypeError, ValueError):
                     values[name] = 0.0
             opp_svpt = float(row[opp + "svpt"]); opp_won = float(row[opp + "1stWon"]) + float(row[opp + "2ndWon"])
+            opp_bp_faced = float(row.get(opp + "bpFaced") or 0)
+            opp_bp_saved = float(row.get(opp + "bpSaved") or 0)
+            opp_service_games = float(row.get(opp + "SvGms") or 0)
         except (KeyError, TypeError, ValueError):
             continue
         if played >= cutoff or values["svpt"] <= 0 or opp_svpt <= 0:
@@ -1746,15 +1749,19 @@ def calculate_serve_return_profile(history: list[dict], player: str, surface: st
         weight = 0.5 ** (max(0, (cutoff - played).days) / 120)
         if surface and str(row.get("surface", "")).casefold() == surface.casefold():
             weight *= 1.35
-        observations.append((played, weight, values, opp_svpt, opp_won))
+        observations.append((played, weight, values, opp_svpt, opp_won, opp_bp_faced, opp_bp_saved, opp_service_games,
+                             str(row.get("_source_url") or "historical_match_records")))
     observations.sort(key=lambda item: item[0], reverse=True); observations = observations[:limit]
-    service_points = sum(weight * values["svpt"] for _, weight, values, _, _ in observations)
-    return_points = sum(weight * opp_svpt for _, weight, _, opp_svpt, _ in observations)
+    service_points = sum(item[1] * item[2]["svpt"] for item in observations)
+    return_points = sum(item[1] * item[3] for item in observations)
     if len(observations) < 8 or service_points < 400 or return_points < 400:
         return None
-    total = lambda field: sum(weight * values[field] for _, weight, values, _, _ in observations)
+    total = lambda field: sum(item[1] * item[2][field] for item in observations)
     service_won = total("1stWon") + total("2ndWon")
-    return_won = sum(weight * (opp_svpt - opp_won) for _, weight, _, opp_svpt, opp_won in observations)
+    return_won = sum(item[1] * (item[3] - item[4]) for item in observations)
+    break_points = sum(item[1] * item[5] for item in observations)
+    breaks = sum(item[1] * max(0.0, item[5] - item[6]) for item in observations)
+    return_games = sum(item[1] * item[7] for item in observations)
     bp_faced = total("bpFaced")
     service_probability = service_won / service_points
     return_probability = return_won / return_points
@@ -1766,7 +1773,80 @@ def calculate_serve_return_profile(history: list[dict], player: str, surface: st
         "second_serve_won": total("2ndWon") / max(1, service_points - total("1stIn")),
         "service_points_won": service_probability, "return_points_won": return_probability,
         "break_points_saved": total("bpSaved") / bp_faced if bp_faced else None,
+        "break_points_converted": breaks / break_points if break_points else None,
+        "break_rate": breaks / return_games if return_games else None,
+        "return_games": return_games,
         "hold_probability": hold_probability(service_probability),
+        "source": ";".join(dict.fromkeys(item[8] for item in observations)),
+    }
+
+
+def calculate_clutch_profile(history: list[dict], player: str, surface: str | None,
+                             as_of: str, limit: int = 50) -> dict | None:
+    """Calculate leakage-safe tiebreak and deciding-set records from completed scores."""
+    player_key = normalize_player_name(player)
+    cutoff = datetime.strptime(as_of, "%Y-%m-%d")
+    matches = []
+    for row in history:
+        winner_key = normalize_player_name(row.get("winner_name", ""))
+        loser_key = normalize_player_name(row.get("loser_name", ""))
+        if player_key not in {winner_key, loser_key}:
+            continue
+        score = str(row.get("score") or "").upper()
+        if not score or any(flag in score for flag in ("W/O", "RET", "DEF")):
+            continue
+        try:
+            played = datetime.strptime(str(row.get("tourney_date", "")), "%Y%m%d")
+        except ValueError:
+            continue
+        if played >= cutoff:
+            continue
+        parsed_sets = []
+        for token in score.split():
+            parsed = re.fullmatch(r"(\d+)-(\d+)(?:\(\d+\))?", token)
+            if not parsed:
+                continue
+            winner_games, loser_games = int(parsed.group(1)), int(parsed.group(2))
+            if max(winner_games, loser_games) <= 7:
+                parsed_sets.append((winner_games, loser_games))
+        if not parsed_sets:
+            continue
+        won_match = player_key == winner_key
+        weight = 0.5 ** ((cutoff - played).days / 730)
+        if surface and str(row.get("surface") or "").casefold() == surface.casefold():
+            weight *= 1.25
+        try:
+            best_of = int(row.get("best_of") or (5 if len(parsed_sets) > 3 else 3))
+        except (TypeError, ValueError):
+            best_of = 5 if len(parsed_sets) > 3 else 3
+        tiebreak_results = []
+        for winner_games, loser_games in parsed_sets:
+            if {winner_games, loser_games} == {6, 7}:
+                player_games = winner_games if won_match else loser_games
+                tiebreak_results.append(player_games == 7)
+        deciding_result = won_match if best_of in {3, 5} and len(parsed_sets) == best_of else None
+        matches.append((played, weight, tiebreak_results, deciding_result,
+                        str(row.get("_source_url") or "historical_match_records")))
+    if not matches:
+        return None
+    matches.sort(reverse=True); matches = matches[:limit]
+    tiebreak_sample = sum(len(item[2]) for item in matches)
+    tiebreak_weight = sum(item[1] for item in matches for _ in item[2])
+    tiebreak_wins = sum(item[1] for item in matches for won in item[2] if won)
+    deciding = [(item[1], item[3]) for item in matches if item[3] is not None]
+    deciding_weight = sum(item[0] for item in deciding)
+    deciding_wins = sum(weight for weight, won in deciding if won)
+
+    def shrunk(wins: float, total: float) -> float | None:
+        return (wins + 2.0) / (total + 4.0) if total else None
+
+    return {
+        "match_sample": len(matches),
+        "tiebreak_sample": tiebreak_sample, "tiebreak_wins": sum(won for item in matches for won in item[2]),
+        "tiebreak_win_rate": shrunk(tiebreak_wins, tiebreak_weight),
+        "deciding_set_sample": len(deciding), "deciding_set_wins": sum(won for _, won in deciding),
+        "deciding_set_win_rate": shrunk(deciding_wins, deciding_weight),
+        "source": ";".join(dict.fromkeys(item[4] for item in matches)),
     }
 
 
@@ -1837,6 +1917,8 @@ def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
         match["player2_recent_form"] = calculate_recent_form(history, match["player2"], match.get("surface"), date_str)
         match["player1_serve_return"] = calculate_serve_return_profile(history, match["player1"], match.get("surface"), date_str)
         match["player2_serve_return"] = calculate_serve_return_profile(history, match["player2"], match.get("surface"), date_str)
+        match["player1_clutch"] = calculate_clutch_profile(history, match["player1"], match.get("surface"), date_str)
+        match["player2_clutch"] = calculate_clutch_profile(history, match["player2"], match.get("surface"), date_str)
         match["player1_workload"] = calculate_workload(history, match["player1"], date_str, match.get("tournament", ""))
         match["player2_workload"] = calculate_workload(history, match["player2"], date_str, match.get("tournament", ""))
         for side in ("player1", "player2"):
@@ -2038,7 +2120,9 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         player_profile = match.get("player1_profile")
         opponent_profile = match.get("player2_profile")
         recent_form = match.get("player1_recent_form")
-        serve_return = calculate_serve_return_matchup(match.get("player1_serve_return"), match.get("player2_serve_return"))
+        player_serve_profile = match.get("player1_serve_return")
+        serve_return = calculate_serve_return_matchup(player_serve_profile, match.get("player2_serve_return"))
+        clutch = match.get("player1_clutch") or {}
         workload = match.get("player1_workload") or {}
         h2h_probability = (match.get("head_to_head") or {}).get("player1_probability")
     elif player_key == normalize_player_name(match["player2"]):
@@ -2046,7 +2130,9 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         player_profile = match.get("player2_profile")
         opponent_profile = match.get("player1_profile")
         recent_form = match.get("player2_recent_form")
-        serve_return = calculate_serve_return_matchup(match.get("player2_serve_return"), match.get("player1_serve_return"))
+        player_serve_profile = match.get("player2_serve_return")
+        serve_return = calculate_serve_return_matchup(player_serve_profile, match.get("player1_serve_return"))
+        clutch = match.get("player2_clutch") or {}
         workload = match.get("player2_workload") or {}
         h2h_probability = (match.get("head_to_head") or {}).get("player2_probability")
     else:
@@ -2123,6 +2209,15 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "h2h_weight": h2h_weight,
         "expected_hold": serve_return["player_hold"] if serve_return else None,
         "opponent_expected_hold": serve_return["opponent_hold"] if serve_return else None,
+        "break_rate": (player_serve_profile or {}).get("break_rate"),
+        "break_points_converted": (player_serve_profile or {}).get("break_points_converted"),
+        "break_return_games": (player_serve_profile or {}).get("return_games", 0),
+        "serve_return_source": (player_serve_profile or {}).get("source", ""),
+        "tiebreak_win_rate": clutch.get("tiebreak_win_rate"),
+        "tiebreak_sample": clutch.get("tiebreak_sample", 0),
+        "deciding_set_win_rate": clutch.get("deciding_set_win_rate"),
+        "deciding_set_sample": clutch.get("deciding_set_sample", 0),
+        "clutch_source": clutch.get("source", ""),
         "component_weights": component_weights,
         "raw_probability": raw_probability,
         "challenger_probability": challenger_probability,
@@ -2247,10 +2342,18 @@ def build_prompt(
                     f"{baseline['h2h_probability']:.1%} (n={baseline['h2h_sample']}, same surface={baseline['h2h_surface_sample']}, weight={baseline['h2h_weight']:.1%})"
                     if baseline.get("h2h_probability") is not None else "unavailable"
                 )
+                clutch_parts = []
+                if baseline.get("break_rate") is not None:
+                    clutch_parts.append(f"break rate {baseline['break_rate']:.1%}")
+                if baseline.get("tiebreak_win_rate") is not None:
+                    clutch_parts.append(f"tiebreak {baseline['tiebreak_win_rate']:.1%} (n={baseline['tiebreak_sample']})")
+                if baseline.get("deciding_set_win_rate") is not None:
+                    clutch_parts.append(f"deciding set {baseline['deciding_set_win_rate']:.1%} (n={baseline['deciding_set_sample']})")
+                clutch_text = ", ".join(clutch_parts) if clutch_parts else "unavailable"
                 baseline_lines.append(
                     f"  Python baseline for {player}: market fair "
                     f"{baseline['market_probability']:.1%}, Elo "
-                    f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, serve/return {serve_text}, H2H {h2h_text}, "
+                    f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, serve/return {serve_text}, H2H {h2h_text}, clutch {clutch_text}, "
                     f"blended assessed "
                     f"{baseline['assessed_probability']:.1%}, EV "
                     f"{baseline['ev']:.2%}, score {baseline['score']:.2f}"
@@ -2792,6 +2895,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "MARKET_PROBABILITY", "ELO_PROBABILITY", "MODEL_PROBABILITY",
         "FORM_PROBABILITY", "FORM_SAMPLE", "H2H_PROBABILITY", "H2H_SAMPLE", "H2H_SURFACE_SAMPLE", "H2H_WEIGHT", "H2H_SOURCE", "SERVE_RETURN_PROBABILITY",
         "SERVE_RETURN_SAMPLE", "EXPECTED_HOLD", "OPPONENT_EXPECTED_HOLD",
+        "BREAK_RATE", "BREAK_POINTS_CONVERTED", "BREAK_RETURN_GAMES", "SERVE_RETURN_SOURCE", "TIEBREAK_WIN_RATE", "TIEBREAK_SAMPLE",
+        "DECIDING_SET_WIN_RATE", "DECIDING_SET_SAMPLE", "CLUTCH_SOURCE",
         "COMPONENT_WEIGHTS", "RAW_PROBABILITY", "CHALLENGER_PROBABILITY",
         "CHALLENGER_SAMPLE", "CHALLENGER_PROMOTED", "CALIBRATION_SAMPLE",
         "CONTEXT_PENALTY", "CONTEXT_REASON", "WORKLOAD_PENALTY", "REST_DAYS",
@@ -2881,6 +2986,13 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 baseline.get("serve_return_sample", 0),
                 f"{baseline['expected_hold']:.6f}" if baseline.get("expected_hold") is not None else "",
                 f"{baseline['opponent_expected_hold']:.6f}" if baseline.get("opponent_expected_hold") is not None else "",
+                f"{baseline['break_rate']:.6f}" if baseline.get("break_rate") is not None else "",
+                f"{baseline['break_points_converted']:.6f}" if baseline.get("break_points_converted") is not None else "",
+                f"{baseline.get('break_return_games', 0):.3f}", baseline.get("serve_return_source", ""),
+                f"{baseline['tiebreak_win_rate']:.6f}" if baseline.get("tiebreak_win_rate") is not None else "",
+                baseline.get("tiebreak_sample", 0),
+                f"{baseline['deciding_set_win_rate']:.6f}" if baseline.get("deciding_set_win_rate") is not None else "",
+                baseline.get("deciding_set_sample", 0), baseline.get("clutch_source", ""),
                 baseline.get("component_weights", ""),
                 f"{baseline['raw_probability']:.6f}",
                 f"{baseline['challenger_probability']:.6f}" if baseline.get("challenger_probability") is not None else "",

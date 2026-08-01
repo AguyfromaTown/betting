@@ -834,6 +834,12 @@ class TennisBotTests(unittest.TestCase):
             "head_to_head": {"player1_probability": 0.58, "player2_probability": 0.42,
                              "sample": 5, "surface_sample": 3, "model_weight": 0.03,
                              "source": "historical_match_records"},
+            "player1_clutch": {"tiebreak_win_rate": 0.60, "tiebreak_sample": 10,
+                               "deciding_set_win_rate": 0.55, "deciding_set_sample": 8,
+                               "source": "historical_match_records"},
+            "player2_clutch": {"tiebreak_win_rate": 0.40, "tiebreak_sample": 10,
+                               "deciding_set_win_rate": 0.45, "deciding_set_sample": 8,
+                               "source": "historical_match_records"},
         }
         with tempfile.TemporaryDirectory() as directory:
             audit_file = Path(directory) / "prediction-audit.csv"
@@ -858,6 +864,9 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["H2H_PROBABILITY"], "0.420000")
         self.assertEqual(second["H2H_SAMPLE"], "5")
         self.assertEqual(second["H2H_SOURCE"], "historical_match_records")
+        self.assertEqual(second["TIEBREAK_WIN_RATE"], "0.400000")
+        self.assertEqual(second["DECIDING_SET_WIN_RATE"], "0.450000")
+        self.assertEqual(second["CLUTCH_SOURCE"], "historical_match_records")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -962,7 +971,7 @@ class TennisBotTests(unittest.TestCase):
                 "tourney_date": f"202605{day:02d}", "surface": "Clay", "score": "6-4 6-4",
                 "winner_name": "Server", "loser_name": f"Opponent {day}",
                 "w_ace": "8", "w_df": "3", "w_svpt": "100", "w_1stIn": "62", "w_1stWon": "46", "w_2ndWon": "20", "w_bpSaved": "4", "w_bpFaced": "5",
-                "l_ace": "2", "l_df": "4", "l_svpt": "90", "l_1stIn": "55", "l_1stWon": "32", "l_2ndWon": "14", "l_bpSaved": "3", "l_bpFaced": "7",
+                "l_ace": "2", "l_df": "4", "l_svpt": "90", "l_1stIn": "55", "l_1stWon": "32", "l_2ndWon": "14", "l_bpSaved": "3", "l_bpFaced": "7", "l_SvGms": "10",
             })
 
         profile = bot.calculate_serve_return_profile(history, "Server", "clay", "2026-06-01")
@@ -971,6 +980,32 @@ class TennisBotTests(unittest.TestCase):
         self.assertAlmostEqual(profile["service_points_won"], 0.66)
         self.assertGreater(profile["return_points_won"], 0.45)
         self.assertGreater(profile["hold_probability"], 0.7)
+        self.assertAlmostEqual(profile["break_points_converted"], 4 / 7)
+        self.assertAlmostEqual(profile["break_rate"], 0.4)
+
+    def test_clutch_profile_tracks_tiebreaks_and_deciding_sets_without_leakage(self):
+        history = []
+        for day in range(1, 5):
+            history.append({
+                "tourney_date": f"202605{day:02d}", "surface": "Clay", "best_of": "3",
+                "winner_name": "Player", "loser_name": f"Opponent W{day}", "score": "7-6(5) 4-6 6-4",
+            })
+        for day in range(5, 9):
+            history.append({
+                "tourney_date": f"202605{day:02d}", "surface": "Clay", "best_of": "3",
+                "winner_name": f"Opponent L{day}", "loser_name": "Player", "score": "7-6(4) 4-6 6-4",
+            })
+        history.extend([
+            {"tourney_date": "20260509", "surface": "Clay", "best_of": "3", "winner_name": "Player", "loser_name": "Retired", "score": "7-6(3) RET"},
+            {"tourney_date": "20260802", "surface": "Clay", "best_of": "3", "winner_name": "Player", "loser_name": "Future", "score": "7-6(3) 4-6 6-4"},
+        ])
+        profile = bot.calculate_clutch_profile(history, "Player", "clay", "2026-08-01")
+        self.assertEqual(profile["match_sample"], 8)
+        self.assertEqual(profile["tiebreak_sample"], 8)
+        self.assertEqual(profile["deciding_set_sample"], 8)
+        self.assertGreater(profile["tiebreak_win_rate"], 0.49)
+        self.assertLess(profile["tiebreak_win_rate"], 0.5)
+        self.assertAlmostEqual(profile["tiebreak_win_rate"], profile["deciding_set_win_rate"])
 
     def test_serve_return_matchup_is_symmetric_and_bounded(self):
         strong = {"sample": 20, "service_points_won": 0.68, "return_points_won": 0.42}

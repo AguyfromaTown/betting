@@ -47,7 +47,7 @@ Status conventions:
 - [x] Add carefully weighted head-to-head features.
 - [x] Calculate serve and return profiles.
 - [x] Calculate expected hold from service-point performance.
-- [ ] Add break-rate, tiebreak and deciding-set features.
+- [x] Add break-rate, tiebreak and deciding-set features.
 - [ ] Add dedicated best-of-five historical features.
 - [ ] Add verified injury and physical-status data.
 - [x] Prevent AI narrative from overriding verified Python calculations.
