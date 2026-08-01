@@ -63,7 +63,7 @@ Status conventions:
 - [x] Explicitly identify unusually long previous matches.
 - [x] Detect recent tournament changes.
 - [x] Detect surface changes between consecutive tournaments.
-- [ ] Calculate verified travel distance and timezone changes.
+- [x] Calculate verified travel distance and timezone changes.
 - [x] Apply conservative workload penalties of no more than three probability points.
 - [ ] Backtest and learn workload thresholds after adequate samples.
 

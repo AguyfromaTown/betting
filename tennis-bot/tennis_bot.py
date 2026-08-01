@@ -11,6 +11,7 @@ import difflib
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import sys
@@ -22,9 +23,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 from bs4 import BeautifulSoup
+from dateutil import tz as dateutil_tz
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BANKROLL_FILE = REPO_ROOT / "bankroll.txt"
@@ -45,6 +48,7 @@ BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
 ALIAS_REVIEW_FILE = REPO_ROOT / "player-alias-review.csv"
 PLAYER_STATUS_FILE = REPO_ROOT / "verified-player-status.csv"
+TOURNAMENT_LOCATIONS_FILE = REPO_ROOT / "verified-tournament-locations.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
 ROLLBACK_STATE_FILE = REPO_ROOT / "model-policy-state.json"
 BACKUPS_DIR = REPO_ROOT / "state-backups"
@@ -1068,6 +1072,23 @@ def detect_surface(event: dict, tournament: str) -> str | None:
     return None
 
 
+def provider_location(event: dict, source: str, as_of: str) -> dict | None:
+    """Extract coordinates/timezone only when the provider supplies them explicitly."""
+    candidates = [event]
+    for field in ("location", "venue"):
+        if isinstance(event.get(field), dict):
+            candidates.append(event[field])
+    for candidate in candidates:
+        latitude = candidate.get("latitude", candidate.get("lat"))
+        longitude = candidate.get("longitude", candidate.get("lon", candidate.get("lng")))
+        timezone_name = (candidate.get("timezone") or candidate.get("timeZone") or
+                         candidate.get("utcOffset") or candidate.get("utc_offset"))
+        location = verified_location(latitude, longitude, timezone_name, source, as_of)
+        if location:
+            return location
+    return None
+
+
 def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict]:
     """Fetch verified tennis fixtures and match-winner odds from Odds-API.io."""
     global LAST_FIXTURE_STATUS
@@ -1161,6 +1182,8 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
                 "away_dispersion": market["away_dispersion"],
                 "indoor": event.get("indoor") if event.get("indoor") is not None else odds_event.get("indoor"),
                 "best_of": event.get("bestOf") or odds_event.get("bestOf"),
+                "location": (provider_location(event, "https://api.odds-api.io", date_str) or
+                             provider_location(odds_event, "https://api.odds-api.io", date_str)),
             })
     log(f"  Found verified moneyline odds for {len(matches)} matches")
     LAST_FIXTURE_STATUS = "ok" if matches else "fixtures_without_verified_odds"
@@ -2024,8 +2047,70 @@ def calculate_serve_return_matchup(player_profile: dict | None, opponent_profile
     return {"probability": probability, "player_hold": player_hold, "opponent_hold": opponent_hold, "sample": min(player_profile["sample"], opponent_profile["sample"])}
 
 
+def verified_location(latitude, longitude, timezone_name, source: str, as_of: str) -> dict | None:
+    """Validate sourced coordinates and resolve the location's UTC offset for the decision date."""
+    if not str(source or "").strip():
+        return None
+    try:
+        latitude, longitude = float(latitude), float(longitude)
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            return None
+    except (TypeError, ValueError):
+        return None
+    timezone_text = str(timezone_name or "").strip()
+    offset = None
+    if timezone_text:
+        try:
+            offset = float(timezone_text)
+        except ValueError:
+            try:
+                local = datetime.strptime(as_of, "%Y-%m-%d").replace(hour=12, tzinfo=ZoneInfo(timezone_text))
+                offset_delta = local.utcoffset()
+                offset = offset_delta.total_seconds() / 3600 if offset_delta is not None else None
+            except (ValueError, ZoneInfoNotFoundError):
+                fallback_zone = dateutil_tz.gettz(timezone_text)
+                if fallback_zone is not None:
+                    local = datetime.strptime(as_of, "%Y-%m-%d").replace(hour=12, tzinfo=fallback_zone)
+                    offset_delta = local.utcoffset()
+                    offset = offset_delta.total_seconds() / 3600 if offset_delta is not None else None
+    return {"latitude": latitude, "longitude": longitude, "timezone": timezone_text,
+            "utc_offset": offset, "source": str(source).strip()}
+
+
+def travel_between_locations(previous: dict | None, current: dict | None) -> dict:
+    """Calculate great-circle distance and timezone change only from verified locations."""
+    result = {"travel_distance_km": None, "timezone_change_hours": None, "travel_source": ""}
+    if not previous or not current:
+        return result
+    lat1, lon1 = math.radians(previous["latitude"]), math.radians(previous["longitude"])
+    lat2, lon2 = math.radians(current["latitude"]), math.radians(current["longitude"])
+    delta_lat, delta_lon = lat2 - lat1, lon2 - lon1
+    arc = 2 * math.asin(math.sqrt(math.sin(delta_lat / 2) ** 2 +
+                                  math.cos(lat1) * math.cos(lat2) * math.sin(delta_lon / 2) ** 2))
+    result["travel_distance_km"] = 6371.0088 * arc
+    if previous.get("utc_offset") is not None and current.get("utc_offset") is not None:
+        result["timezone_change_hours"] = current["utc_offset"] - previous["utc_offset"]
+    result["travel_source"] = ";".join(dict.fromkeys((previous["source"], current["source"])))
+    return result
+
+
+def load_verified_tournament_locations(as_of: str) -> dict[str, dict]:
+    """Load source-backed tournament coordinates; incomplete or unsourced rows are ignored."""
+    locations = {}
+    if not TOURNAMENT_LOCATIONS_FILE.exists():
+        return locations
+    with open(TOURNAMENT_LOCATIONS_FILE, newline="", encoding="utf-8-sig") as handle:
+        for row in csv.DictReader(handle):
+            name = normalize_player_name(row.get("TOURNAMENT", ""))
+            location = verified_location(row.get("LATITUDE"), row.get("LONGITUDE"), row.get("TIMEZONE"),
+                                         row.get("SOURCE", ""), as_of)
+            if name and location:
+                locations[name] = location
+    return locations
+
+
 def calculate_workload(history: list[dict], player: str, as_of: str, current_tournament: str = "",
-                       current_surface: str | None = None) -> dict:
+                       current_surface: str | None = None, current_location: dict | None = None) -> dict:
     """Measure recent match density, sets and rest without inventing unavailable durations."""
     key = normalize_player_name(player); cutoff = datetime.strptime(as_of, "%Y-%m-%d")
     played = []
@@ -2051,10 +2136,15 @@ def calculate_workload(history: list[dict], player: str, as_of: str, current_tou
         historical_surface = str(row.get("surface") or "").strip().casefold()
         if historical_surface not in {"hard", "clay", "grass", "carpet"}:
             historical_surface = ""
+        source = str(row.get("_location_source") or row.get("_source_url") or "")
+        historical_location = verified_location(
+            row.get("_latitude", row.get("latitude")), row.get("_longitude", row.get("longitude")),
+            row.get("_timezone", row.get("timezone")), source, as_of
+        )
         played.append((date, max(1, sets), row.get("tourney_name") or row.get("tournament") or "",
                        minutes, str(row.get("_source_url") or "historical_match_records"),
                        best_of, bool(minutes is not None and minutes >= long_threshold), long_threshold,
-                       historical_surface))
+                       historical_surface, historical_location))
     played.sort(reverse=True)
     last = played[0] if played else None
     matches_7 = sum((cutoff - item[0]).days <= 7 for item in played)
@@ -2079,6 +2169,7 @@ def calculate_workload(history: list[dict], player: str, as_of: str, current_tou
     previous_surface = previous_tournament[8] if previous_tournament else ""
     surface_change = (previous_surface != current_surface_key
                       if previous_surface and current_surface_key else None)
+    travel = travel_between_locations(previous_tournament[9] if previous_tournament else None, current_location)
     penalty = .025 if matches_7 >= 4 or sets_7 >= 10 else .015 if matches_7 >= 3 or sets_7 >= 8 else .01 if rest_days is not None and rest_days <= 1 else 0.0
     if tournament_change and rest_days is not None and rest_days <= 3: penalty += .005
     return {"matches_7": matches_7, "matches_14": matches_14, "matches_30": matches_30,
@@ -2102,6 +2193,7 @@ def calculate_workload(history: list[dict], player: str, as_of: str, current_tou
             "surface_transition_source": previous_tournament[4] if previous_tournament else "",
             "current_surface": current_surface_key or None,
             "surface_change": surface_change,
+            **travel,
             "tournament_change": tournament_change, "penalty": min(.03, penalty)}
 
 
@@ -2128,8 +2220,16 @@ def fetch_recent_match_history(matches: list[dict], date_str: str) -> list[dict]
 
 def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
     history = fetch_recent_match_history(matches, date_str)
+    tournament_locations = load_verified_tournament_locations(date_str)
+    for row in history:
+        location = tournament_locations.get(normalize_player_name(row.get("tourney_name") or row.get("tournament") or ""))
+        if location:
+            row.update({"_latitude": location["latitude"], "_longitude": location["longitude"],
+                        "_timezone": location["timezone"], "_location_source": location["source"]})
     official_statuses = load_verified_player_status(date_str)
     for match in matches:
+        match["location"] = (match.get("location") or
+                             tournament_locations.get(normalize_player_name(match.get("tournament", ""))))
         match["head_to_head"] = calculate_head_to_head(
             history, match["player1"], match["player2"], match.get("surface"), date_str
         )
@@ -2141,8 +2241,8 @@ def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
         match["player2_clutch"] = calculate_clutch_profile(history, match["player2"], match.get("surface"), date_str)
         match["player1_best_of_five"] = calculate_best_of_five_profile(history, match["player1"], match.get("surface"), date_str)
         match["player2_best_of_five"] = calculate_best_of_five_profile(history, match["player2"], match.get("surface"), date_str)
-        match["player1_workload"] = calculate_workload(history, match["player1"], date_str, match.get("tournament", ""), match.get("surface"))
-        match["player2_workload"] = calculate_workload(history, match["player2"], date_str, match.get("tournament", ""), match.get("surface"))
+        match["player1_workload"] = calculate_workload(history, match["player1"], date_str, match.get("tournament", ""), match.get("surface"), match.get("location"))
+        match["player2_workload"] = calculate_workload(history, match["player2"], date_str, match.get("tournament", ""), match.get("surface"), match.get("location"))
         for side in ("player1", "player2"):
             ranking_history = calculate_ranking_history(history, match[side], date_str)
             bio = calculate_player_bio(history, match[side], date_str)
@@ -2614,6 +2714,10 @@ def build_prompt(
                 if baseline.get("physical_status_detail"):
                     physical_text += f" ({baseline['physical_status_detail']})"
                 workload = baseline.get("workload") or {}
+                travel_text = (f"{workload['travel_distance_km']:.0f} km"
+                               if workload.get("travel_distance_km") is not None else "unknown")
+                timezone_text = (f"{workload['timezone_change_hours']:+g}h"
+                                 if workload.get("timezone_change_hours") is not None else "unknown")
                 workload_text = (
                     f"rest={workload.get('rest_days', 'N/A')}d, matches 7/14/30d="
                     f"{workload.get('matches_7', 0)}/{workload.get('matches_14', 0)}/{workload.get('matches_30', 0)}, "
@@ -2625,7 +2729,8 @@ def build_prompt(
                     f", previous tournament={workload.get('previous_tournament') or 'unknown'} "
                     f"({workload.get('previous_tournament_surface') or 'unknown'} -> "
                     f"{workload.get('current_surface') or 'unknown'}, surface change="
-                    f"{'unknown' if workload.get('surface_change') is None else workload.get('surface_change')})"
+                    f"{'unknown' if workload.get('surface_change') is None else workload.get('surface_change')}), "
+                    f"verified travel={travel_text}, timezone change={timezone_text}"
                 )
                 baseline_lines.append(
                     f"  Python baseline for {player}: market fair "
@@ -3186,6 +3291,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "LATEST_LONG_MATCH_MINUTES", "LATEST_LONG_MATCH_DATE", "LATEST_LONG_MATCH_DAYS_AGO", "LATEST_LONG_MATCH_SOURCE",
         "TOURNAMENT_CHANGE", "PREVIOUS_TOURNAMENT", "PREVIOUS_TOURNAMENT_SURFACE",
         "PREVIOUS_TOURNAMENT_DAYS_AGO", "CURRENT_SURFACE", "SURFACE_CHANGE", "SURFACE_TRANSITION_SOURCE",
+        "TRAVEL_DISTANCE_KM", "TIMEZONE_CHANGE_HOURS", "TRAVEL_SOURCE",
         "BEST_OF", "INDOOR",
         "MARKET_DISPERSION", "DATA_QUALITY_SCORE", "DATA_QUALITY_GRADE",
         "UNCERTAINTY_MARGIN", "RISK_ADJUSTED_EV", "KILL_SWITCH", "KILL_SWITCH_REASON",
@@ -3308,6 +3414,9 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 workload.get("previous_tournament", ""), workload.get("previous_tournament_surface", ""),
                 workload.get("previous_tournament_days_ago", ""), workload.get("current_surface", ""),
                 workload.get("surface_change", ""), workload.get("surface_transition_source", ""),
+                f"{workload['travel_distance_km']:.3f}" if workload.get("travel_distance_km") is not None else "",
+                f"{workload['timezone_change_hours']:.3f}" if workload.get("timezone_change_hours") is not None else "",
+                workload.get("travel_source", ""),
                 baseline.get("best_of", 3), baseline.get("indoor", ""),
                 f"{data_quality['dispersion']:.6f}" if data_quality.get("dispersion") is not None else "",
                 data_quality["score"], data_quality["grade"], f"{baseline['uncertainty_margin']:.6f}",

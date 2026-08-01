@@ -349,15 +349,20 @@ class TennisBotTests(unittest.TestCase):
              "score": "6-4 6-4", "tourney_name": "Current Event", "surface": "Hard"},
             {"tourney_date": "20260728", "winner_name": "Player", "loser_name": "Other",
              "score": "6-4 6-4", "tourney_name": "Previous Event", "surface": "Clay",
-             "_source_url": "verified-history.csv"},
+             "_source_url": "verified-history.csv", "latitude": "40.4168", "longitude": "-3.7038",
+             "timezone": "Europe/Madrid"},
         ]
-        workload = bot.calculate_workload(history, "Player", "2026-08-01", "Current Event", "Hard")
+        current_location = bot.verified_location(51.5074, -0.1278, "Europe/London", "official-current-event", "2026-08-01")
+        workload = bot.calculate_workload(history, "Player", "2026-08-01", "Current Event", "Hard", current_location)
         self.assertEqual(workload["previous_tournament"], "Previous Event")
         self.assertEqual(workload["previous_tournament_surface"], "clay")
         self.assertEqual(workload["current_surface"], "hard")
         self.assertTrue(workload["surface_change"])
         self.assertEqual(workload["previous_tournament_days_ago"], 4)
         self.assertEqual(workload["surface_transition_source"], "verified-history.csv")
+        self.assertAlmostEqual(workload["travel_distance_km"], 1263.4, delta=2)
+        self.assertEqual(workload["timezone_change_hours"], -1)
+        self.assertEqual(workload["travel_source"], "verified-history.csv;official-current-event")
 
     def test_surface_change_is_unknown_without_two_verified_surfaces(self):
         history = [{"tourney_date": "20260728", "winner_name": "Player", "loser_name": "Other",
@@ -365,6 +370,28 @@ class TennisBotTests(unittest.TestCase):
         workload = bot.calculate_workload(history, "Player", "2026-08-01", "Current Event", "Hard")
         self.assertIsNone(workload["previous_tournament_surface"])
         self.assertIsNone(workload["surface_change"])
+
+    def test_travel_requires_sourced_valid_coordinates(self):
+        self.assertIsNone(bot.verified_location(40, -3, "Europe/Madrid", "", "2026-08-01"))
+        self.assertIsNone(bot.verified_location(100, -3, "Europe/Madrid", "official", "2026-08-01"))
+        current = bot.verified_location(40, -3, "invalid/timezone", "official", "2026-08-01")
+        previous = bot.verified_location(41, -4, "Europe/Madrid", "history", "2026-08-01")
+        travel = bot.travel_between_locations(previous, current)
+        self.assertIsNotNone(travel["travel_distance_km"])
+        self.assertIsNone(travel["timezone_change_hours"])
+
+    def test_verified_tournament_location_registry_rejects_unsourced_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            location_file = Path(directory) / "locations.csv"
+            location_file.write_text(
+                "TOURNAMENT,LATITUDE,LONGITUDE,TIMEZONE,SOURCE\n"
+                "Verified Event,40.4,-3.7,Europe/Madrid,official-calendar\n"
+                "Unsourced Event,51.5,-0.1,Europe/London,\n", encoding="utf-8"
+            )
+            with patch.object(bot, "TOURNAMENT_LOCATIONS_FILE", location_file):
+                locations = bot.load_verified_tournament_locations("2026-08-01")
+        self.assertIn(bot.normalize_player_name("Verified Event"), locations)
+        self.assertNotIn(bot.normalize_player_name("Unsourced Event"), locations)
 
     def test_tennis_context_and_match_format(self):
         self.assertEqual(bot.tennis_context_uncertainty({"tournament": "ITF Madrid", "level": "ITF"})[0], .02)
@@ -917,7 +944,9 @@ class TennisBotTests(unittest.TestCase):
                                  "latest_long_match_source": "verified-history.csv", "tournament_change": True,
                                  "previous_tournament": "WTA Clay Event", "previous_tournament_surface": "clay",
                                  "previous_tournament_days_ago": 4, "current_surface": "hard", "surface_change": True,
-                                 "surface_transition_source": "verified-history.csv", "penalty": 0.015},
+                                 "surface_transition_source": "verified-history.csv", "travel_distance_km": 1263.42,
+                                 "timezone_change_hours": -1, "travel_source": "verified-history.csv;official-event",
+                                 "penalty": 0.015},
         }
         with tempfile.TemporaryDirectory() as directory:
             audit_file = Path(directory) / "prediction-audit.csv"
@@ -963,6 +992,9 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["CURRENT_SURFACE"], "hard")
         self.assertEqual(second["SURFACE_CHANGE"], "True")
         self.assertEqual(second["SURFACE_TRANSITION_SOURCE"], "verified-history.csv")
+        self.assertEqual(second["TRAVEL_DISTANCE_KM"], "1263.420")
+        self.assertEqual(second["TIMEZONE_CHANGE_HOURS"], "-1.000")
+        self.assertEqual(second["TRAVEL_SOURCE"], "verified-history.csv;official-event")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
