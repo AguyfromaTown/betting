@@ -26,6 +26,7 @@ from bs4 import BeautifulSoup
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BANKROLL_FILE = REPO_ROOT / "bankroll.txt"
 LOG_FILE = REPO_ROOT / "bets-log.csv"
+PAPER_LOG_FILE = REPO_ROOT / "paper-bets-log.csv"
 AUDIT_FILE = REPO_ROOT / "predictions-log.csv"
 PENDING_FILE = REPO_ROOT / "pending-bets.csv"
 POLICY_FILE = REPO_ROOT / "counterfactual-log.csv"
@@ -71,6 +72,7 @@ REQUEST_HEADERS = {
 SOURCE_HEALTH = []
 LAST_FIXTURE_STATUS = "not_run"
 DIAGNOSTIC_MODE = False
+PAPER_TRADING_MODE = False
 RUN_STATE_ACTIVE = False
 CIRCUIT_BREAKERS = {}
 
@@ -433,6 +435,7 @@ def parse_args():
     parser.add_argument("--revalidate-only", action="store_true", help="Refresh and authorize pending bets near match time")
     parser.add_argument("--backtest-only", action="store_true", help="Rebuild analytics without API calls")
     parser.add_argument("--diagnostic", action="store_true", help="Collect and validate data without writing files, calling AI, staking, or settling")
+    parser.add_argument("--paper-trading", action="store_true", help="Simulate authorized bets without changing the real bankroll")
     return parser.parse_args()
 
 
@@ -2238,22 +2241,26 @@ def tennis_void_reason(event: dict) -> str | None:
     return None
 
 
-def settle_pending_bets(api_keys: list[str]) -> int:
+def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
     """Settle finished tennis bets and add bookmaker returns to bankroll."""
     if not api_keys:
         return 0
     rows = []
-    if LOG_FILE.exists() and LOG_FILE.stat().st_size:
+    if include_real and LOG_FILE.exists() and LOG_FILE.stat().st_size:
         with open(LOG_FILE, newline="", encoding="utf-8") as handle:
             rows = list(csv.DictReader(handle))
-    if BANKROLL_FILE.exists():
+    paper_rows = []
+    if PAPER_LOG_FILE.exists() and PAPER_LOG_FILE.stat().st_size:
+        with PAPER_LOG_FILE.open(newline="", encoding="utf-8") as handle:
+            paper_rows = list(csv.DictReader(handle))
+    if rows and BANKROLL_FILE.exists():
         try: reconcile_bankroll(float(BANKROLL_FILE.read_text().strip() or 0))
         except ValueError: pass
     policy_rows = []
     if POLICY_FILE.exists() and POLICY_FILE.stat().st_size:
         with POLICY_FILE.open(newline="", encoding="utf-8") as handle:
             policy_rows = list(csv.DictReader(handle))
-    dates = sorted({r.get("DATE", "") for r in rows + policy_rows if not r.get("RESULT", "").strip() and r.get("DATE")})
+    dates = sorted({r.get("DATE", "") for r in rows + paper_rows + policy_rows if not r.get("RESULT", "").strip() and r.get("DATE")})
     if not dates:
         return 0
     events = []
@@ -2279,8 +2286,9 @@ def settle_pending_bets(api_keys: list[str]) -> int:
             home_odds, away_odds, _ = extract_moneyline_odds(odds_event)
             closing_by_id[str(odds_event.get("id"))] = (home_odds, away_odds)
     settled = 0
+    paper_settled = 0
     credited = 0.0
-    for row in rows:
+    for row, is_paper in [(item, False) for item in rows] + [(item, True) for item in paper_rows]:
         if row.get("RESULT", "").strip():
             continue
         label = normalize_player_name(row.get("MATCH", ""))
@@ -2294,7 +2302,9 @@ def settle_pending_bets(api_keys: list[str]) -> int:
         if void_reason:
             stake = float(row.get("STAKE") or 0)
             row["RESULT"], row["RETURN"] = "V", f"{stake:.2f}"
-            credited += stake; settled += 1
+            if not is_paper: credited += stake
+            if is_paper: paper_settled += 1
+            else: settled += 1
             update_audit_result(row.get("DATE", ""), pick, "V", None)
             continue
         scores = event.get("scores") or {}
@@ -2312,7 +2322,9 @@ def settle_pending_bets(api_keys: list[str]) -> int:
         stake, odds = float(row.get("STAKE") or 0), float(row.get("ODDS") or 0)
         returned = stake * odds if won else 0.0
         row["RESULT"], row["RETURN"] = ("W" if won else "L"), f"{returned:.2f}"
-        credited += returned; settled += 1
+        if not is_paper: credited += returned
+        if is_paper: paper_settled += 1
+        else: settled += 1
         update_audit_result(row.get("DATE", ""), pick, row["RESULT"], closing)
     if settled:
         headers = ["DATE", "MATCH", "BET", "ODDS", "STAKE", "RESULT", "RETURN", "STARTING BALANCE"]
@@ -2320,6 +2332,10 @@ def settle_pending_bets(api_keys: list[str]) -> int:
         balance = reconcile_bankroll()
         log(f"Settled {settled} bet(s); credited €{credited:.2f}")
         log(f"Bankroll reconciled to ledger: €{balance:.2f}")
+    if paper_settled:
+        headers = ["DATE", "MATCH", "BET", "ODDS", "STAKE", "RESULT", "RETURN", "STARTING BALANCE"]
+        atomic_write_csv(PAPER_LOG_FILE, headers, paper_rows)
+        log(f"Settled {paper_settled} paper bet(s); real bankroll unchanged")
     policy_settled = 0
     for row in policy_rows:
         if row.get("RESULT"): continue
@@ -2337,7 +2353,7 @@ def settle_pending_bets(api_keys: list[str]) -> int:
     if policy_settled:
         atomic_write_csv(POLICY_FILE, POLICY_HEADERS, policy_rows)
         log(f"Settled {policy_settled} counterfactual policy decision(s)")
-    return settled
+    return settled + paper_settled
 
 
 def generate_performance_summary():
@@ -2448,7 +2464,7 @@ PENDING_HEADERS = [
     "DATE", "MATCH", "PLAYER1", "PLAYER2", "PICK", "TOURNAMENT", "SURFACE",
     "START_TIME", "EVENT_ID", "GRADE", "ODDS_MIN", "ODDS_MAX",
     "DISCOVERY_ODDS", "DISCOVERY_PROBABILITY", "DISCOVERY_EV", "DISCOVERED_AT",
-    "STATUS", "REASON", "FINAL_ODDS", "FINAL_PROBABILITY", "FINAL_EV",
+    "MODE", "STATUS", "REASON", "FINAL_ODDS", "FINAL_PROBABILITY", "FINAL_EV",
     "FINAL_BOOKMAKERS", "FINAL_SOURCE", "REVALIDATED_AT", "PRICE_MOVEMENT",
 ]
 
@@ -2477,6 +2493,7 @@ def stage_pending_bets(date_str: str, recommendations: list[dict], odds_min: flo
             "DISCOVERY_ODDS": f"{rec['odds']:.3f}",
             "DISCOVERY_PROBABILITY": f"{rec['assessed_probability']:.6f}",
             "DISCOVERY_EV": f"{rec['ev']:.6f}", "DISCOVERED_AT": now,
+            "MODE": "paper" if PAPER_TRADING_MODE else "live",
             "STATUS": "pending_revalidation", "REASON": "awaiting_pre_match_check",
         })
         existing.add(key); staged += 1
@@ -2570,7 +2587,8 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
             ready_by_date.setdefault(row["DATE"], []).append(row)
 
     bankroll = float(BANKROLL_FILE.read_text().strip() or 0) if BANKROLL_FILE.exists() else None
-    if bankroll is not None:
+    has_live_candidates = any((row.get("MODE") or "live") != "paper" for candidates in ready_by_date.values() for row in candidates)
+    if bankroll is not None and has_live_candidates:
         bankroll = reconcile_bankroll(bankroll)
     authorized_recs, authorized_matches = [], []
     for date_str, candidates in ready_by_date.items():
@@ -2624,14 +2642,16 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
                 "FINAL_SOURCE": match.get("odds_source", ""),
                 "PRICE_MOVEMENT": f"{movement:.6f}",
             })
-            authorized_recs.append({"_date": row["DATE"], "player": row["PICK"], "grade": row["GRADE"], "odds": baseline["player_odds"], "assessed_probability": baseline["assessed_probability"], "ev": baseline["ev"], "match": match})
+            authorized_recs.append({"_date": row["DATE"], "_paper": row.get("MODE") == "paper", "player": row["PICK"], "grade": row["GRADE"], "odds": baseline["player_odds"], "assessed_probability": baseline["assessed_probability"], "ev": baseline["ev"], "match": match})
             record_policy_decision(now, row, match, baseline, "authorized", "pre_match_validated")
             authorized_matches.append(match)
             update_audit_lifecycle(row["DATE"], row["PICK"], "Authorized", "pre_match_validated")
     total_stake = 0.0
-    for date_str in sorted({rec["_date"] for rec in authorized_recs}):
-        recs = [rec for rec in authorized_recs if rec["_date"] == date_str]
-        total_stake += log_bets(date_str, recs, authorized_matches, bankroll - total_stake if bankroll is not None else None)
+    for date_str, paper in sorted({(rec["_date"], rec["_paper"]) for rec in authorized_recs}):
+        recs = [rec for rec in authorized_recs if rec["_date"] == date_str and rec["_paper"] == paper]
+        stake = log_bets(date_str, recs, authorized_matches, bankroll - total_stake if bankroll is not None else None, paper_trading=paper)
+        if not paper:
+            total_stake += stake
     if total_stake:
         save_bankroll(bankroll, total_stake)
     atomic_write_csv(PENDING_FILE, PENDING_HEADERS, rows)
@@ -2651,15 +2671,17 @@ def log_bets(
     recommendations: list[dict],
     matches: list[dict],
     bankroll: float | None,
+    paper_trading: bool = False,
 ):
-    """Append bets to the log CSV."""
-    file_exists = LOG_FILE.exists()
+    """Append real or simulated bets to their isolated log CSV."""
+    target_log = PAPER_LOG_FILE if paper_trading else LOG_FILE
+    file_exists = target_log.exists()
     rows_to_append = []
     current_balance = bankroll
     total_stake = 0.0
     existing_bets = set()
     if file_exists and LOG_FILE.stat().st_size > 0:
-        with open(LOG_FILE, newline="", encoding="utf-8") as existing_file:
+        with open(target_log, newline="", encoding="utf-8") as existing_file:
             for row in csv.DictReader(existing_file):
                 existing_bets.add((
                     row.get("DATE", "").strip(),
@@ -2727,15 +2749,15 @@ def log_bets(
         return total_stake
 
     headers = ["DATE", "MATCH", "BET", "ODDS", "STAKE", "RESULT", "RETURN", "STARTING BALANCE"]
-    _, existing_rows = read_csv_rows(LOG_FILE)
+    _, existing_rows = read_csv_rows(target_log)
     existing_rows.extend({
         "DATE": row["date"], "MATCH": row["match"], "BET": row["bet"], "ODDS": row["odds"],
         "STAKE": row["stake"], "RESULT": row["result"], "RETURN": row["return"],
         "STARTING BALANCE": row["starting_balance"],
     } for row in rows_to_append)
-    atomic_write_csv(LOG_FILE, headers, existing_rows)
+    atomic_write_csv(target_log, headers, existing_rows)
 
-    log(f"Logged {len(rows_to_append)} bets to {LOG_FILE.name}")
+    log(f"Logged {len(rows_to_append)} {'paper ' if paper_trading else ''}bets to {target_log.name}")
     return total_stake
 
 
@@ -2752,11 +2774,12 @@ def save_report(date_str: str, report: str):
 
 # ─── Main ────────────────────────────────────────────────────────────
 
-def already_logged_today(date_str: str) -> bool:
+def already_logged_today(date_str: str, paper_trading: bool = False) -> bool:
     """Check if bets for this date already exist in the log."""
-    if not LOG_FILE.exists() or LOG_FILE.stat().st_size == 0:
+    target = PAPER_LOG_FILE if paper_trading else LOG_FILE
+    if not target.exists() or target.stat().st_size == 0:
         return False
-    with open(LOG_FILE, newline="", encoding="utf-8") as f:
+    with open(target, newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
         next(reader, None)  # skip header
         for row in reader:
@@ -2765,11 +2788,13 @@ def already_logged_today(date_str: str) -> bool:
     return False
 
 
-def already_staged_today(date_str: str) -> bool:
+def already_staged_today(date_str: str, paper_trading: bool = False) -> bool:
     if not PENDING_FILE.exists() or not PENDING_FILE.stat().st_size:
         return False
     with PENDING_FILE.open(newline="", encoding="utf-8") as handle:
-        return any(row.get("DATE") == date_str and row.get("STATUS") == "pending_revalidation" for row in csv.DictReader(handle))
+        wanted_mode = "paper" if paper_trading else "live"
+        return any(row.get("DATE") == date_str and row.get("STATUS") == "pending_revalidation"
+                   and (row.get("MODE") or "live") == wanted_mode for row in csv.DictReader(handle))
 
 
 def add_validation_summary(
@@ -2897,9 +2922,10 @@ def run_diagnostic(date_str: str, odds_min: float, odds_max: float, api_keys: li
 
 
 def main():
-    global DIAGNOSTIC_MODE
+    global DIAGNOSTIC_MODE, PAPER_TRADING_MODE
     args = parse_args()
     DIAGNOSTIC_MODE = args.diagnostic
+    PAPER_TRADING_MODE = args.paper_trading
 
     date_str = resolve_date(args.date)
     odds_min = args.odds_min
@@ -2933,9 +2959,9 @@ def main():
         result = run_diagnostic(date_str, odds_min, odds_max, odds_api_keys)
         print(json.dumps(result, indent=2))
         return
-    mode = "settlement" if args.settle_only else "revalidation" if args.revalidate_only else "daily"
+    mode = "settlement" if args.settle_only else "revalidation" if args.revalidate_only else "paper_daily" if args.paper_trading else "daily"
     begin_run_state(date_str, mode)
-    settle_pending_bets(odds_api_keys)
+    settle_pending_bets(odds_api_keys, include_real=not args.paper_trading)
     update_run_state("settlement_complete")
     generate_performance_summary()
     save_source_health()
@@ -2954,13 +2980,15 @@ def main():
         log("Revalidation-only run complete")
         return
 
-    if not args.force and (already_logged_today(date_str) or already_staged_today(date_str)):
+    if not args.force and (already_logged_today(date_str, args.paper_trading) or already_staged_today(date_str, args.paper_trading)):
         log(f"Bets already logged or awaiting revalidation for {date_str}. Skipping to avoid duplicates.")
         log("(Use --force to override.)")
         update_run_state("duplicate_safe_skip", "complete")
         return
 
-    bankroll = load_bankroll(args.bankroll)
+    bankroll = args.bankroll if args.paper_trading and args.bankroll is not None else load_bankroll(None if args.paper_trading else args.bankroll)
+    if args.paper_trading:
+        log(f"Paper-trading mode active; real bankroll and ledger will not change (virtual bankroll €{bankroll:.2f})" if bankroll is not None else "Paper-trading mode active; using zero virtual stakes because no bankroll is available")
     if bankroll is None:
         log("WARNING: No bankroll set. Run with --bankroll <amount>")
 

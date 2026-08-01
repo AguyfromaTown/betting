@@ -143,7 +143,7 @@ Status conventions:
 - [x] Prevent duplicate deductions.
 - [x] Introduce an immutable bankroll transaction ledger.
 - [x] Add automatic bankroll reconciliation.
-- [ ] Add an explicit paper-trading mode.
+- [x] Add an explicit paper-trading mode.
 - [ ] Add walk-forward simulations comparing fixed and Kelly staking.
 
 ## Settlement

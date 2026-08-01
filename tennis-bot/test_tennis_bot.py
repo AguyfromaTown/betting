@@ -327,6 +327,7 @@ class TennisBotTests(unittest.TestCase):
             bankroll_path.write_text("97.00", encoding="utf-8")
             with (
                 patch.object(bot, "LOG_FILE", log_path),
+                patch.object(bot, "PAPER_LOG_FILE", root / "paper-bets-log.csv"),
                 patch.object(bot, "BANKROLL_FILE", bankroll_path),
                 patch.object(bot, "TRANSACTION_FILE", transaction_path),
                 patch.object(bot, "fetch_odds_json", side_effect=[([event], 0), ([], 0)]),
@@ -340,6 +341,88 @@ class TennisBotTests(unittest.TestCase):
             self.assertEqual(rows[0]["RESULT"], "W")
             self.assertEqual(rows[0]["RETURN"], "6.00")
             self.assertEqual(bankroll_path.read_text(), "103.00")
+
+    def test_paper_bet_log_is_isolated_from_real_bankroll_and_ledger(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            real_log, paper_log = root / "bets-log.csv", root / "paper-bets-log.csv"
+            bankroll, ledger = root / "bankroll.txt", root / "bankroll-transactions.csv"
+            bankroll.write_text("100.00", encoding="utf-8")
+            with (
+                patch.object(bot, "LOG_FILE", real_log),
+                patch.object(bot, "PAPER_LOG_FILE", paper_log),
+                patch.object(bot, "BANKROLL_FILE", bankroll),
+                patch.object(bot, "TRANSACTION_FILE", ledger),
+            ):
+                stake = bot.log_bets(
+                    "2026-08-01",
+                    [{"player": "A", "grade": "Value Pick", "odds": 1.6, "assessed_probability": .7}],
+                    [{"player1": "A", "player2": "B", "tournament": "ATP"}],
+                    100.0,
+                    paper_trading=True,
+                )
+
+            self.assertEqual(stake, 2.0)
+            self.assertTrue(paper_log.exists())
+            self.assertFalse(real_log.exists())
+            self.assertFalse(ledger.exists())
+            self.assertEqual(bankroll.read_text(encoding="utf-8"), "100.00")
+
+    def test_staged_paper_candidate_persists_mode_for_revalidation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pending = Path(directory) / "pending.csv"
+            recommendation = {"player": "A", "grade": "Top Pick", "odds": 1.55,
+                              "assessed_probability": .72, "ev": .116,
+                              "match": {"player1": "A", "player2": "B", "tournament": "ATP"}}
+            with patch.object(bot, "PENDING_FILE", pending), patch.object(bot, "PAPER_TRADING_MODE", True):
+                bot.stage_pending_bets("2026-08-01", [recommendation], 1.5, 1.6)
+            _, rows = bot.read_csv_rows(pending)
+            self.assertEqual(rows[0]["MODE"], "paper")
+
+    def test_paper_settlement_records_result_without_crediting_real_bankroll(self):
+        event = {"id": 7, "date": "2026-08-01T12:00:00Z", "status": "settled",
+                 "home": "A", "away": "B", "scores": {"home": 2, "away": 0}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paper_log, bankroll = root / "paper-bets-log.csv", root / "bankroll.txt"
+            paper_log.write_text(
+                "DATE,MATCH,BET,ODDS,STAKE,RESULT,RETURN,STARTING BALANCE\n"
+                "2026-08-01,A vs B (ATP),A to win,2.00,3.00,,,100.00\n", encoding="utf-8"
+            )
+            bankroll.write_text("100.00", encoding="utf-8")
+            with (
+                patch.object(bot, "LOG_FILE", root / "bets-log.csv"),
+                patch.object(bot, "PAPER_LOG_FILE", paper_log),
+                patch.object(bot, "BANKROLL_FILE", bankroll),
+                patch.object(bot, "TRANSACTION_FILE", root / "bankroll-transactions.csv"),
+                patch.object(bot, "POLICY_FILE", root / "policy.csv"),
+                patch.object(bot, "fetch_odds_json", side_effect=[([event], 0), ([], 0)]),
+                patch.object(bot, "update_audit_result"),
+            ):
+                settled = bot.settle_pending_bets(["key"])
+            _, rows = bot.read_csv_rows(paper_log)
+            self.assertEqual(settled, 1)
+            self.assertEqual((rows[0]["RESULT"], rows[0]["RETURN"]), ("W", "6.00"))
+            self.assertEqual(bankroll.read_text(encoding="utf-8"), "100.00")
+            self.assertFalse((root / "bankroll-transactions.csv").exists())
+
+    def test_paper_only_settlement_does_not_touch_live_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            real_log = root / "bets-log.csv"
+            real_log.write_text("DATE,MATCH,BET,ODDS,STAKE,RESULT,RETURN,STARTING BALANCE\n2026-08-01,A vs B,A to win,2,3,,,100\n", encoding="utf-8")
+            original = real_log.read_bytes()
+            with (
+                patch.object(bot, "LOG_FILE", real_log),
+                patch.object(bot, "PAPER_LOG_FILE", root / "paper.csv"),
+                patch.object(bot, "POLICY_FILE", root / "policy.csv"),
+                patch.object(bot, "BANKROLL_FILE", root / "bankroll.txt"),
+                patch.object(bot, "fetch_odds_json") as fetch_odds,
+            ):
+                settled = bot.settle_pending_bets(["key"], include_real=False)
+            self.assertEqual(settled, 0)
+            self.assertEqual(real_log.read_bytes(), original)
+            fetch_odds.assert_not_called()
 
     def test_bankroll_ledger_reconciles_stake_return_and_duplicate_rerun(self):
         with tempfile.TemporaryDirectory() as directory:

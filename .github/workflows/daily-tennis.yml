@@ -22,6 +22,11 @@ on:
         description: 'Bankroll override (optional)'
         required: false
         default: ''
+      paper_trading:
+        description: 'Simulate bets without changing the real bankroll'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -70,6 +75,9 @@ jobs:
           ARGS="$ARGS --odds-max ${{ github.event.inputs.odds_max || '1.6' }}"
           if [ -n "${{ github.event.inputs.bankroll }}" ]; then
             ARGS="$ARGS --bankroll ${{ github.event.inputs.bankroll }}"
+          fi
+          if [ "${{ github.event.inputs.paper_trading }}" = "true" ]; then
+            ARGS="$ARGS --paper-trading"
           fi
           python tennis-bot/tennis_bot.py $ARGS
 
