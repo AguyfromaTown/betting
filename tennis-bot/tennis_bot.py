@@ -1781,6 +1781,19 @@ def calculate_serve_return_profile(history: list[dict], player: str, surface: st
     }
 
 
+def parse_standard_sets(score: str) -> list[tuple[int, int]]:
+    """Parse completed conventional sets, excluding match-tiebreak scores."""
+    parsed_sets = []
+    for token in str(score or "").upper().split():
+        parsed = re.fullmatch(r"(\d+)-(\d+)(?:\(\d+\))?", token)
+        if not parsed:
+            continue
+        winner_games, loser_games = int(parsed.group(1)), int(parsed.group(2))
+        if max(winner_games, loser_games) <= 7:
+            parsed_sets.append((winner_games, loser_games))
+    return parsed_sets
+
+
 def calculate_clutch_profile(history: list[dict], player: str, surface: str | None,
                              as_of: str, limit: int = 50) -> dict | None:
     """Calculate leakage-safe tiebreak and deciding-set records from completed scores."""
@@ -1801,14 +1814,7 @@ def calculate_clutch_profile(history: list[dict], player: str, surface: str | No
             continue
         if played >= cutoff:
             continue
-        parsed_sets = []
-        for token in score.split():
-            parsed = re.fullmatch(r"(\d+)-(\d+)(?:\(\d+\))?", token)
-            if not parsed:
-                continue
-            winner_games, loser_games = int(parsed.group(1)), int(parsed.group(2))
-            if max(winner_games, loser_games) <= 7:
-                parsed_sets.append((winner_games, loser_games))
+        parsed_sets = parse_standard_sets(score)
         if not parsed_sets:
             continue
         won_match = player_key == winner_key
@@ -1847,6 +1853,73 @@ def calculate_clutch_profile(history: list[dict], player: str, surface: str | No
         "deciding_set_sample": len(deciding), "deciding_set_wins": sum(won for _, won in deciding),
         "deciding_set_win_rate": shrunk(deciding_wins, deciding_weight),
         "source": ";".join(dict.fromkeys(item[4] for item in matches)),
+    }
+
+
+def calculate_best_of_five_profile(history: list[dict], player: str, surface: str | None,
+                                   as_of: str, limit: int = 40) -> dict | None:
+    """Build a dedicated leakage-safe profile for completed best-of-five matches."""
+    player_key = normalize_player_name(player)
+    cutoff = datetime.strptime(as_of, "%Y-%m-%d")
+    observations = []
+    for row in history:
+        winner_key = normalize_player_name(row.get("winner_name", ""))
+        loser_key = normalize_player_name(row.get("loser_name", ""))
+        if player_key not in {winner_key, loser_key}:
+            continue
+        try:
+            played = datetime.strptime(str(row.get("tourney_date", "")), "%Y%m%d")
+            best_of = int(row.get("best_of") or 0)
+        except (TypeError, ValueError):
+            continue
+        score = str(row.get("score") or "").upper()
+        if played >= cutoff or best_of != 5 or not score or any(flag in score for flag in ("W/O", "RET", "DEF")):
+            continue
+        sets = parse_standard_sets(score)
+        if len(sets) < 3:
+            continue
+        won_match = player_key == winner_key
+        player_set_wins = sum((winner_games > loser_games) if won_match else (loser_games > winner_games)
+                              for winner_games, loser_games in sets)
+        weight = 0.5 ** ((cutoff - played).days / 1095)
+        same_surface = bool(surface and str(row.get("surface") or "").casefold() == surface.casefold())
+        if same_surface:
+            weight *= 1.20
+        lost_first_two = all((winner_games < loser_games) if won_match else (loser_games < winner_games)
+                             for winner_games, loser_games in sets[:2])
+        observations.append({
+            "date": played, "weight": weight, "won": won_match, "sets": len(sets),
+            "set_wins": player_set_wins, "same_surface": same_surface,
+            "five_set_decider": len(sets) == 5, "comeback_opportunity": lost_first_two,
+            "source": str(row.get("_source_url") or "historical_match_records"),
+        })
+    if not observations:
+        return None
+    observations.sort(key=lambda item: item["date"], reverse=True); observations = observations[:limit]
+    match_weight = sum(item["weight"] for item in observations)
+    match_wins = sum(item["weight"] for item in observations if item["won"])
+    set_weight = sum(item["weight"] * item["sets"] for item in observations)
+    set_wins = sum(item["weight"] * item["set_wins"] for item in observations)
+    deciders = [item for item in observations if item["five_set_decider"]]
+    decider_weight = sum(item["weight"] for item in deciders)
+    decider_wins = sum(item["weight"] for item in deciders if item["won"])
+    comebacks = [item for item in observations if item["comeback_opportunity"]]
+    comeback_weight = sum(item["weight"] for item in comebacks)
+    comeback_wins = sum(item["weight"] for item in comebacks if item["won"])
+
+    def shrunk(wins: float, total: float, prior: float = 4.0) -> float | None:
+        return (wins + prior / 2) / (total + prior) if total else None
+
+    return {
+        "match_sample": len(observations), "match_wins": sum(item["won"] for item in observations),
+        "match_win_rate": shrunk(match_wins, match_weight),
+        "set_sample": sum(item["sets"] for item in observations), "set_win_rate": shrunk(set_wins, set_weight, 8.0),
+        "same_surface_sample": sum(item["same_surface"] for item in observations),
+        "five_set_sample": len(deciders), "five_set_wins": sum(item["won"] for item in deciders),
+        "five_set_win_rate": shrunk(decider_wins, decider_weight),
+        "comeback_0_2_sample": len(comebacks), "comeback_0_2_wins": sum(item["won"] for item in comebacks),
+        "comeback_0_2_rate": shrunk(comeback_wins, comeback_weight),
+        "source": ";".join(dict.fromkeys(item["source"] for item in observations)),
     }
 
 
@@ -1919,6 +1992,8 @@ def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
         match["player2_serve_return"] = calculate_serve_return_profile(history, match["player2"], match.get("surface"), date_str)
         match["player1_clutch"] = calculate_clutch_profile(history, match["player1"], match.get("surface"), date_str)
         match["player2_clutch"] = calculate_clutch_profile(history, match["player2"], match.get("surface"), date_str)
+        match["player1_best_of_five"] = calculate_best_of_five_profile(history, match["player1"], match.get("surface"), date_str)
+        match["player2_best_of_five"] = calculate_best_of_five_profile(history, match["player2"], match.get("surface"), date_str)
         match["player1_workload"] = calculate_workload(history, match["player1"], date_str, match.get("tournament", ""))
         match["player2_workload"] = calculate_workload(history, match["player2"], date_str, match.get("tournament", ""))
         for side in ("player1", "player2"):
@@ -2113,6 +2188,7 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
     away_odds = match.get("away_odds")
     if not all(isinstance(odds, (int, float)) and odds > 1 for odds in (home_odds, away_odds)):
         return None
+    match_best_of = inferred_best_of(match)
 
     player_key = normalize_player_name(player)
     if player_key == normalize_player_name(match["player1"]):
@@ -2123,6 +2199,7 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         player_serve_profile = match.get("player1_serve_return")
         serve_return = calculate_serve_return_matchup(player_serve_profile, match.get("player2_serve_return"))
         clutch = match.get("player1_clutch") or {}
+        best_of_five_profile = match.get("player1_best_of_five") or {}
         workload = match.get("player1_workload") or {}
         h2h_probability = (match.get("head_to_head") or {}).get("player1_probability")
     elif player_key == normalize_player_name(match["player2"]):
@@ -2133,10 +2210,12 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         player_serve_profile = match.get("player2_serve_return")
         serve_return = calculate_serve_return_matchup(player_serve_profile, match.get("player1_serve_return"))
         clutch = match.get("player2_clutch") or {}
+        best_of_five_profile = match.get("player2_best_of_five") or {}
         workload = match.get("player2_workload") or {}
         h2h_probability = (match.get("head_to_head") or {}).get("player2_probability")
     else:
         return None
+    active_best_of_five = best_of_five_profile if match_best_of == 5 else {}
 
     consensus_home = match.get("consensus_home_odds") or home_odds
     consensus_away = match.get("consensus_away_odds") or away_odds
@@ -2218,6 +2297,16 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "deciding_set_win_rate": clutch.get("deciding_set_win_rate"),
         "deciding_set_sample": clutch.get("deciding_set_sample", 0),
         "clutch_source": clutch.get("source", ""),
+        "bo5_match_win_rate": active_best_of_five.get("match_win_rate"),
+        "bo5_match_sample": active_best_of_five.get("match_sample", 0),
+        "bo5_set_win_rate": active_best_of_five.get("set_win_rate"),
+        "bo5_set_sample": active_best_of_five.get("set_sample", 0),
+        "bo5_same_surface_sample": active_best_of_five.get("same_surface_sample", 0),
+        "bo5_five_set_win_rate": active_best_of_five.get("five_set_win_rate"),
+        "bo5_five_set_sample": active_best_of_five.get("five_set_sample", 0),
+        "bo5_comeback_0_2_rate": active_best_of_five.get("comeback_0_2_rate"),
+        "bo5_comeback_0_2_sample": active_best_of_five.get("comeback_0_2_sample", 0),
+        "bo5_source": active_best_of_five.get("source", ""),
         "component_weights": component_weights,
         "raw_probability": raw_probability,
         "challenger_probability": challenger_probability,
@@ -2228,7 +2317,7 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "context_reason": context_reason,
         "workload_penalty": workload_penalty,
         "workload": workload,
-        "best_of": inferred_best_of(match),
+        "best_of": match_best_of,
         "indoor": match.get("indoor"),
         "segment_sample": health["sample"],
         "segment_roi": health["roi"],
@@ -2350,10 +2439,22 @@ def build_prompt(
                 if baseline.get("deciding_set_win_rate") is not None:
                     clutch_parts.append(f"deciding set {baseline['deciding_set_win_rate']:.1%} (n={baseline['deciding_set_sample']})")
                 clutch_text = ", ".join(clutch_parts) if clutch_parts else "unavailable"
+                bo5_parts = []
+                if baseline.get("bo5_match_win_rate") is not None:
+                    bo5_parts.append(f"matches {baseline['bo5_match_win_rate']:.1%} (n={baseline['bo5_match_sample']})")
+                if baseline.get("bo5_set_win_rate") is not None:
+                    bo5_parts.append(f"sets {baseline['bo5_set_win_rate']:.1%} (n={baseline['bo5_set_sample']})")
+                if baseline.get("bo5_five_set_win_rate") is not None:
+                    bo5_parts.append(f"five-set deciders {baseline['bo5_five_set_win_rate']:.1%} (n={baseline['bo5_five_set_sample']})")
+                if baseline.get("bo5_comeback_0_2_rate") is not None:
+                    bo5_parts.append(f"0-2 comebacks {baseline['bo5_comeback_0_2_rate']:.1%} (n={baseline['bo5_comeback_0_2_sample']})")
+                if baseline.get("bo5_match_sample"):
+                    bo5_parts.append(f"same-surface matches n={baseline['bo5_same_surface_sample']}")
+                bo5_text = ", ".join(bo5_parts) if bo5_parts else "not applicable/unavailable"
                 baseline_lines.append(
                     f"  Python baseline for {player}: market fair "
                     f"{baseline['market_probability']:.1%}, Elo "
-                    f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, serve/return {serve_text}, H2H {h2h_text}, clutch {clutch_text}, "
+                    f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, serve/return {serve_text}, H2H {h2h_text}, clutch {clutch_text}, BO5 {bo5_text}, "
                     f"blended assessed "
                     f"{baseline['assessed_probability']:.1%}, EV "
                     f"{baseline['ev']:.2%}, score {baseline['score']:.2f}"
@@ -2897,6 +2998,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "SERVE_RETURN_SAMPLE", "EXPECTED_HOLD", "OPPONENT_EXPECTED_HOLD",
         "BREAK_RATE", "BREAK_POINTS_CONVERTED", "BREAK_RETURN_GAMES", "SERVE_RETURN_SOURCE", "TIEBREAK_WIN_RATE", "TIEBREAK_SAMPLE",
         "DECIDING_SET_WIN_RATE", "DECIDING_SET_SAMPLE", "CLUTCH_SOURCE",
+        "BO5_MATCH_WIN_RATE", "BO5_MATCH_SAMPLE", "BO5_SET_WIN_RATE", "BO5_SET_SAMPLE", "BO5_SAME_SURFACE_SAMPLE",
+        "BO5_FIVE_SET_WIN_RATE", "BO5_FIVE_SET_SAMPLE", "BO5_COMEBACK_0_2_RATE", "BO5_COMEBACK_0_2_SAMPLE", "BO5_SOURCE",
         "COMPONENT_WEIGHTS", "RAW_PROBABILITY", "CHALLENGER_PROBABILITY",
         "CHALLENGER_SAMPLE", "CHALLENGER_PROMOTED", "CALIBRATION_SAMPLE",
         "CONTEXT_PENALTY", "CONTEXT_REASON", "WORKLOAD_PENALTY", "REST_DAYS",
@@ -2993,6 +3096,14 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 baseline.get("tiebreak_sample", 0),
                 f"{baseline['deciding_set_win_rate']:.6f}" if baseline.get("deciding_set_win_rate") is not None else "",
                 baseline.get("deciding_set_sample", 0), baseline.get("clutch_source", ""),
+                f"{baseline['bo5_match_win_rate']:.6f}" if baseline.get("bo5_match_win_rate") is not None else "",
+                baseline.get("bo5_match_sample", 0),
+                f"{baseline['bo5_set_win_rate']:.6f}" if baseline.get("bo5_set_win_rate") is not None else "",
+                baseline.get("bo5_set_sample", 0), baseline.get("bo5_same_surface_sample", 0),
+                f"{baseline['bo5_five_set_win_rate']:.6f}" if baseline.get("bo5_five_set_win_rate") is not None else "",
+                baseline.get("bo5_five_set_sample", 0),
+                f"{baseline['bo5_comeback_0_2_rate']:.6f}" if baseline.get("bo5_comeback_0_2_rate") is not None else "",
+                baseline.get("bo5_comeback_0_2_sample", 0), baseline.get("bo5_source", ""),
                 baseline.get("component_weights", ""),
                 f"{baseline['raw_probability']:.6f}",
                 f"{baseline['challenger_probability']:.6f}" if baseline.get("challenger_probability") is not None else "",

@@ -824,7 +824,7 @@ class TennisBotTests(unittest.TestCase):
     def test_every_prediction_audit_row_contains_both_identity_confidences(self):
         match = {
             "event_id": "7", "player1": "Player One", "player2": "Player Two",
-            "home_odds": 1.6, "away_odds": 2.5, "bookmaker_count": 3, "surface": "hard",
+            "home_odds": 1.6, "away_odds": 2.5, "bookmaker_count": 3, "surface": "hard", "best_of": 5,
             "player1_profile": {"elo": 1800, "identity_confidence": 1.0, "identity_method": "exact"},
             "player2_profile": {"elo": 1600, "identity_confidence": 0.94, "identity_method": "auto_unique"},
             "player1_ranking_history": {"latest_rank": 12, "latest_date": "2026-07-28", "rank_90d": 20, "improvement_90d": 8, "samples_365d": 9},
@@ -840,6 +840,12 @@ class TennisBotTests(unittest.TestCase):
             "player2_clutch": {"tiebreak_win_rate": 0.40, "tiebreak_sample": 10,
                                "deciding_set_win_rate": 0.45, "deciding_set_sample": 8,
                                "source": "historical_match_records"},
+            "player1_best_of_five": {"match_win_rate": 0.60, "match_sample": 10, "set_win_rate": 0.55,
+                                     "set_sample": 40, "five_set_win_rate": 0.58, "five_set_sample": 5,
+                                     "comeback_0_2_rate": 0.40, "comeback_0_2_sample": 2, "source": "historical_match_records"},
+            "player2_best_of_five": {"match_win_rate": 0.40, "match_sample": 8, "set_win_rate": 0.45,
+                                     "set_sample": 32, "five_set_win_rate": 0.42, "five_set_sample": 4,
+                                     "comeback_0_2_rate": 0.30, "comeback_0_2_sample": 2, "source": "historical_match_records"},
         }
         with tempfile.TemporaryDirectory() as directory:
             audit_file = Path(directory) / "prediction-audit.csv"
@@ -867,6 +873,9 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["TIEBREAK_WIN_RATE"], "0.400000")
         self.assertEqual(second["DECIDING_SET_WIN_RATE"], "0.450000")
         self.assertEqual(second["CLUTCH_SOURCE"], "historical_match_records")
+        self.assertEqual(second["BO5_MATCH_WIN_RATE"], "0.400000")
+        self.assertEqual(second["BO5_FIVE_SET_SAMPLE"], "4")
+        self.assertEqual(second["BO5_SOURCE"], "historical_match_records")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1006,6 +1015,32 @@ class TennisBotTests(unittest.TestCase):
         self.assertGreater(profile["tiebreak_win_rate"], 0.49)
         self.assertLess(profile["tiebreak_win_rate"], 0.5)
         self.assertAlmostEqual(profile["tiebreak_win_rate"], profile["deciding_set_win_rate"])
+
+    def test_best_of_five_profile_tracks_sets_deciders_and_comebacks_without_leakage(self):
+        history = []
+        for day in range(1, 5):
+            history.append({
+                "tourney_date": f"202605{day:02d}", "surface": "Clay", "best_of": "5",
+                "winner_name": "Player", "loser_name": f"Won {day}", "score": "4-6 4-6 6-4 6-4 6-3",
+            })
+        for day in range(5, 9):
+            history.append({
+                "tourney_date": f"202605{day:02d}", "surface": "Clay", "best_of": "5",
+                "winner_name": f"Lost {day}", "loser_name": "Player", "score": "6-4 4-6 6-4 4-6 6-3",
+            })
+        history.extend([
+            {"tourney_date": "20260509", "surface": "Clay", "best_of": "3", "winner_name": "Player", "loser_name": "BO3", "score": "6-4 6-4"},
+            {"tourney_date": "20260802", "surface": "Clay", "best_of": "5", "winner_name": "Player", "loser_name": "Future", "score": "6-4 6-4 6-4"},
+            {"tourney_date": "20260510", "surface": "Clay", "best_of": "5", "winner_name": "Player", "loser_name": "Retired", "score": "6-4 RET"},
+        ])
+        profile = bot.calculate_best_of_five_profile(history, "Player", "clay", "2026-08-01")
+        self.assertEqual(profile["match_sample"], 8)
+        self.assertEqual(profile["set_sample"], 40)
+        self.assertEqual(profile["same_surface_sample"], 8)
+        self.assertEqual(profile["five_set_sample"], 8)
+        self.assertEqual(profile["comeback_0_2_sample"], 4)
+        self.assertEqual(profile["comeback_0_2_wins"], 4)
+        self.assertGreater(profile["comeback_0_2_rate"], 0.5)
 
     def test_serve_return_matchup_is_symmetric_and_bounded(self):
         strong = {"sample": 20, "service_points_won": 0.68, "return_points_won": 0.42}
@@ -1256,6 +1291,24 @@ class TennisBotTests(unittest.TestCase):
         self.assertAlmostEqual(baseline["assessed_probability"], 0.5 * 0.97 + 0.58 * 0.03)
         self.assertEqual(baseline["h2h_weight"], 0.03)
         self.assertIn("h2h=0.030", baseline["component_weights"])
+
+    def test_best_of_five_features_activate_only_for_best_of_five_fixture(self):
+        profile = {"match_win_rate": 0.60, "match_sample": 12, "set_win_rate": 0.55, "set_sample": 50,
+                   "five_set_win_rate": 0.58, "five_set_sample": 6, "comeback_0_2_rate": 0.40,
+                   "comeback_0_2_sample": 2, "source": "verified-history"}
+        match = {
+            "player1": "Player", "player2": "Opponent", "home_odds": 2.0, "away_odds": 2.0, "best_of": 5,
+            "player1_profile": {"elo": 1700}, "player2_profile": {"elo": 1700},
+            "player1_best_of_five": profile,
+        }
+        with patch.object(bot, "load_resolved_predictions", return_value=[]):
+            bo5 = bot.calculate_tennis_baseline(match, "Player")
+            match["best_of"] = 3
+            bo3 = bot.calculate_tennis_baseline(match, "Player")
+        self.assertEqual(bo5["bo5_match_sample"], 12)
+        self.assertEqual(bo5["bo5_match_win_rate"], 0.60)
+        self.assertIsNone(bo3["bo5_match_win_rate"])
+        self.assertAlmostEqual(bo5["assessed_probability"], bo3["assessed_probability"])
 
     def test_evidence_quality_rewards_surface_profiles_and_bookmakers(self):
         match = {
