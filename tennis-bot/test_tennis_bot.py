@@ -2461,6 +2461,34 @@ class TennisBotTests(unittest.TestCase):
         ):
             self.assertIn(required, reference)
 
+    def test_threshold_reference_tracks_production_sample_constants(self):
+        reference = MODULE_PATH.parent.parent.joinpath("THRESHOLDS.md").read_text(encoding="utf-8")
+        constants = (
+            "MIN_CALIBRATION_SAMPLE",
+            "MIN_SEGMENT_SAMPLE",
+            "MIN_WEIGHT_TRAINING_SAMPLE",
+            "MIN_WORKLOAD_TRAINING_SAMPLE",
+            "MIN_WORKLOAD_TRIGGER_SAMPLE",
+            "MIN_MARKET_LIMIT_TRAINING_SAMPLE",
+            "MIN_MARKET_LIMIT_TRIGGER_SAMPLE",
+            "MIN_MONTHLY_POLICY_SAMPLE",
+        )
+        for name in constants:
+            self.assertIn(f"`{name}`", reference)
+            self.assertRegex(reference, rf"`{name}` \| {getattr(bot, name)} \|")
+        for required in (
+            "Player-feature maturity",
+            "Component-weight challengers",
+            "Workload-policy challenger",
+            "Tour-specific market-limit challenger",
+            "Calibration maturity",
+            "Monitoring, suspension, and rollback maturity",
+            "Monthly counterfactual policy review",
+            "Decision-time evidence counts",
+            "below-threshold, exact-threshold, and above-threshold",
+        ):
+            self.assertIn(required, reference)
+
 
 if __name__ == "__main__":
     unittest.main()
