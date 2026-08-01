@@ -8,6 +8,7 @@ import argparse
 import base64
 import csv
 import difflib
+import gzip
 import hashlib
 import io
 import json
@@ -44,6 +45,7 @@ SCHEMA_ALERT_FILE = REPO_ROOT / "provider-schema-alerts.md"
 MANUAL_KILL_SWITCH_FILE = REPO_ROOT / "kill-switch.json"
 RISK_CONFIG_FILE = REPO_ROOT / "risk-config.json"
 EXTERNAL_CACHE_FILE = REPO_ROOT / "external-cache.json"
+PREDICTION_SNAPSHOTS_DIR = REPO_ROOT / "prediction-snapshots"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
 ALIAS_REVIEW_FILE = REPO_ROOT / "player-alias-review.csv"
@@ -361,6 +363,109 @@ def read_csv_rows(path: Path) -> tuple[list[str], list[dict]]:
     with path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         return list(reader.fieldnames or []), list(reader)
+
+
+def json_safe(value):
+    """Convert decision inputs to deterministic strict-JSON values without dropping fields."""
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))}
+    if isinstance(value, (list, tuple, set)):
+        return [json_safe(item) for item in value]
+    if isinstance(value, (datetime, Path)):
+        return str(value)
+    return str(value)
+
+
+def snapshot_bytes(payload: dict) -> bytes:
+    return json.dumps(json_safe(payload), ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
+def write_snapshot_blob(directory: Path, prefix: str, payload: dict) -> tuple[Path, str]:
+    """Write a content-addressed immutable gzip blob and return its path and payload hash."""
+    raw = snapshot_bytes(payload)
+    digest = hashlib.sha256(raw).hexdigest()
+    path = directory / f"{prefix}-{digest}.json.gz"
+    compressed = gzip.compress(raw, compresslevel=9, mtime=0)
+    if path.exists():
+        existing = gzip.decompress(path.read_bytes())
+        if hashlib.sha256(existing).hexdigest() != digest:
+            raise ValueError(f"snapshot hash collision or corruption: {path}")
+    else:
+        atomic_write_bytes(path, compressed)
+    return path, digest
+
+
+def cached_source_artifacts(value) -> list[dict]:
+    """Capture cached raw responses referenced by the enriched match without copying unrelated cache entries."""
+    urls = set()
+    def visit(item):
+        if isinstance(item, dict):
+            for nested in item.values(): visit(nested)
+        elif isinstance(item, (list, tuple)):
+            for nested in item: visit(nested)
+        elif isinstance(item, str) and item.startswith(("http://", "https://")):
+            urls.add(item)
+    visit(value)
+    entries = load_external_cache().get("entries", {})
+    artifacts = []
+    for url in sorted(urls):
+        for namespace in ("direct", "reader"):
+            entry = entries.get(external_cache_key(namespace, url))
+            if entry:
+                artifacts.append(json_safe(entry))
+    return artifacts
+
+
+def save_prediction_snapshot(date_str: str, match: dict, player: str, baseline: dict,
+                             training_history: list[dict]) -> dict:
+    """Persist all decision-time inputs and shared training evidence needed for an exact replay."""
+    directory = PREDICTION_SNAPSHOTS_DIR / date_str
+    training_payload = {"schema_version": 1, "kind": "resolved_training_history",
+                        "decision_date": date_str, "rows": training_history}
+    training_path, training_hash = write_snapshot_blob(directory, "training", training_payload)
+    configuration = {
+        "model_version": MODEL_VERSION, "groq_model": GROQ_MODEL,
+        "minimum_calibration_sample": MIN_CALIBRATION_SAMPLE,
+        "minimum_weight_training_sample": MIN_WEIGHT_TRAINING_SAMPLE,
+        "minimum_workload_training_sample": MIN_WORKLOAD_TRAINING_SAMPLE,
+        "minimum_workload_trigger_sample": MIN_WORKLOAD_TRIGGER_SAMPLE,
+        "maximum_market_overround": MAX_MARKET_OVERROUND,
+        "maximum_elo_market_gap": MAX_ELO_MARKET_GAP,
+        "maximum_bookmaker_dispersion": MAX_BOOKMAKER_DISPERSION,
+        "maximum_price_movement": MAX_PRICE_MOVEMENT,
+    }
+    payload = {
+        "schema_version": 1, "kind": "tennis_prediction", "decision_date": date_str,
+        "model_version": MODEL_VERSION, "event_id": match.get("event_id", ""), "player": player,
+        "configuration": configuration, "match_input": match, "calculated_baseline": baseline,
+        "cached_source_artifacts": cached_source_artifacts(match),
+        "training_snapshot": {"path": training_path.name, "sha256": training_hash},
+    }
+    safe_label = re.sub(r"[^a-z0-9]+", "-", f"{match.get('event_id', 'event')}-{player}".casefold()).strip("-")[:80] or "prediction"
+    path, digest = write_snapshot_blob(directory, safe_label, payload)
+    display_path = str(path.relative_to(REPO_ROOT)) if path.is_relative_to(REPO_ROOT) else str(path)
+    return {"path": display_path.replace("\\", "/"), "sha256": digest, "schema_version": 1}
+
+
+def verify_prediction_snapshot(path: Path) -> dict:
+    """Verify a prediction blob and its referenced training-history blob before replay."""
+    raw = gzip.decompress(path.read_bytes())
+    payload = json.loads(raw.decode("utf-8"))
+    digest = hashlib.sha256(snapshot_bytes(payload)).hexdigest()
+    if not path.name.endswith(f"-{digest}.json.gz"):
+        raise ValueError("prediction snapshot hash mismatch")
+    training = payload.get("training_snapshot") or {}
+    training_path = path.parent / str(training.get("path") or "")
+    training_raw = gzip.decompress(training_path.read_bytes())
+    if hashlib.sha256(training_raw).hexdigest() != training.get("sha256"):
+        raise ValueError("training snapshot hash mismatch")
+    return {"sha256": digest, "payload": payload,
+            "training": json.loads(training_raw.decode("utf-8"))}
 
 
 def backup_state_for_migration(path: Path, old_headers: list[str], new_headers: list[str]) -> Path:
@@ -1043,7 +1148,7 @@ def extract_moneyline_market(payload: dict) -> dict:
                 if home > 1 and away > 1:
                     prices_found.append((home, away, bookmaker))
     if not prices_found:
-        return {"best_home": None, "best_away": None, "consensus_home": None, "consensus_away": None, "source": None, "bookmaker_count": 0, "home_dispersion": None, "away_dispersion": None}
+        return {"best_home": None, "best_away": None, "consensus_home": None, "consensus_away": None, "source": None, "bookmaker_count": 0, "home_dispersion": None, "away_dispersion": None, "quotes": []}
     homes, aways = sorted(p[0] for p in prices_found), sorted(p[1] for p in prices_found)
     midpoint = len(homes) // 2
     median_home = homes[midpoint] if len(homes) % 2 else (homes[midpoint - 1] + homes[midpoint]) / 2
@@ -1055,7 +1160,9 @@ def extract_moneyline_market(payload: dict) -> dict:
     source = best_home[2] if best_home[2] == best_away[2] else f"{best_home[2]}/{best_away[2]}"
     return {"best_home": best_home[0], "best_away": best_away[1], "consensus_home": median_home, "consensus_away": median_away, "source": source, "bookmaker_count": len(prices_found),
             "home_dispersion": (max(homes) - min(homes)) / median_home,
-            "away_dispersion": (max(aways) - min(aways)) / median_away}
+            "away_dispersion": (max(aways) - min(aways)) / median_away,
+            "quotes": [{"home": home, "away": away, "bookmaker": bookmaker}
+                       for home, away, bookmaker in sorted(prices_found, key=lambda item: item[2])]}
 
 
 def detect_surface(event: dict, tournament: str) -> str | None:
@@ -1182,6 +1289,7 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
                 "bookmaker_count": market["bookmaker_count"],
                 "home_dispersion": market["home_dispersion"],
                 "away_dispersion": market["away_dispersion"],
+                "bookmaker_quotes": market["quotes"],
                 "indoor": event.get("indoor") if event.get("indoor") is not None else odds_event.get("indoor"),
                 "best_of": event.get("bestOf") or odds_event.get("bestOf"),
                 "location": (provider_location(event, "https://api.odds-api.io", date_str) or
@@ -1471,6 +1579,7 @@ def fetch_tennis_abstract_profiles(matches: list[dict]) -> dict[str, dict]:
     ):
         html = fetch(url, cache_ttl=43_200, stale_if_error=604_800)
         tour_profiles = parse_tennis_abstract_elo(html) if html else {}
+        source_method = "direct"
         if not tour_profiles:
             log(f"  Direct Tennis Abstract {tour} access unavailable; trying reader")
             reader_text = fetch_reader(url, cache_ttl=43_200, stale_if_error=604_800)
@@ -1479,7 +1588,11 @@ def fetch_tennis_abstract_profiles(matches: list[dict]) -> dict[str, dict]:
                 if reader_text
                 else {}
             )
+            source_method = "reader"
         if tour_profiles:
+            for profile in tour_profiles.values():
+                profile["_source_url"] = url
+                profile["_source_method"] = source_method
             profiles.update(tour_profiles)
             log(f"  Loaded {len(tour_profiles)} Tennis Abstract {tour} profiles")
         else:
@@ -2230,6 +2343,10 @@ def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
                         "_timezone": location["timezone"], "_location_source": location["source"]})
     official_statuses = load_verified_player_status(date_str)
     for match in matches:
+        player_keys = {normalize_player_name(match["player1"]), normalize_player_name(match["player2"])}
+        match["source_history"] = [row for row in history if
+                                   normalize_player_name(row.get("winner_name", "")) in player_keys or
+                                   normalize_player_name(row.get("loser_name", "")) in player_keys]
         match["location"] = (match.get("location") or
                              tournament_locations.get(normalize_player_name(match.get("tournament", ""))))
         match["head_to_head"] = calculate_head_to_head(
@@ -3535,7 +3652,8 @@ def bio_audit_values(match: dict, player: str) -> tuple[dict, dict]:
 def append_prediction_audit(date_str, matches, recommendations, authorized, authorization_block_reason: str = ""):
     """Persist all Elo-modelled singles candidates and final decisions."""
     headers = [
-        "DATE", "MODEL_VERSION", "EVENT_ID", "MATCH", "PICK",
+        "DATE", "MODEL_VERSION", "SNAPSHOT_PATH", "SNAPSHOT_SHA256", "SNAPSHOT_SCHEMA_VERSION",
+        "EVENT_ID", "MATCH", "PICK",
         "PICK_IDENTITY_CONFIDENCE", "PICK_IDENTITY_METHOD",
         "OPPONENT_IDENTITY_CONFIDENCE", "OPPONENT_IDENTITY_METHOD",
         "PICK_RANK_AS_OF", "PICK_RANK_DATE", "PICK_RANK_90D", "PICK_RANK_IMPROVEMENT_90D", "PICK_RANK_SAMPLES_365",
@@ -3597,6 +3715,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         with open(AUDIT_FILE, newline="", encoding="utf-8") as handle:
             existing = {(r["DATE"], r["EVENT_ID"], r["PICK"]) for r in csv.DictReader(handle)}
     rows = []
+    training_history = load_resolved_predictions(date_str)
     for match in matches:
         for player in (match["player1"], match["player2"]):
             baseline = calculate_tennis_baseline(match, player)
@@ -3626,11 +3745,13 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
             quality_score, quality_grade = evidence_quality(match, baseline)
             data_quality = tennis_data_quality(match, baseline, player)
             workload = baseline.get("workload") or {}
+            snapshot = save_prediction_snapshot(date_str, match, player, baseline, training_history)
             pick_identity, pick_identity_method, opponent_identity, opponent_identity_method = identity_audit_values(match, player)
             pick_ranking, opponent_ranking = ranking_audit_values(match, player)
             pick_bio, opponent_bio = bio_audit_values(match, player)
             rows.append([
-                date_str, MODEL_VERSION, match.get("event_id", ""),
+                date_str, MODEL_VERSION, snapshot["path"], snapshot["sha256"], snapshot["schema_version"],
+                match.get("event_id", ""),
                 f"{match['player1']} vs {match['player2']}", player,
                 f"{pick_identity:.3f}", pick_identity_method,
                 f"{opponent_identity:.3f}", opponent_identity_method,

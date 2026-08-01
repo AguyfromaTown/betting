@@ -1067,6 +1067,7 @@ class TennisBotTests(unittest.TestCase):
             with (
                 patch.object(bot, "AUDIT_FILE", audit_file),
                 patch.object(bot, "BACKUPS_DIR", Path(directory) / "backups"),
+                patch.object(bot, "PREDICTION_SNAPSHOTS_DIR", Path(directory) / "prediction-snapshots"),
             ):
                 bot.append_prediction_audit("2026-08-01", [match], [], [])
             _, rows = bot.read_csv_rows(audit_file)
@@ -1120,6 +1121,9 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["ENVIRONMENT_MODEL_SAMPLE"], "0")
         self.assertEqual(second["ENVIRONMENT_MODEL_PROMOTED"], "False")
         self.assertEqual(second["ACTIVE_COMPONENT_MODEL"], "static")
+        self.assertTrue(second["SNAPSHOT_PATH"].endswith(".json.gz"))
+        self.assertEqual(len(second["SNAPSHOT_SHA256"]), 64)
+        self.assertEqual(second["SNAPSHOT_SCHEMA_VERSION"], "1")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1507,6 +1511,37 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(market["best_away"], 2.6)
         self.assertEqual(market["consensus_home"], 1.55)
         self.assertEqual(market["consensus_away"], 2.5)
+        self.assertEqual(market["quotes"], [
+            {"home": 1.5, "away": 2.6, "bookmaker": "A"},
+            {"home": 1.6, "away": 2.4, "bookmaker": "B"},
+            {"home": 1.55, "away": 2.5, "bookmaker": "C"},
+        ])
+
+    def test_prediction_snapshot_is_content_addressed_and_replay_verifiable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "external-cache.json"
+            with (patch.object(bot, "REPO_ROOT", root),
+                  patch.object(bot, "PREDICTION_SNAPSHOTS_DIR", root / "prediction-snapshots"),
+                  patch.object(bot, "EXTERNAL_CACHE_FILE", cache)):
+                bot.cache_external_response("direct", "https://example.test/profile", "raw profile evidence")
+                match = {"event_id": "event/7", "player1": "One", "player2": "Two",
+                         "source": "https://example.test/profile",
+                         "bookmaker_quotes": [{"bookmaker": "A", "home": 1.6, "away": 2.4}],
+                         "source_history": [{"tourney_date": "20260701", "winner_name": "One", "loser_name": "Two"}]}
+                baseline = {"assessed_probability": .625, "component_weights": "elo=.55;market=.45"}
+                training = [{"DATE": "2026-07-01", "PICK": "One", "MODEL_PROBABILITY": ".60", "RESULT": "W"}]
+                first = bot.save_prediction_snapshot("2026-08-01", match, "One", baseline, training)
+                second = bot.save_prediction_snapshot("2026-08-01", match, "One", baseline, training)
+                snapshot_path = root / first["path"]
+                verified = bot.verify_prediction_snapshot(snapshot_path)
+                blobs = list((root / "prediction-snapshots" / "2026-08-01").glob("*.json.gz"))
+            self.assertEqual(first, second)
+            self.assertEqual(len(blobs), 2)
+            self.assertEqual(verified["sha256"], first["sha256"])
+            self.assertEqual(verified["payload"]["match_input"]["bookmaker_quotes"][0]["bookmaker"], "A")
+            self.assertEqual(verified["payload"]["cached_source_artifacts"][0]["url"], "https://example.test/profile")
+            self.assertEqual(verified["training"]["rows"], training)
 
     def test_surface_elo_is_used_when_surface_is_known(self):
         match = {

@@ -83,7 +83,7 @@ Status conventions:
 - [x] Track Brier score, ROI and CLV.
 - [x] Add log loss and expected calibration error to tennis reporting.
 - [x] Store immutable model versions with predictions and policy decisions.
-- [ ] Store enough source snapshots to reproduce every historical prediction exactly.
+- [x] Store enough source snapshots to reproduce every historical prediction exactly.
 
 ## Market model
 
