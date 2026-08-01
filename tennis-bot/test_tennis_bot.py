@@ -12,6 +12,36 @@ SPEC.loader.exec_module(bot)
 
 
 class TennisBotTests(unittest.TestCase):
+    def test_atomic_text_write_replaces_complete_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "state.txt"; target.write_text("old", encoding="utf-8")
+            bot.atomic_write_text(target, "new")
+            self.assertEqual(target.read_text(encoding="utf-8"), "new")
+            self.assertEqual(list(Path(directory).glob("*.tmp")), [])
+
+    def test_diagnostic_summary_has_no_mutating_actions(self):
+        with patch.object(bot, "fetch_matches_from_odds_api", return_value=[]):
+            result = bot.run_diagnostic("2026-08-01", 1.5, 1.6, ["key"])
+        self.assertFalse(result["would_write"])
+        self.assertFalse(result["would_settle"])
+        self.assertFalse(result["would_call_ai"])
+        self.assertFalse(result["would_stake"])
+
+    def test_fixture_provider_failure_is_distinct_from_empty_schedule(self):
+        with patch.object(bot, "fetch_odds_json", return_value=(None, 0)):
+            bot.fetch_matches_from_odds_api("2026-08-01", ["key"])
+            self.assertEqual(bot.LAST_FIXTURE_STATUS, "provider_failure")
+        with patch.object(bot, "fetch_odds_json", return_value=([], 0)):
+            bot.fetch_matches_from_odds_api("2026-08-01", ["key"])
+            self.assertEqual(bot.LAST_FIXTURE_STATUS, "valid_empty_schedule")
+
+    def test_diagnostic_mode_does_not_save_discovered_alias(self):
+        with tempfile.TemporaryDirectory() as directory:
+            aliases = Path(directory) / "aliases.csv"
+            with patch.object(bot, "PLAYER_ALIASES_FILE", aliases), patch.object(bot, "DIAGNOSTIC_MODE", True):
+                bot.save_player_alias("Provider Name", "Canonical Name", .99)
+            self.assertFalse(aliases.exists())
+
     def test_counterfactual_policy_decision_is_versioned_and_deduplicated(self):
         from datetime import datetime, timezone
         with tempfile.TemporaryDirectory() as directory:

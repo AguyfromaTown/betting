@@ -22,7 +22,8 @@ Status conventions:
 - [x] Classify ATP, WTA, Challenger and ITF events.
 - [ ] Add persistent external-response caching.
 - [x] Rotate Odds and Groq API keys after quota/authentication failures.
-- [ ] Track API latency and quota consumption.
+- [x] Track provider request latency and failures in `source-health.json`.
+- [ ] Track API quota consumption.
 - [ ] Add provider schema-change alarms.
 
 ## Player identity
@@ -161,6 +162,8 @@ Status conventions:
 
 - [x] Make daily generation, revalidation and settlement duplicate-safe.
 - [ ] Use atomic writes for all state files.
+- [x] Use atomic replacement for bankroll, reports, health summaries and other text state.
+- [ ] Convert CSV state mutations to atomic replacement.
 - [x] Use GitHub concurrency groups to avoid overlapping workflows.
 - [x] Migrate prediction CSV schemas while preserving legacy rows.
 - [ ] Back up state before every schema migration.
@@ -198,7 +201,7 @@ Status conventions:
 - [ ] Add settlement-failure alerts.
 - [x] Monitor CLV and probability calibration deterioration.
 - [ ] Alert on abnormal rejection and pick counts.
-- [ ] Distinguish provider failure from a valid no-bet day in notifications.
+- [x] Distinguish provider failure, a valid empty schedule and missing odds in reports.
 - [ ] Add optional Telegram or email delivery without exposing secrets.
 
 ## Dashboard
@@ -240,7 +243,7 @@ Status conventions:
 - [ ] Document alias review and API-provider replacement procedures.
 - [ ] Maintain a changelog and model/policy release notes.
 - [ ] Provide a one-command local paper run.
-- [ ] Add a diagnostic no-write/no-stake mode.
+- [x] Add a diagnostic no-write/no-stake/no-AI/no-settlement mode.
 
 ## Production validation
 

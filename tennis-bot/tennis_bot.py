@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -55,6 +56,9 @@ REQUEST_HEADERS = {
         "Chrome/125.0.0.0 Safari/537.36"
     )
 }
+SOURCE_HEALTH = []
+LAST_FIXTURE_STATUS = "not_run"
+DIAGNOSTIC_MODE = False
 
 
 # ─── Helpers ────────────────────────────────────────────────────────
@@ -63,12 +67,41 @@ def log(msg: str):
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
 
+def record_source_health(source: str, ok: bool, detail: str, started: float):
+    SOURCE_HEALTH.append({"source": source, "ok": ok, "detail": detail,
+                          "latency_ms": round((time.monotonic() - started) * 1000),
+                          "timestamp": datetime.now(timezone.utc).isoformat()})
+
+
+def atomic_write_text(path: Path, content: str, encoding: str = "utf-8"):
+    """Replace a text state file atomically so interrupted runs keep the old version."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding=encoding, newline="") as handle:
+            handle.write(content); handle.flush(); os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except Exception:
+        try: os.unlink(temporary)
+        except OSError: pass
+        raise
+
+
+def save_source_health():
+    payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "fixture_status": LAST_FIXTURE_STATUS,
+               "requests": SOURCE_HEALTH, "failures": sum(not item["ok"] for item in SOURCE_HEALTH)}
+    atomic_write_text(REPO_ROOT / "source-health.json", json.dumps(payload, indent=2) + "\n")
+
+
 def fetch(url: str) -> str | None:
+    started = time.monotonic()
     try:
         resp = requests.get(url, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
+        record_source_health(url.split("/")[2], True, f"HTTP {resp.status_code}", started)
         return resp.text
     except requests.RequestException as e:
+        record_source_health(url.split("/")[2], False, type(e).__name__, started)
         log(f"  Failed to fetch {url}: {e}")
         return None
 
@@ -130,6 +163,7 @@ def fetch_odds_json(
         candidate_index = (key_index + offset) % len(api_keys)
         request_params = {**params, "apiKey": api_keys[candidate_index]}
         try:
+            started = time.monotonic()
             response = requests.get(
                 url,
                 params=request_params,
@@ -137,14 +171,17 @@ def fetch_odds_json(
                 timeout=REQUEST_TIMEOUT,
             )
             if response.status_code in {401, 403, 429}:
+                record_source_health("api.odds-api.io", False, f"HTTP {response.status_code} key {candidate_index + 1}", started)
                 log(
                     f"  Odds API key {candidate_index + 1}/{len(api_keys)} "
                     f"unavailable ({response.status_code}); rotating"
                 )
                 continue
             response.raise_for_status()
+            record_source_health("api.odds-api.io", True, f"HTTP {response.status_code} key {candidate_index + 1}", started)
             return response.json(), candidate_index
         except (requests.RequestException, ValueError) as exc:
+            record_source_health("api.odds-api.io", False, type(exc).__name__, started)
             status = getattr(getattr(exc, "response", None), "status_code", None)
             detail = f"HTTP {status}" if status else type(exc).__name__
             log(f"  Odds API request failed for {url}: {detail}")
@@ -164,6 +201,7 @@ def parse_args():
     parser.add_argument("--settle-only", action="store_true", help="Settle pending bets without generating picks")
     parser.add_argument("--revalidate-only", action="store_true", help="Refresh and authorize pending bets near match time")
     parser.add_argument("--backtest-only", action="store_true", help="Rebuild analytics without API calls")
+    parser.add_argument("--diagnostic", action="store_true", help="Collect and validate data without writing files, calling AI, staking, or settling")
     return parser.parse_args()
 
 
@@ -175,8 +213,7 @@ def resolve_date(raw: str | None) -> str:
 
 def load_bankroll(args_bankroll: float | None) -> float | None:
     if args_bankroll is not None:
-        with open(BANKROLL_FILE, "w") as f:
-            f.write(str(args_bankroll))
+        atomic_write_text(BANKROLL_FILE, str(args_bankroll))
         log(f"Bankroll overridden to €{args_bankroll:.2f}")
         return args_bankroll
 
@@ -198,8 +235,7 @@ def save_bankroll(bankroll: float | None, total_stake: float):
     if bankroll is None:
         return
     remaining = round(bankroll - total_stake, 2)
-    with open(BANKROLL_FILE, "w") as f:
-        f.write(str(remaining))
+    atomic_write_text(BANKROLL_FILE, str(remaining))
     log(f"Bankroll saved: €{remaining:.2f} (was €{bankroll:.2f}, staked €{total_stake:.2f})")
 
 
@@ -355,6 +391,7 @@ def detect_surface(event: dict, tournament: str) -> str | None:
 
 def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict]:
     """Fetch verified tennis fixtures and match-winner odds from Odds-API.io."""
+    global LAST_FIXTURE_STATUS
     events_payload, key_index = fetch_odds_json(
         "https://api.odds-api.io/v3/events",
         {"sport": "tennis"},
@@ -362,6 +399,7 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
         0,
     )
     if events_payload is None:
+        LAST_FIXTURE_STATUS = "provider_failure"
         return []
 
     if isinstance(events_payload, list):
@@ -376,6 +414,9 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
         and event.get("away")
     ]
     log(f"  Found {len(dated_events)} tennis events from Odds-API.io")
+    if not dated_events:
+        LAST_FIXTURE_STATUS = "valid_empty_schedule"
+        return []
 
     events_by_id = {str(event.get("id")): event for event in dated_events}
     matches = []
@@ -431,6 +472,7 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
                 "best_of": event.get("bestOf") or odds_event.get("bestOf"),
             })
     log(f"  Found verified moneyline odds for {len(matches)} matches")
+    LAST_FIXTURE_STATUS = "ok" if matches else "fixtures_without_verified_odds"
     return matches
 
 
@@ -590,6 +632,8 @@ def load_player_aliases() -> dict[str, str]:
 
 
 def save_player_alias(provider_name: str, canonical_name: str, confidence: float):
+    if DIAGNOSTIC_MODE:
+        return
     aliases = load_player_aliases()
     provider_key = normalize_player_name(provider_name)
     if not provider_key or provider_key in aliases:
@@ -1869,7 +1913,7 @@ def settle_pending_bets(api_keys: list[str]) -> int:
         with open(LOG_FILE, "w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=headers); writer.writeheader(); writer.writerows(rows)
         balance = float(BANKROLL_FILE.read_text().strip() or 0) + credited
-        BANKROLL_FILE.write_text(f"{balance:.2f}", encoding="utf-8")
+        atomic_write_text(BANKROLL_FILE, f"{balance:.2f}")
         log(f"Settled {settled} bet(s); credited €{credited:.2f}")
     policy_settled = 0
     for row in policy_rows:
@@ -1932,14 +1976,14 @@ def generate_performance_summary():
         actual = sum(row["RESULT"] == "W" for row in bucket) / len(bucket) if bucket else None
         label = f"{low:.0%}–{high:.0%}" if high <= 1 else "70%+"
         lines.append(f"| {label} | {len(bucket)} | {actual:.1%} |" if actual is not None else f"| {label} | 0 | N/A |")
-    PERFORMANCE_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_text(PERFORMANCE_FILE, "\n".join(lines) + "\n")
     health = ["# Weekly Tennis Policy Health", "", f"Model version: `{MODEL_VERSION}`", "", "| Rule | Decisions | Flat-unit ROI |", "|---|---:|---:|"]
     for rule in sorted({row.get("RULE", "unknown") for row in policy_resolved}):
         group = [row for row in policy_resolved if row.get("RULE", "unknown") == rule]
         roi = sum(float(row.get("FLAT_RETURN") or 0) for row in group) / len(group)
         health.append(f"| {rule} | {len(group)} | {roi:.2%} |")
     if not policy_resolved: health.append("| No settled policy decisions | 0 | N/A |")
-    (REPO_ROOT / "weekly-health.md").write_text("\n".join(health) + "\n", encoding="utf-8")
+    atomic_write_text(REPO_ROOT / "weekly-health.md", "\n".join(health) + "\n")
     generate_backtest_summary(resolved)
     log(f"Performance summary saved: {PERFORMANCE_FILE.name}")
 
@@ -1992,7 +2036,7 @@ def generate_backtest_summary(resolved: list[dict]):
         _append_segment_table(lines, title, [(value, [r for r in resolved if (r.get(field) or "Unknown") == value]) for value in values])
     months = sorted({(row.get("DATE") or "")[:7] for row in resolved if row.get("DATE")})
     _append_segment_table(lines, "Monthly performance", [(month, [r for r in resolved if (r.get("DATE") or "").startswith(month)]) for month in months])
-    BACKTEST_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_text(BACKTEST_FILE, "\n".join(lines) + "\n")
     log(f"Backtest summary saved: {BACKTEST_FILE.name}")
 
 
@@ -2198,7 +2242,7 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
         final_ev = f"{float(row['FINAL_EV']):.1%}" if row.get("FINAL_EV") else "—"
         lines.append(f"| {row.get('MATCH', '')} | {row.get('PICK', '')} | {row.get('STATUS', '')} | {row.get('REASON', '')} | {row.get('FINAL_ODDS') or '—'} | {final_ev} |")
     if not recent: lines.append("| — | — | waiting | No candidates were ready in this run | — | — |")
-    PENDING_FILE.with_name("lifecycle-summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_text(PENDING_FILE.with_name("lifecycle-summary.md"), "\n".join(lines) + "\n")
     log(f"Pre-match revalidation authorized {len(authorized_recs)}, cancelled {cancelled}")
     return len(authorized_recs), cancelled
 
@@ -2306,7 +2350,7 @@ def save_report(date_str: str, report: str):
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     filename = f"picks-{date_str}.md"
     path = REPORTS_DIR / filename
-    path.write_text(report, encoding="utf-8")
+    atomic_write_text(path, report)
     log(f"Report saved: {path}")
 
 
@@ -2441,8 +2485,24 @@ def finalize_analysis(
     print("\n" + final_report)
 
 
+def run_diagnostic(date_str: str, odds_min: float, odds_max: float, api_keys: list[str]) -> dict:
+    """Exercise collection and deterministic validation without mutating project state."""
+    matches = fetch_matches_from_odds_api(date_str, api_keys)
+    qualified = attach_odds(matches, odds_min, odds_max)
+    if qualified:
+        enrich_matches_with_profiles(qualified)
+        enrich_matches_with_recent_form(qualified, date_str)
+    baselines = sum(calculate_tennis_baseline(match, player) is not None for match in qualified for player in (match["player1"], match["player2"]))
+    return {"mode": "diagnostic", "date": date_str, "fixture_status": LAST_FIXTURE_STATUS,
+            "verified_matches": len(matches), "qualified_matches": len(qualified), "modelled_players": baselines,
+            "source_requests": len(SOURCE_HEALTH), "source_failures": sum(not item["ok"] for item in SOURCE_HEALTH),
+            "would_write": False, "would_settle": False, "would_call_ai": False, "would_stake": False}
+
+
 def main():
+    global DIAGNOSTIC_MODE
     args = parse_args()
+    DIAGNOSTIC_MODE = args.diagnostic
 
     date_str = resolve_date(args.date)
     odds_min = args.odds_min
@@ -2470,8 +2530,15 @@ def main():
         log("ERROR: No odds keys configured.")
         sys.exit(1)
     log(f"Loaded {len(odds_api_keys)} Odds API key(s)")
+    if args.diagnostic:
+        if args.bankroll is not None:
+            log("Diagnostic mode ignores --bankroll to guarantee no writes")
+        result = run_diagnostic(date_str, odds_min, odds_max, odds_api_keys)
+        print(json.dumps(result, indent=2))
+        return
     settle_pending_bets(odds_api_keys)
     generate_performance_summary()
+    save_source_health()
 
     if args.settle_only:
         log("Settlement-only run complete")
@@ -2480,6 +2547,7 @@ def main():
     if args.revalidate_only:
         revalidate_pending_bets(odds_api_keys)
         generate_performance_summary()
+        save_source_health()
         log("Revalidation-only run complete")
         return
 
@@ -2496,7 +2564,16 @@ def main():
     log("Fetching tennis fixtures and odds...")
     all_matches = fetch_matches_from_odds_api(date_str, odds_api_keys)
     if not all_matches:
-        log("No verified matches with moneyline odds were found.")
+        if LAST_FIXTURE_STATUS == "provider_failure":
+            title, explanation = "DATA COLLECTION FAILURE", "The fixture provider failed, so this run is not evidence that no qualifying bets existed."
+        elif LAST_FIXTURE_STATUS == "valid_empty_schedule":
+            title, explanation = "VALID EMPTY SCHEDULE", "The provider responded successfully but returned no tennis fixtures for the requested date."
+        else:
+            title, explanation = "ODDS UNAVAILABLE", "Fixtures existed, but no verified moneyline market could be constructed."
+        report = f"# {title}\n\nDate: {date_str}\n\n{explanation}\n\nNo bets were staged and no bankroll was changed.\n"
+        log(f"{title}: {explanation}")
+        save_report(date_str, report); save_source_health(); print("\n" + report)
+        return
 
     # Attach odds
     qualified = attach_odds(all_matches, odds_min, odds_max)
@@ -2550,6 +2627,7 @@ def main():
         odds_max,
         statistical_candidates,
     )
+    save_source_health()
 
 
 if __name__ == "__main__":
