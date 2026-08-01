@@ -412,7 +412,7 @@ class TennisBotTests(unittest.TestCase):
                 bot.append_price_snapshot(datetime(2026, 8, 1, tzinfo=timezone.utc), {"DATE": "2026-08-01", "MATCH": "A vs B", "PICK": "A"},
                                           {"player1": "A", "player2": "B", "bookmaker_count": 3, "home_dispersion": .04}, {"player_odds": 1.55})
             text = (Path(directory) / "price-history.csv").read_text(encoding="utf-8")
-        self.assertIn("TIMESTAMP,DATE,EVENT_ID,MATCH,PICK,ODDS", text)
+        self.assertIn("TIMESTAMP,QUOTE_TIMESTAMP,DATE,EVENT_ID,MATCH,PICK,ODDS", text)
         self.assertIn("1.550", text)
 
     def test_price_velocity_and_acceleration_use_ordered_snapshots(self):
@@ -442,15 +442,42 @@ class TennisBotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             audit = Path(directory) / "audit.csv"
             headers = ["DATE", "PICK", "DECISION", "REASON", "PRICE_SNAPSHOT_COUNT",
-                       "PRICE_VELOCITY_PER_HOUR", "PRICE_ACCELERATION_PER_HOUR2"]
+                       "PRICE_VELOCITY_PER_HOUR", "PRICE_ACCELERATION_PER_HOUR2", "PRICE_AGE_MINUTES", "PRICE_STALE"]
             bot.atomic_write_csv(audit, headers, [{"DATE": "2026-08-01", "PICK": "A"}])
-            dynamics = {"snapshot_count": 3, "velocity_per_hour": -.15, "acceleration_per_hour2": -.05}
+            dynamics = {"snapshot_count": 3, "velocity_per_hour": -.15, "acceleration_per_hour2": -.05,
+                        "price_age_minutes": 2.5, "stale": False}
             with patch.object(bot, "AUDIT_FILE", audit):
                 bot.update_audit_lifecycle("2026-08-01", "A", "Authorized", "pre_match_validated", dynamics)
             _, rows = bot.read_csv_rows(audit)
         self.assertEqual(rows[0]["PRICE_SNAPSHOT_COUNT"], "3")
         self.assertEqual(rows[0]["PRICE_VELOCITY_PER_HOUR"], "-0.150000")
         self.assertEqual(rows[0]["PRICE_ACCELERATION_PER_HOUR2"], "-0.050000")
+        self.assertEqual(rows[0]["PRICE_AGE_MINUTES"], "2.500")
+        self.assertEqual(rows[0]["PRICE_STALE"], "False")
+
+    def test_stale_price_uses_provider_quote_timestamp(self):
+        from datetime import datetime, timedelta, timezone
+        with tempfile.TemporaryDirectory() as directory:
+            pending = Path(directory) / "pending.csv"
+            now = datetime(2026, 8, 1, 12, tzinfo=timezone.utc)
+            quote_time = now - timedelta(minutes=30)
+            row = {"DATE": "2026-08-01", "EVENT_ID": "7", "MATCH": "A vs B", "PICK": "A"}
+            match = {"player1": "A", "player2": "B", "odds_timestamp": quote_time.isoformat()}
+            with patch.object(bot, "PENDING_FILE", pending):
+                dynamics = bot.append_price_snapshot(now, row, match, {"player_odds": 1.6})
+                _, snapshots = bot.read_csv_rows(Path(directory) / "price-history.csv")
+        self.assertEqual(dynamics["price_age_minutes"], 30)
+        self.assertTrue(dynamics["stale"])
+        self.assertEqual(snapshots[-1]["PRICE_AGE_MINUTES"], "30.000")
+        self.assertEqual(snapshots[-1]["STALE"], "True")
+
+    def test_provider_quote_timestamp_rejects_future_metadata(self):
+        from datetime import datetime, timedelta, timezone
+        received = datetime(2026, 8, 1, 12, tzinfo=timezone.utc)
+        old = bot.provider_quote_timestamp(received, {"updatedAt": (received - timedelta(minutes=3)).isoformat()})
+        future = bot.provider_quote_timestamp(received, {"updatedAt": (received + timedelta(hours=1)).isoformat()})
+        self.assertTrue(old.startswith("2026-08-01T11:57:00"))
+        self.assertEqual(future, "")
 
     def test_tournament_correlation_cap(self):
         recs = [{"player": f"P{i}", "grade": "Value Pick", "ev": .10 - i * .01, "score": 8,

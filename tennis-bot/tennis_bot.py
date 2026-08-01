@@ -79,6 +79,7 @@ MIN_WORKLOAD_TRIGGER_SAMPLE = 30
 KELLY_FRACTION = 0.25
 MIN_STAKE_RATE = 0.005
 MAX_PRICE_MOVEMENT = 0.10
+MAX_PRICE_AGE_MINUTES = 15
 MAX_BOOKMAKER_DISPERSION = 0.12
 MAX_BETS_PER_TOURNAMENT = 2
 DEFAULT_TOUR_EXPOSURE_CAPS = {"ATP": .08, "WTA": .08, "Challenger": .05, "ITF": .03, "Unknown": .03}
@@ -89,7 +90,7 @@ OFFICIAL_STATUS_DOMAINS = {
 BLOCKING_PHYSICAL_STATUSES = {"questionable", "injured", "withdrawn", "unavailable", "suspended"}
 MAX_CACHE_ENTRY_BYTES = 2_000_000
 MAX_CACHE_ENTRIES = 20
-MODEL_VERSION = "tennis-2026.08-environment-models-v1"
+MODEL_VERSION = "tennis-2026.08-price-freshness-v1"
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -438,6 +439,7 @@ def save_prediction_snapshot(date_str: str, match: dict, player: str, baseline: 
         "maximum_elo_market_gap": MAX_ELO_MARKET_GAP,
         "maximum_bookmaker_dispersion": MAX_BOOKMAKER_DISPERSION,
         "maximum_price_movement": MAX_PRICE_MOVEMENT,
+        "maximum_price_age_minutes": MAX_PRICE_AGE_MINUTES,
     }
     payload = {
         "schema_version": 1, "kind": "tennis_prediction", "decision_date": date_str,
@@ -1198,6 +1200,33 @@ def provider_location(event: dict, source: str, as_of: str) -> dict | None:
     return None
 
 
+def provider_quote_timestamp(received_at: datetime, *payloads: dict) -> str:
+    """Return a plausible provider-supplied quote timestamp, never an event start time."""
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        for field in ("oddsUpdatedAt", "lastUpdated", "updatedAt", "updated_at"):
+            value = payload.get(field)
+            if value in (None, ""):
+                continue
+            try:
+                if isinstance(value, (int, float)) or str(value).isdigit():
+                    numeric = float(value)
+                    if numeric > 10_000_000_000:
+                        numeric /= 1000
+                    parsed = datetime.fromtimestamp(numeric, tz=timezone.utc)
+                else:
+                    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                parsed = parsed.astimezone(timezone.utc)
+                if parsed <= received_at.astimezone(timezone.utc) + timedelta(minutes=5):
+                    return parsed.isoformat()
+            except (OSError, OverflowError, TypeError, ValueError):
+                continue
+    return ""
+
+
 def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict]:
     """Fetch verified tennis fixtures and match-winner odds from Odds-API.io."""
     global LAST_FIXTURE_STATUS
@@ -1292,6 +1321,7 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
                 "bookmaker_quotes": market["quotes"],
                 "indoor": event.get("indoor") if event.get("indoor") is not None else odds_event.get("indoor"),
                 "best_of": event.get("bestOf") or odds_event.get("bestOf"),
+                "odds_timestamp": provider_quote_timestamp(datetime.now(timezone.utc), odds_event, event),
                 "location": (provider_location(event, "https://api.odds-api.io", date_str) or
                              provider_location(odds_event, "https://api.odds-api.io", date_str)),
             })
@@ -3687,7 +3717,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "TRAVEL_DISTANCE_KM", "TIMEZONE_CHANGE_HOURS", "TRAVEL_SOURCE",
         "BEST_OF", "INDOOR",
         "MARKET_DISPERSION", "PRICE_SNAPSHOT_COUNT", "PRICE_VELOCITY_PER_HOUR",
-        "PRICE_ACCELERATION_PER_HOUR2", "DATA_QUALITY_SCORE", "DATA_QUALITY_GRADE",
+        "PRICE_ACCELERATION_PER_HOUR2", "PRICE_AGE_MINUTES", "PRICE_STALE",
+        "DATA_QUALITY_SCORE", "DATA_QUALITY_GRADE",
         "UNCERTAINTY_MARGIN", "RISK_ADJUSTED_EV", "KILL_SWITCH", "KILL_SWITCH_REASON",
         "SEGMENT_SAMPLE", "SEGMENT_ROI", "SEGMENT_CLV", "SEGMENT_SUSPENDED",
         "EV", "SCORE", "EVIDENCE", "QUALITY_SCORE", "QUALITY_GRADE",
@@ -3829,7 +3860,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 workload.get("travel_source", ""),
                 baseline.get("best_of", 3), baseline.get("indoor", ""),
                 f"{data_quality['dispersion']:.6f}" if data_quality.get("dispersion") is not None else "",
-                "", "", "",
+                "", "", "", "", "",
                 data_quality["score"], data_quality["grade"], f"{baseline['uncertainty_margin']:.6f}",
                 f"{baseline['risk_adjusted_ev']:.6f}", baseline.get("kill_switch", False), baseline.get("kill_switch_reason", ""),
                 baseline.get("segment_sample", 0),
@@ -4266,6 +4297,7 @@ PENDING_HEADERS = [
     "MODE", "STATUS", "REASON", "FINAL_ODDS", "FINAL_PROBABILITY", "FINAL_EV",
     "FINAL_BOOKMAKERS", "FINAL_SOURCE", "REVALIDATED_AT", "PRICE_MOVEMENT",
     "PRICE_VELOCITY_PER_HOUR", "PRICE_ACCELERATION_PER_HOUR2", "PRICE_SNAPSHOT_COUNT",
+    "PRICE_AGE_MINUTES", "PRICE_STALE",
 ]
 
 
@@ -4322,6 +4354,10 @@ def update_audit_lifecycle(date_str: str, pick: str, decision: str, reason: str,
                                                    if price_dynamics.get("velocity_per_hour") is not None else "")
                 row["PRICE_ACCELERATION_PER_HOUR2"] = (f"{price_dynamics['acceleration_per_hour2']:.6f}"
                                                         if price_dynamics.get("acceleration_per_hour2") is not None else "")
+                row["PRICE_AGE_MINUTES"] = (f"{price_dynamics['price_age_minutes']:.3f}"
+                                             if price_dynamics.get("price_age_minutes") is not None else "")
+                row["PRICE_STALE"] = (price_dynamics.get("stale")
+                                      if price_dynamics.get("stale") is not None else "")
             changed = True
     if changed:
         atomic_write_csv(AUDIT_FILE, list(headers or []), rows)
@@ -4345,7 +4381,8 @@ def match_time_state(value: str, now: datetime, window_minutes: int = 90) -> str
 
 
 def calculate_price_dynamics(rows: list[dict], date_str: str, match_label: str, pick: str,
-                             event_id: str = "") -> dict:
+                             event_id: str = "", as_of: datetime | None = None,
+                             max_age_minutes: int = MAX_PRICE_AGE_MINUTES) -> dict:
     """Calculate relative price velocity/hour and acceleration/hour² from ordered snapshots."""
     wanted_pick = normalize_player_name(pick)
     wanted_match = normalize_player_name(match_label)
@@ -4361,7 +4398,7 @@ def calculate_price_dynamics(rows: list[dict], date_str: str, match_label: str, 
         elif normalize_player_name(item.get("MATCH", "")) != wanted_match:
             continue
         try:
-            timestamp = datetime.fromisoformat(str(item.get("TIMESTAMP") or "").replace("Z", "+00:00"))
+            timestamp = datetime.fromisoformat(str(item.get("QUOTE_TIMESTAMP") or item.get("TIMESTAMP") or "").replace("Z", "+00:00"))
             if timestamp.tzinfo is None:
                 timestamp = timestamp.replace(tzinfo=timezone.utc)
             odds = float(item.get("ODDS") or "")
@@ -4378,7 +4415,14 @@ def calculate_price_dynamics(rows: list[dict], date_str: str, match_label: str, 
         else:
             deduplicated.append(observation)
     result = {"snapshot_count": len(deduplicated), "price_movement": None,
-              "velocity_per_hour": None, "acceleration_per_hour2": None}
+              "velocity_per_hour": None, "acceleration_per_hour2": None,
+              "latest_snapshot_at": None, "price_age_minutes": None, "stale": None}
+    if deduplicated:
+        latest_time = deduplicated[-1][0]
+        reference = (as_of or latest_time).astimezone(timezone.utc)
+        age_minutes = max(0.0, (reference - latest_time).total_seconds() / 60)
+        result.update({"latest_snapshot_at": latest_time.isoformat(), "price_age_minutes": age_minutes,
+                       "stale": age_minutes > max_age_minutes})
     if len(deduplicated) >= 2:
         first_odds = deduplicated[0][1]
         previous_time, previous_odds = deduplicated[-2]
@@ -4403,21 +4447,25 @@ def calculate_price_dynamics(rows: list[dict], date_str: str, match_label: str, 
 
 def append_price_snapshot(now: datetime, row: dict, match: dict | None, baseline: dict | None) -> dict:
     path = PENDING_FILE.with_name("price-history.csv")
-    headers = ["TIMESTAMP", "DATE", "EVENT_ID", "MATCH", "PICK", "ODDS", "BOOKMAKERS", "DISPERSION", "SOURCE", "EVENT_STATUS",
-               "PRICE_MOVEMENT", "VELOCITY_PER_HOUR", "ACCELERATION_PER_HOUR2", "SNAPSHOT_COUNT"]
+    headers = ["TIMESTAMP", "QUOTE_TIMESTAMP", "DATE", "EVENT_ID", "MATCH", "PICK", "ODDS", "BOOKMAKERS", "DISPERSION", "SOURCE", "EVENT_STATUS",
+               "PRICE_MOVEMENT", "VELOCITY_PER_HOUR", "ACCELERATION_PER_HOUR2", "SNAPSHOT_COUNT",
+               "LATEST_SNAPSHOT_AT", "PRICE_AGE_MINUTES", "STALE"]
     _, rows = read_csv_rows(path)
     dispersion = player_market_dispersion(match, row.get("PICK", "")) if match else None
-    snapshot = dict(zip(headers, [now.isoformat(), row.get("DATE", ""), row.get("EVENT_ID", ""), row.get("MATCH", ""), row.get("PICK", ""),
+    snapshot = dict(zip(headers, [now.isoformat(), (match or {}).get("odds_timestamp", ""), row.get("DATE", ""), row.get("EVENT_ID", ""), row.get("MATCH", ""), row.get("PICK", ""),
                          f"{baseline['player_odds']:.3f}" if baseline else "", (match or {}).get("bookmaker_count", 0),
                          f"{dispersion:.6f}" if dispersion is not None else "", (match or {}).get("odds_source", ""), (match or {}).get("status", ""),
-                         "", "", "", ""]))
+                         "", "", "", "", "", "", "", ""]))
     rows.append(snapshot)
-    dynamics = calculate_price_dynamics(rows, row.get("DATE", ""), row.get("MATCH", ""), row.get("PICK", ""), row.get("EVENT_ID", ""))
+    dynamics = calculate_price_dynamics(rows, row.get("DATE", ""), row.get("MATCH", ""), row.get("PICK", ""), row.get("EVENT_ID", ""), now)
     snapshot.update({
         "PRICE_MOVEMENT": f"{dynamics['price_movement']:.6f}" if dynamics["price_movement"] is not None else "",
         "VELOCITY_PER_HOUR": f"{dynamics['velocity_per_hour']:.6f}" if dynamics["velocity_per_hour"] is not None else "",
         "ACCELERATION_PER_HOUR2": f"{dynamics['acceleration_per_hour2']:.6f}" if dynamics["acceleration_per_hour2"] is not None else "",
         "SNAPSHOT_COUNT": dynamics["snapshot_count"],
+        "LATEST_SNAPSHOT_AT": dynamics["latest_snapshot_at"] or "",
+        "PRICE_AGE_MINUTES": f"{dynamics['price_age_minutes']:.3f}" if dynamics["price_age_minutes"] is not None else "",
+        "STALE": dynamics["stale"] if dynamics["stale"] is not None else "",
     })
     atomic_write_csv(path, headers, rows)
     return dynamics
@@ -4496,6 +4544,9 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
                 "PRICE_ACCELERATION_PER_HOUR2": (f"{price_dynamics['acceleration_per_hour2']:.6f}"
                                                   if price_dynamics["acceleration_per_hour2"] is not None else ""),
                 "PRICE_SNAPSHOT_COUNT": price_dynamics["snapshot_count"],
+                "PRICE_AGE_MINUTES": (f"{price_dynamics['price_age_minutes']:.3f}"
+                                      if price_dynamics["price_age_minutes"] is not None else ""),
+                "PRICE_STALE": price_dynamics["stale"] if price_dynamics["stale"] is not None else "",
             })
             reason = None
             status = str((match or {}).get("status") or "").casefold()
@@ -4503,6 +4554,8 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
             movement = baseline["player_odds"] / float(row["DISCOVERY_ODDS"]) - 1 if baseline else None
             if any(token in status for token in ("cancel", "postpon", "settled", "live", "inplay", "in-play", "withdraw", "walkover", "retir", "suspend")):
                 reason = "event_not_pre_match"
+            elif price_dynamics.get("stale"):
+                reason = "stale_price"
             elif not match or not baseline:
                 reason = "market_or_model_unavailable"
             elif int(match.get("bookmaker_count") or 0) < 2:

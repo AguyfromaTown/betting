@@ -93,7 +93,7 @@ Status conventions:
 - [x] Measure bookmaker dispersion.
 - [x] Measure discovery-to-authorization price movement.
 - [x] Measure price velocity and acceleration across snapshots.
-- [ ] Add stale-price detection based on snapshot timestamps.
+- [x] Add stale-price detection based on snapshot timestamps.
 - [x] Distinguish broad market movement from isolated price errors.
 - [x] Require at least two bookmakers at authorization.
 - [x] Store opening/authorization/closing prices when available.
