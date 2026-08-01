@@ -1,0 +1,60 @@
+name: Tennis Bot Quality Gate
+
+on:
+  push:
+    paths:
+      - 'tennis-bot/**'
+      - '.coveragerc'
+      - '.github/workflows/tennis-*.yml'
+  pull_request:
+    paths:
+      - 'tennis-bot/**'
+      - '.coveragerc'
+      - '.github/workflows/tennis-*.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tennis-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: tennis-bot/requirements-test.txt
+      - name: Install test dependencies
+        run: pip install -r tennis-bot/requirements-test.txt
+      - name: Run tests with 70% coverage gate
+        run: |
+          python -m coverage run -m unittest discover -s tennis-bot -p "test_*.py"
+          python -m coverage report --fail-under=70 > coverage-report.txt
+          cat coverage-report.txt
+          python -m coverage xml
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          echo "## Tennis test coverage" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f coverage-report.txt ]; then
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            cat coverage-report.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Coverage report unavailable because the test command did not complete." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tennis-coverage-${{ github.run_id }}
+          path: |
+            coverage.xml
+            coverage-report.txt
+          if-no-files-found: warn

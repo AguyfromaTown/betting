@@ -1,0 +1,20 @@
+[run]
+branch = True
+source = tennis-bot
+omit =
+    tennis-bot/test_*.py
+
+[report]
+show_missing = True
+skip_covered = False
+precision = 1
+fail_under = 70
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+
+[html]
+directory = htmlcov
+
+[xml]
+output = coverage.xml

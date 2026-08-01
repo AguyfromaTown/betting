@@ -189,7 +189,7 @@ Status conventions:
 - [x] Test counterfactual recording and emergency-stop logic.
 - [x] Add fixed end-to-end historical integration fixtures.
 - [x] Add interrupted-write and recovery tests.
-- [ ] Add automated test coverage reporting and a required minimum.
+- [x] Add automated test coverage reporting and a required minimum.
 - [x] Run tests before every GitHub workflow mutation.
 
 ## Monitoring and alerts

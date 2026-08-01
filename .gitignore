@@ -1,5 +1,9 @@
 __pycache__/
 *.pyc
+.coverage
+coverage.xml
+coverage-report.txt
+htmlcov/
 .env
 *.egg-info/
 dist/
