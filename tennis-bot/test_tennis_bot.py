@@ -831,6 +831,9 @@ class TennisBotTests(unittest.TestCase):
             "player2_ranking_history": {"latest_rank": 24, "latest_date": "2026-07-27", "rank_90d": 18, "improvement_90d": -6, "samples_365d": 8},
             "player1_bio": {"handedness": "Right", "nationality": "ESP", "handedness_date": "2026-07-28", "source": "historical_match_records"},
             "player2_bio": {"handedness": "Left", "nationality": "USA", "handedness_date": "2026-07-27", "source": "historical_match_records"},
+            "head_to_head": {"player1_probability": 0.58, "player2_probability": 0.42,
+                             "sample": 5, "surface_sample": 3, "model_weight": 0.03,
+                             "source": "historical_match_records"},
         }
         with tempfile.TemporaryDirectory() as directory:
             audit_file = Path(directory) / "prediction-audit.csv"
@@ -852,6 +855,9 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["PICK_HANDEDNESS"], "Left")
         self.assertEqual(second["PICK_NATIONALITY"], "USA")
         self.assertEqual(second["OPPONENT_HANDEDNESS"], "Right")
+        self.assertEqual(second["H2H_PROBABILITY"], "0.420000")
+        self.assertEqual(second["H2H_SAMPLE"], "5")
+        self.assertEqual(second["H2H_SOURCE"], "historical_match_records")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -921,6 +927,33 @@ class TennisBotTests(unittest.TestCase):
             "winner_hand": "U", "winner_ioc": "Unknown",
         }]
         self.assertIsNone(bot.calculate_player_bio(history, "Test Player", "2026-08-01"))
+
+    def test_head_to_head_is_leakage_safe_surface_weighted_and_symmetric(self):
+        history = [
+            {"tourney_date": "20260701", "winner_name": "One", "loser_name": "Two", "surface": "Clay", "score": "6-4 6-4", "_source_url": "https://example.test/history.csv"},
+            {"tourney_date": "20260101", "winner_name": "One", "loser_name": "Two", "surface": "Clay", "score": "7-6 6-4"},
+            {"tourney_date": "20250101", "winner_name": "Two", "loser_name": "One", "surface": "Hard", "score": "6-3 6-3"},
+            {"tourney_date": "20240101", "winner_name": "One", "loser_name": "Two", "surface": "Clay", "score": "6-2 6-2"},
+            {"tourney_date": "20260715", "winner_name": "Two", "loser_name": "One", "surface": "Clay", "score": "RET"},
+            {"tourney_date": "20260802", "winner_name": "Two", "loser_name": "One", "surface": "Clay", "score": "6-0 6-0"},
+        ]
+        forward = bot.calculate_head_to_head(history, "One", "Two", "clay", "2026-08-01")
+        reverse = bot.calculate_head_to_head(history, "Two", "One", "clay", "2026-08-01")
+        self.assertEqual(forward["sample"], 4)
+        self.assertEqual(forward["surface_sample"], 3)
+        self.assertEqual(forward["model_weight"], 0.02)
+        self.assertGreater(forward["player1_probability"], 0.5)
+        self.assertAlmostEqual(forward["player1_probability"], reverse["player2_probability"])
+        self.assertIn("https://example.test/history.csv", forward["source"])
+
+    def test_head_to_head_needs_three_completed_meetings_to_affect_model(self):
+        history = [
+            {"tourney_date": "20260701", "winner_name": "One", "loser_name": "Two", "surface": "Clay", "score": "6-4 6-4"},
+            {"tourney_date": "20260101", "winner_name": "One", "loser_name": "Two", "surface": "Clay", "score": "6-4 6-4"},
+        ]
+        h2h = bot.calculate_head_to_head(history, "One", "Two", "clay", "2026-08-01")
+        self.assertIsNone(h2h["player1_probability"])
+        self.assertEqual(h2h["model_weight"], 0.0)
 
     def test_serve_return_profile_requires_points_and_calculates_rates(self):
         history = []
@@ -1175,6 +1208,19 @@ class TennisBotTests(unittest.TestCase):
 
         self.assertAlmostEqual(baseline["assessed_probability"], expected)
         self.assertIn("serve_return=.15", baseline["component_weights"])
+
+    def test_head_to_head_probability_influence_is_capped_at_three_percent(self):
+        match = {
+            "player1": "Player", "player2": "Opponent", "home_odds": 2.0, "away_odds": 2.0,
+            "player1_profile": {"elo": 1700}, "player2_profile": {"elo": 1700},
+            "head_to_head": {"player1_probability": 0.58, "player2_probability": 0.42,
+                             "sample": 8, "surface_sample": 5, "model_weight": 0.03},
+        }
+        with patch.object(bot, "load_resolved_predictions", return_value=[]):
+            baseline = bot.calculate_tennis_baseline(match, "Player")
+        self.assertAlmostEqual(baseline["assessed_probability"], 0.5 * 0.97 + 0.58 * 0.03)
+        self.assertEqual(baseline["h2h_weight"], 0.03)
+        self.assertIn("h2h=0.030", baseline["component_weights"])
 
     def test_evidence_quality_rewards_surface_profiles_and_bookmakers(self):
         match = {

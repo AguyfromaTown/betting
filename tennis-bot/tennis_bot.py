@@ -1628,6 +1628,51 @@ def calculate_player_bio(history: list[dict], player: str, as_of: str) -> dict |
     }
 
 
+def calculate_head_to_head(history: list[dict], player1: str, player2: str,
+                           surface: str | None, as_of: str) -> dict | None:
+    """Calculate a recency/surface-weighted H2H with strong small-sample shrinkage."""
+    player1_key, player2_key = normalize_player_name(player1), normalize_player_name(player2)
+    cutoff = datetime.strptime(as_of, "%Y-%m-%d")
+    observations = []
+    for row in history:
+        winner_key = normalize_player_name(row.get("winner_name", ""))
+        loser_key = normalize_player_name(row.get("loser_name", ""))
+        if {winner_key, loser_key} != {player1_key, player2_key}:
+            continue
+        score = str(row.get("score") or "").upper()
+        if not score or any(flag in score for flag in ("W/O", "RET", "DEF")):
+            continue
+        try:
+            played = datetime.strptime(str(row.get("tourney_date", "")), "%Y%m%d")
+        except ValueError:
+            continue
+        if played >= cutoff:
+            continue
+        same_surface = bool(surface and str(row.get("surface") or "").casefold() == surface.casefold())
+        weight = 0.5 ** ((cutoff - played).days / 730)
+        if same_surface:
+            weight *= 1.25
+        observations.append((played, winner_key == player1_key, same_surface, weight,
+                             str(row.get("_source_url") or "historical_match_records")))
+    if not observations:
+        return None
+    observations.sort(reverse=True)
+    weighted_total = sum(item[3] for item in observations)
+    weighted_wins = sum(item[3] for item in observations if item[1])
+    # Four neutral prior matches prevent a tiny or stale H2H from dominating.
+    shrunk_probability = (weighted_wins + 2.0) / (weighted_total + 4.0)
+    model_weight = min(0.03, max(0.0, (len(observations) - 2) * 0.01))
+    model_probability = max(0.42, min(0.58, shrunk_probability)) if model_weight else None
+    return {
+        "sample": len(observations), "player1_wins": sum(item[1] for item in observations),
+        "surface_sample": sum(item[2] for item in observations),
+        "weighted_player1_win_rate": weighted_wins / weighted_total if weighted_total else 0.5,
+        "player1_probability": model_probability, "player2_probability": 1 - model_probability if model_probability is not None else None,
+        "model_weight": model_weight, "last_meeting": observations[0][0].strftime("%Y-%m-%d"),
+        "source": ";".join(dict.fromkeys(item[4] for item in observations)),
+    }
+
+
 def calculate_recent_form(history: list[dict], player: str, surface: str | None, as_of: str, limit: int = 20) -> dict | None:
     """Calculate recency-, surface-, and opponent-rank-adjusted form."""
     player_key = normalize_player_name(player)
@@ -1785,6 +1830,9 @@ def fetch_recent_match_history(matches: list[dict], date_str: str) -> list[dict]
 def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
     history = fetch_recent_match_history(matches, date_str)
     for match in matches:
+        match["head_to_head"] = calculate_head_to_head(
+            history, match["player1"], match["player2"], match.get("surface"), date_str
+        )
         match["player1_recent_form"] = calculate_recent_form(history, match["player1"], match.get("surface"), date_str)
         match["player2_recent_form"] = calculate_recent_form(history, match["player2"], match.get("surface"), date_str)
         match["player1_serve_return"] = calculate_serve_return_profile(history, match["player1"], match.get("surface"), date_str)
@@ -1992,6 +2040,7 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         recent_form = match.get("player1_recent_form")
         serve_return = calculate_serve_return_matchup(match.get("player1_serve_return"), match.get("player2_serve_return"))
         workload = match.get("player1_workload") or {}
+        h2h_probability = (match.get("head_to_head") or {}).get("player1_probability")
     elif player_key == normalize_player_name(match["player2"]):
         player_odds = float(away_odds)
         player_profile = match.get("player2_profile")
@@ -1999,6 +2048,7 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         recent_form = match.get("player2_recent_form")
         serve_return = calculate_serve_return_matchup(match.get("player2_serve_return"), match.get("player1_serve_return"))
         workload = match.get("player2_workload") or {}
+        h2h_probability = (match.get("head_to_head") or {}).get("player2_probability")
     else:
         return None
 
@@ -2027,7 +2077,6 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
     else:
         assessed_probability = 0.55 * elo_probability + 0.45 * market_probability
         component_weights = "elo=.55;market=.45;form=0;serve_return=0"
-    raw_probability = assessed_probability
     decision_date = str(match.get("start_time") or "")[:10] or None
     history = load_resolved_predictions(decision_date)
     comparable = [row for row in history if (row.get("SURFACE") or "Unknown") == (surface or "Unknown")]
@@ -2045,6 +2094,11 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         if challenger["promoted"] and not rollback["model_rollback"]:
             assessed_probability = challenger_probability
             component_weights = "learned:" + ";".join(f"{name}={weight:.3f}" for name, weight in sorted(used.items()))
+    h2h_weight = float((match.get("head_to_head") or {}).get("model_weight") or 0)
+    if h2h_probability is not None and h2h_weight > 0:
+        assessed_probability = (1 - h2h_weight) * assessed_probability + h2h_weight * float(h2h_probability)
+        component_weights += f";h2h={h2h_weight:.3f}"
+    raw_probability = assessed_probability
     assessed_probability, calibration_sample = calibrate_probability(assessed_probability, comparable)
     context_penalty, context_reason = tennis_context_uncertainty(match)
     workload_penalty = float(workload.get("penalty") or 0)
@@ -2063,6 +2117,10 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "form_sample": recent_form["sample"] if recent_form else 0,
         "serve_return_probability": serve_return["probability"] if serve_return else None,
         "serve_return_sample": serve_return["sample"] if serve_return else 0,
+        "h2h_probability": h2h_probability,
+        "h2h_sample": (match.get("head_to_head") or {}).get("sample", 0),
+        "h2h_surface_sample": (match.get("head_to_head") or {}).get("surface_sample", 0),
+        "h2h_weight": h2h_weight,
         "expected_hold": serve_return["player_hold"] if serve_return else None,
         "opponent_expected_hold": serve_return["opponent_hold"] if serve_return else None,
         "component_weights": component_weights,
@@ -2185,10 +2243,14 @@ def build_prompt(
                     f"{baseline['serve_return_probability']:.1%} (n={baseline['serve_return_sample']}, hold {baseline['expected_hold']:.1%} vs {baseline['opponent_expected_hold']:.1%})"
                     if baseline.get("serve_return_probability") is not None else "unavailable"
                 )
+                h2h_text = (
+                    f"{baseline['h2h_probability']:.1%} (n={baseline['h2h_sample']}, same surface={baseline['h2h_surface_sample']}, weight={baseline['h2h_weight']:.1%})"
+                    if baseline.get("h2h_probability") is not None else "unavailable"
+                )
                 baseline_lines.append(
                     f"  Python baseline for {player}: market fair "
                     f"{baseline['market_probability']:.1%}, Elo "
-                    f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, serve/return {serve_text}, "
+                    f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, serve/return {serve_text}, H2H {h2h_text}, "
                     f"blended assessed "
                     f"{baseline['assessed_probability']:.1%}, EV "
                     f"{baseline['ev']:.2%}, score {baseline['score']:.2f}"
@@ -2222,10 +2284,9 @@ Matches in odds range [{odds_min}-{odds_max}]:
                 prompt += compact_profile_line(player, profiles) + "\n"
                 seen_players.add(key)
     prompt += (
-        "\nSource: Tennis Abstract weekly Elo leaderboards. Fields not shown "
-        "above, including current form, head-to-head, serve/return splits, "
-        "physical status, and Match Charting Project tactics, are unavailable "
-        "for this run and MUST NOT be invented.\n"
+        "\nSources: Tennis Abstract weekly Elo leaderboards and dated historical "
+        "match records. Any current form, H2H, serve/return, physical-status, or "
+        "tactical field not explicitly shown above is unavailable and MUST NOT be invented.\n"
     )
 
     # Add the analysis instructions
@@ -2729,7 +2790,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "OPPONENT_HANDEDNESS", "OPPONENT_NATIONALITY", "OPPONENT_BIO_DATE", "OPPONENT_BIO_SOURCE",
         "OPENING_ODDS",
         "MARKET_PROBABILITY", "ELO_PROBABILITY", "MODEL_PROBABILITY",
-        "FORM_PROBABILITY", "FORM_SAMPLE", "SERVE_RETURN_PROBABILITY",
+        "FORM_PROBABILITY", "FORM_SAMPLE", "H2H_PROBABILITY", "H2H_SAMPLE", "H2H_SURFACE_SAMPLE", "H2H_WEIGHT", "H2H_SOURCE", "SERVE_RETURN_PROBABILITY",
         "SERVE_RETURN_SAMPLE", "EXPECTED_HOLD", "OPPONENT_EXPECTED_HOLD",
         "COMPONENT_WEIGHTS", "RAW_PROBABILITY", "CHALLENGER_PROBABILITY",
         "CHALLENGER_SAMPLE", "CHALLENGER_PROMOTED", "CALIBRATION_SAMPLE",
@@ -2813,6 +2874,9 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 f"{baseline['assessed_probability']:.6f}",
                 f"{baseline['form_probability']:.6f}" if baseline.get("form_probability") is not None else "",
                 baseline.get("form_sample", 0),
+                f"{baseline['h2h_probability']:.6f}" if baseline.get("h2h_probability") is not None else "",
+                baseline.get("h2h_sample", 0), baseline.get("h2h_surface_sample", 0), f"{baseline.get('h2h_weight', 0):.3f}",
+                (match.get("head_to_head") or {}).get("source", ""),
                 f"{baseline['serve_return_probability']:.6f}" if baseline.get("serve_return_probability") is not None else "",
                 baseline.get("serve_return_sample", 0),
                 f"{baseline['expected_hold']:.6f}" if baseline.get("expected_hold") is not None else "",
