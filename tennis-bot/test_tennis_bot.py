@@ -2511,6 +2511,31 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("Never change only `bankroll.txt`", runbook)
         self.assertIn("do not manually clear `model-policy-state.json`", runbook.casefold())
 
+    def test_identity_provider_runbook_documents_review_and_safe_cutover(self):
+        runbook = MODULE_PATH.parent.parent.joinpath("IDENTITY-AND-PROVIDER-OPERATIONS.md").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "Resolution order implemented by the bot",
+            "player-aliases.csv",
+            "player-alias-review.csv",
+            "STATUS=approved",
+            "STATUS=rejected",
+            "72 hours",
+            "Alias acceptance checklist",
+            "When an API replacement is justified",
+            "Replacement contract design",
+            "Canonical internal match adapter",
+            "provider_schema_failure",
+            "Shadow comparison before cutover",
+            "Cutover procedure",
+            "Rollback procedure",
+            "Settings → Secrets and variables → Actions",
+        ):
+            self.assertIn(required, runbook)
+        self.assertIn("never creates a player or profile", runbook)
+        self.assertIn("must not write live bets, debit bankroll, or settle existing bets", runbook)
+
 
 if __name__ == "__main__":
     unittest.main()

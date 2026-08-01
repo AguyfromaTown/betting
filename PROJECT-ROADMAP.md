@@ -240,7 +240,7 @@ Status conventions:
 - [x] Document every model formula and weight in a technical reference.
 - [x] Document threshold sample requirements in one configuration reference.
 - [x] Document emergency-stop and recovery procedures.
-- [ ] Document alias review and API-provider replacement procedures.
+- [x] Document alias review and API-provider replacement procedures.
 - [ ] Maintain a changelog and model/policy release notes.
 - [ ] Provide a one-command local paper run.
 - [x] Add a diagnostic no-write/no-stake/no-AI/no-settlement mode.
