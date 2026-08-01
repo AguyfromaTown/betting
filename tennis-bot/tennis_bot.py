@@ -87,7 +87,7 @@ OFFICIAL_STATUS_DOMAINS = {
 BLOCKING_PHYSICAL_STATUSES = {"questionable", "injured", "withdrawn", "unavailable", "suspended"}
 MAX_CACHE_ENTRY_BYTES = 2_000_000
 MAX_CACHE_ENTRIES = 20
-MODEL_VERSION = "tennis-2026.08-workload-v1"
+MODEL_VERSION = "tennis-2026.08-tour-calibration-v1"
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -2442,6 +2442,30 @@ def calibrate_probability(probability: float, rows: list[dict]) -> tuple[float, 
     return max(.02, min(.98, probability * (1 - strength) + actual * strength)), len(bucket)
 
 
+def canonical_tour(value: str | None) -> str:
+    text = str(value or "").strip().casefold()
+    if "challenger" in text:
+        return "Challenger"
+    if "itf" in text:
+        return "ITF"
+    if text == "wta" or text.startswith("wta "):
+        return "WTA"
+    if text == "atp" or text.startswith("atp "):
+        return "ATP"
+    return "Unknown"
+
+
+def calibrate_probability_by_tour(probability: float, rows: list[dict], tour: str | None) -> dict:
+    """Calibrate from the current tour only; sparse/unknown segments remain unchanged."""
+    segment = canonical_tour(tour)
+    if segment == "Unknown":
+        return {"probability": probability, "sample": 0, "segment": segment, "applied": False}
+    tour_rows = [row for row in rows if canonical_tour(row.get("TOUR")) == segment]
+    calibrated, sample = calibrate_probability(probability, tour_rows)
+    return {"probability": calibrated, "sample": sample, "segment": segment,
+            "applied": sample >= MIN_CALIBRATION_SAMPLE}
+
+
 def segment_health(match: dict, rows: list[dict]) -> dict:
     """Suspend a mature surface/tour segment only when ROI and CLV both confirm harm."""
     surface, tour = match.get("surface") or "Unknown", match.get("level") or "Unknown"
@@ -2614,7 +2638,8 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         assessed_probability = (1 - h2h_weight) * assessed_probability + h2h_weight * float(h2h_probability)
         component_weights += f";h2h={h2h_weight:.3f}"
     raw_probability = assessed_probability
-    assessed_probability, calibration_sample = calibrate_probability(assessed_probability, comparable)
+    calibration = calibrate_probability_by_tour(assessed_probability, history, match.get("level"))
+    assessed_probability, calibration_sample = calibration["probability"], calibration["sample"]
     context_penalty, context_reason = tennis_context_uncertainty(match)
     static_workload_penalty = float(workload.get("penalty") or 0)
     workload_challenger = learned_workload_policy(history)
@@ -2672,6 +2697,8 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "challenger_sample": challenger["sample"] if challenger else 0,
         "challenger_promoted": bool(challenger and challenger["promoted"] and not rollback["model_rollback"]),
         "calibration_sample": calibration_sample,
+        "calibration_segment": calibration["segment"],
+        "calibration_applied": calibration["applied"],
         "context_penalty": context_penalty,
         "context_reason": context_reason,
         "workload_penalty": workload_penalty,
@@ -2846,7 +2873,8 @@ def build_prompt(
                     f"  Python baseline for {player}: market fair "
                     f"{baseline['market_probability']:.1%}, Elo "
                     f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, serve/return {serve_text}, H2H {h2h_text}, clutch {clutch_text}, BO5 {bo5_text}, physical status {physical_text}, workload {workload_text}, "
-                    f"blended assessed "
+                    f"tour calibration {baseline.get('calibration_segment', 'Unknown')} "
+                    f"(n={baseline.get('calibration_sample', 0)}, applied={baseline.get('calibration_applied', False)}), blended assessed "
                     f"{baseline['assessed_probability']:.1%}, EV "
                     f"{baseline['ev']:.2%}, score {baseline['score']:.2f}"
                 )
@@ -3393,7 +3421,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "BO5_MATCH_WIN_RATE", "BO5_MATCH_SAMPLE", "BO5_SET_WIN_RATE", "BO5_SET_SAMPLE", "BO5_SAME_SURFACE_SAMPLE",
         "BO5_FIVE_SET_WIN_RATE", "BO5_FIVE_SET_SAMPLE", "BO5_COMEBACK_0_2_RATE", "BO5_COMEBACK_0_2_SAMPLE", "BO5_SOURCE",
         "COMPONENT_WEIGHTS", "RAW_PROBABILITY", "CHALLENGER_PROBABILITY",
-        "CHALLENGER_SAMPLE", "CHALLENGER_PROMOTED", "CALIBRATION_SAMPLE",
+        "CHALLENGER_SAMPLE", "CHALLENGER_PROMOTED", "CALIBRATION_SAMPLE", "CALIBRATION_SEGMENT", "CALIBRATION_APPLIED",
         "CONTEXT_PENALTY", "CONTEXT_REASON", "WORKLOAD_PENALTY", "STATIC_WORKLOAD_PENALTY",
         "WORKLOAD_POLICY_ID", "WORKLOAD_POLICY_SAMPLE", "WORKLOAD_POLICY_HOLDOUT",
         "WORKLOAD_POLICY_ACTIVE_BRIER", "WORKLOAD_POLICY_CHALLENGER_BRIER", "WORKLOAD_POLICY_PROMOTED", "REST_DAYS",
@@ -3513,7 +3541,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 f"{baseline['raw_probability']:.6f}",
                 f"{baseline['challenger_probability']:.6f}" if baseline.get("challenger_probability") is not None else "",
                 baseline.get("challenger_sample", 0), baseline.get("challenger_promoted", False),
-                baseline.get("calibration_sample", 0), f"{baseline.get('context_penalty', 0):.6f}", baseline.get("context_reason", "main_draw"),
+                baseline.get("calibration_sample", 0), baseline.get("calibration_segment", "Unknown"),
+                baseline.get("calibration_applied", False), f"{baseline.get('context_penalty', 0):.6f}", baseline.get("context_reason", "main_draw"),
                 f"{baseline.get('workload_penalty', 0):.6f}", f"{baseline.get('static_workload_penalty', 0):.6f}",
                 baseline.get("workload_policy_id", "static-v1"), baseline.get("workload_policy_sample", 0),
                 baseline.get("workload_policy_holdout", 0),
@@ -3897,6 +3926,16 @@ def generate_backtest_summary(resolved: list[dict]):
     for field, title in (("TOUR", "Tour and level"), ("SURFACE", "Surface"), ("QUALITY_GRADE", "Evidence quality")):
         values = sorted({row.get(field) or "Unknown" for row in resolved})
         _append_segment_table(lines, title, [(value, [r for r in resolved if (r.get(field) or "Unknown") == value]) for value in values])
+    lines.extend(["", "## Tour calibration maturity", "",
+                  "Calibration is isolated by tour and activates only when the local ±5-point probability bucket has at least 100 settled predictions.", "",
+                  "| Tour | Settled predictions | Largest 10-point bucket | Status |", "|---|---:|---:|---|"])
+    for tour in ("ATP", "WTA", "Challenger", "ITF"):
+        tour_rows = [row for row in resolved if canonical_tour(row.get("TOUR")) == tour]
+        bucket_counts = []
+        for low in (0, .1, .2, .3, .4, .5, .6, .7, .8, .9):
+            bucket_counts.append(sum(low <= float(row.get("MODEL_PROBABILITY") or -1) < low + .1 for row in tour_rows))
+        largest = max(bucket_counts, default=0)
+        lines.append(f"| {tour} | {len(tour_rows)} | {largest} | {'locally eligible' if largest >= MIN_CALIBRATION_SAMPLE else 'collecting data'} |")
     months = sorted({(row.get("DATE") or "")[:7] for row in resolved if row.get("DATE")})
     _append_segment_table(lines, "Monthly performance", [(month, [r for r in resolved if (r.get("DATE") or "").startswith(month)]) for month in months])
     simulation = walk_forward_staking_simulation(resolved)

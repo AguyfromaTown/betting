@@ -496,6 +496,23 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(sample, 100)
         self.assertGreater(probability, .60)
 
+    def test_tour_calibration_never_borrows_other_tours(self):
+        rows = ([{"MODEL_PROBABILITY": ".60", "RESULT": "W", "TOUR": "ATP"} for _ in range(99)] +
+                [{"MODEL_PROBABILITY": ".60", "RESULT": "L", "TOUR": "WTA"} for _ in range(100)])
+        atp = bot.calibrate_probability_by_tour(.60, rows, "ATP")
+        wta = bot.calibrate_probability_by_tour(.60, rows, "WTA")
+        self.assertEqual(atp["sample"], 99)
+        self.assertFalse(atp["applied"])
+        self.assertEqual(atp["probability"], .60)
+        self.assertEqual(wta["sample"], 100)
+        self.assertTrue(wta["applied"])
+        self.assertLess(wta["probability"], .60)
+
+    def test_unknown_tour_is_never_calibrated(self):
+        rows = [{"MODEL_PROBABILITY": ".60", "RESULT": "W", "TOUR": "ATP"} for _ in range(200)]
+        result = bot.calibrate_probability_by_tour(.60, rows, "Unknown")
+        self.assertEqual(result, {"probability": .60, "sample": 0, "segment": "Unknown", "applied": False})
+
     def test_segment_suspension_needs_roi_and_clv_confirmation(self):
         rows = [{"SURFACE": "hard", "TOUR": "ATP", "RESULT": "L",
                  "OPENING_ODDS": "1.60", "CLV": "-0.03"} for _ in range(30)]
@@ -936,7 +953,7 @@ class TennisBotTests(unittest.TestCase):
     def test_every_prediction_audit_row_contains_both_identity_confidences(self):
         match = {
             "event_id": "7", "player1": "Player One", "player2": "Player Two",
-            "home_odds": 1.6, "away_odds": 2.5, "bookmaker_count": 3, "surface": "hard", "best_of": 5,
+            "home_odds": 1.6, "away_odds": 2.5, "bookmaker_count": 3, "surface": "hard", "best_of": 5, "level": "ATP",
             "player1_profile": {"elo": 1800, "identity_confidence": 1.0, "identity_method": "exact"},
             "player2_profile": {"elo": 1600, "identity_confidence": 0.94, "identity_method": "auto_unique"},
             "player1_ranking_history": {"latest_rank": 12, "latest_date": "2026-07-28", "rank_90d": 20, "improvement_90d": 8, "samples_365d": 9},
@@ -1023,6 +1040,8 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["TRAVEL_SOURCE"], "verified-history.csv;official-event")
         self.assertEqual(second["WORKLOAD_POLICY_ID"], "static-v1")
         self.assertEqual(second["WORKLOAD_POLICY_PROMOTED"], "False")
+        self.assertEqual(second["CALIBRATION_SEGMENT"], "ATP")
+        self.assertEqual(second["CALIBRATION_APPLIED"], "False")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1535,6 +1554,8 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("Capped quarter-Kelly", report)
         self.assertIn("## Workload threshold challenger", report)
         self.assertIn("requires at least 200", report)
+        self.assertIn("## Tour calibration maturity", report)
+        self.assertIn("| ATP | 2 | 2 | collecting data |", report)
 
     def test_walk_forward_staking_compares_fixed_and_capped_kelly(self):
         rows = [

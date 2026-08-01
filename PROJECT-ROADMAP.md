@@ -72,7 +72,7 @@ Status conventions:
 - [x] Preserve market, Elo, form and serve/return as separate components.
 - [x] Calculate an explicit uncertainty margin.
 - [x] Require uncertainty-adjusted EV during final authorization.
-- [ ] Calibrate ATP, WTA, Challenger and ITF independently after sufficient samples.
+- [x] Calibrate ATP, WTA, Challenger and ITF independently after sufficient samples.
 - [x] Segment historical evaluation by surface and tour/level.
 - [ ] Build separate best-of-three and best-of-five models.
 - [ ] Build indoor/outdoor models after sufficient data.
