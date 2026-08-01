@@ -352,6 +352,19 @@
       </div>
     </section>
 
+    <section class="card table-card" style="margin-top:12px">
+      <div class="table-toolbar">
+        <div><h2 class="panel-title">Performance by tour, surface and level</h2><div class="panel-kicker">Settled pre-match predictions with flat-unit returns; sparse segments remain explicitly labelled</div></div>
+        <span class="count" id="segment-row-count">0 settled predictions</span>
+      </div>
+      <div class="table-scroll">
+        <table id="segment-table">
+          <thead><tr><th>Dimension</th><th>Segment</th><th>Bets</th><th>Win rate</th><th>Flat-unit ROI</th><th>Brier</th><th>Average CLV</th><th>CLV sample</th><th>Reliability</th></tr></thead>
+          <tbody id="segment-body"></tbody>
+        </table>
+      </div>
+    </section>
+
     <footer class="footer"><span>Edgebook performance dashboard</span><span>Synced from betting, prediction and counterfactual ledgers</span></footer>
 
   </main>
@@ -598,6 +611,49 @@
       el("counterfactual-row-count").textContent = `${settled.length} settled ${settled.length === 1 ? "rejection" : "rejections"}`;
     }
 
+    function competitiveLevel(tour) {
+      const value = String(tour || "").trim().toLowerCase();
+      if (["atp", "wta"].includes(value)) return "Main tour";
+      if (value.includes("challenger")) return "Challenger";
+      if (value.includes("itf")) return "ITF";
+      return "Unknown";
+    }
+
+    function renderPerformanceSegments(rows) {
+      const settled = rows.filter(row => ["w", "l", "win", "loss", "won", "lost"].includes(String(row.result || "").trim().toLowerCase()));
+      const dimensions = [
+        ["Tour", row => String(row.tour || "Unknown").trim() || "Unknown"],
+        ["Surface", row => String(row.surface || "Unknown").trim() || "Unknown"],
+        ["Level", row => competitiveLevel(row.tour)],
+      ];
+      const segments = [];
+      dimensions.forEach(([dimension, getter]) => {
+        [...new Set(settled.map(getter))].sort().forEach(label => {
+          segments.push({ dimension, label, rows: settled.filter(row => getter(row) === label) });
+        });
+      });
+      el("segment-body").innerHTML = segments.map(segment => {
+        const group = segment.rows;
+        const wins = group.filter(row => ["w", "win", "won"].includes(String(row.result).toLowerCase())).length;
+        const priced = group.filter(row => String(row.opening_odds || "").trim() && Number.isFinite(Number(row.opening_odds)));
+        const returns = priced.map(row => ["w", "win", "won"].includes(String(row.result).toLowerCase())
+          ? Number(row.opening_odds) - 1 : -1);
+        const probabilities = group.filter(row => String(row.model_probability || "").trim() && Number.isFinite(Number(row.model_probability)));
+        const brier = probabilities.length ? probabilities.reduce((sum, row) => {
+          const outcome = ["w", "win", "won"].includes(String(row.result).toLowerCase()) ? 1 : 0;
+          return sum + Math.pow(Number(row.model_probability) - outcome, 2);
+        }, 0) / probabilities.length : null;
+        const clv = group.map(row => String(row.clv || "").trim()).filter(Boolean).map(Number).filter(Number.isFinite);
+        const roi = returns.length ? returns.reduce((sum, value) => sum + value, 0) / returns.length : null;
+        const averageClv = clv.length ? clv.reduce((sum, value) => sum + value, 0) / clv.length : null;
+        const reliability = group.length >= 100 ? "Usable" : group.length >= 30 ? "Developing" : "Small sample";
+        const tone = roi === null ? "" : roi > 0 ? "positive" : roi < 0 ? "negative" : "";
+        return `<tr><td>${safe(segment.dimension)}</td><td>${safe(segment.label)}</td><td>${group.length}</td><td>${(wins / group.length * 100).toFixed(1)}%</td><td class="${tone}">${roi === null ? "—" : (roi * 100).toFixed(1) + "%"}</td><td>${brier === null ? "—" : brier.toFixed(4)}</td><td>${averageClv === null ? "—" : (averageClv * 100).toFixed(1) + "%"}</td><td>${clv.length}/${group.length}</td><td>${reliability}</td></tr>`;
+      }).join("");
+      el("segment-table").style.display = segments.length ? "table" : "none";
+      el("segment-row-count").textContent = `${settled.length} settled ${settled.length === 1 ? "prediction" : "predictions"}`;
+    }
+
     function refreshAll() {
       const rows = allRows.map(row => ({ ...row }));
       renderStats(rows);
@@ -606,6 +662,7 @@
       renderBacktest(auditRows);
       renderModelComparison(auditRows);
       renderCounterfactualByRule(policyRows);
+      renderPerformanceSegments(auditRows);
       renderPending(pendingRows);
       drawChart(allRows);
       updateStatus(allRows);
