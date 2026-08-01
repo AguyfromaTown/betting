@@ -167,7 +167,7 @@ Status conventions:
 - [x] Use GitHub concurrency groups to avoid overlapping workflows.
 - [x] Migrate prediction CSV schemas while preserving legacy rows.
 - [ ] Back up state before every schema migration.
-- [ ] Add explicit interrupted-run recovery.
+- [x] Add explicit interrupted-run recovery.
 - [x] Rotate keys only on authentication/quota failures.
 - [ ] Add exponential retry delays for transient errors.
 - [ ] Add provider-specific circuit breakers.
@@ -188,7 +188,7 @@ Status conventions:
 - [x] Test workload, dispersion, outlier and correlation controls.
 - [x] Test counterfactual recording and emergency-stop logic.
 - [ ] Add fixed end-to-end historical integration fixtures.
-- [ ] Add interrupted-write and recovery tests.
+- [x] Add interrupted-write and recovery tests.
 - [ ] Add automated test coverage reporting and a required minimum.
 - [x] Run tests before every GitHub workflow mutation.
 

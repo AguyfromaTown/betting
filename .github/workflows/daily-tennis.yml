@@ -74,6 +74,7 @@ jobs:
           python tennis-bot/tennis_bot.py $ARGS
 
       - name: Commit results
+        if: always()
         run: |
           git config --local user.email "tennis-bot@github.com"
           git config --local user.name "Tennis Bot"

@@ -44,6 +44,32 @@ class TennisBotTests(unittest.TestCase):
             self.assertEqual(target.read_text(encoding="utf-8"), original)
             self.assertEqual(list(Path(directory).glob("*.tmp")), [])
 
+    def test_run_state_recovers_same_interrupted_mode_and_phase(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = Path(directory) / "run-state.json"
+            with patch.object(bot, "RUN_STATE_FILE", state_file):
+                bot.begin_run_state("2026-08-01", "daily")
+                bot.update_run_state("collection_complete")
+                bot.update_run_state("interrupted", "interrupted", "RuntimeError")
+                recovered = bot.begin_run_state("2026-08-01", "daily")
+
+            self.assertEqual(recovered["status"], "running")
+            self.assertEqual(recovered["phase"], "recovery_started")
+            self.assertEqual(recovered["recovered_from_phase"], "collection_complete")
+            self.assertEqual(recovered["attempt"], 2)
+
+    def test_run_state_completion_is_durable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = Path(directory) / "run-state.json"
+            with patch.object(bot, "RUN_STATE_FILE", state_file):
+                bot.begin_run_state("2026-08-01", "settlement")
+                bot.update_run_state("complete", "complete")
+                completed = bot.load_run_state()
+
+            self.assertEqual(completed["status"], "complete")
+            self.assertEqual(completed["phase"], "complete")
+            self.assertIn("completed_at", completed)
+
     def test_diagnostic_summary_has_no_mutating_actions(self):
         with patch.object(bot, "fetch_matches_from_odds_api", return_value=[]):
             result = bot.run_diagnostic("2026-08-01", 1.5, 1.6, ["key"])

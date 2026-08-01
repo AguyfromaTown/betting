@@ -30,6 +30,7 @@ jobs:
           ODDS_API_KEY_5: ${{ secrets.ODDS_API_KEY_5 }}
         run: python tennis-bot/tennis_bot.py --settle-only
       - name: Commit settlement
+        if: always()
         run: |
           git config --local user.email "tennis-bot@github.com"
           git config --local user.name "Tennis Bot"

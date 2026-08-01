@@ -38,6 +38,7 @@ jobs:
             cat lifecycle-summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Commit lifecycle updates
+        if: always()
         run: |
           git config --local user.email "tennis-bot@github.com"
           git config --local user.name "Tennis Bot"

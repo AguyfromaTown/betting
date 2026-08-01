@@ -31,6 +31,7 @@ POLICY_FILE = REPO_ROOT / "counterfactual-log.csv"
 PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
+RUN_STATE_FILE = REPO_ROOT / "run-state.json"
 REPORTS_DIR = REPO_ROOT / "reports"
 REQUEST_TIMEOUT = 30
 MAX_COMPLETION_TOKENS = 2048
@@ -59,6 +60,7 @@ REQUEST_HEADERS = {
 SOURCE_HEALTH = []
 LAST_FIXTURE_STATUS = "not_run"
 DIAGNOSTIC_MODE = False
+RUN_STATE_ACTIVE = False
 
 
 # ─── Helpers ────────────────────────────────────────────────────────
@@ -118,6 +120,59 @@ def save_source_health():
     payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "fixture_status": LAST_FIXTURE_STATUS,
                "requests": SOURCE_HEALTH, "failures": sum(not item["ok"] for item in SOURCE_HEALTH)}
     atomic_write_text(REPO_ROOT / "source-health.json", json.dumps(payload, indent=2) + "\n")
+
+
+def load_run_state() -> dict:
+    if not RUN_STATE_FILE.exists():
+        return {}
+    try:
+        value = json.loads(RUN_STATE_FILE.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def begin_run_state(date_str: str, mode: str) -> dict:
+    global RUN_STATE_ACTIVE
+    previous = load_run_state()
+    recoverable = (
+        previous.get("status") in {"running", "interrupted"}
+        and previous.get("date") == date_str
+        and previous.get("mode") == mode
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    state = {
+        "date": date_str,
+        "mode": mode,
+        "status": "running",
+        "phase": "recovery_started" if recoverable else "started",
+        "started_at": previous.get("started_at", now) if recoverable else now,
+        "updated_at": now,
+        "attempt": int(previous.get("attempt", 0)) + 1 if recoverable else 1,
+        "recovered_from_phase": previous.get("interrupted_from_phase", previous.get("phase", "")) if recoverable else "",
+    }
+    atomic_write_text(RUN_STATE_FILE, json.dumps(state, indent=2) + "\n")
+    RUN_STATE_ACTIVE = True
+    if recoverable:
+        log(f"Recovering interrupted {mode} run from phase: {previous.get('phase', 'unknown')}")
+    return state
+
+
+def update_run_state(phase: str, status: str = "running", detail: str = ""):
+    global RUN_STATE_ACTIVE
+    state = load_run_state()
+    if not state:
+        return
+    if status == "interrupted":
+        state["interrupted_from_phase"] = state.get("phase", "")
+    state.update({"phase": phase, "status": status, "updated_at": datetime.now(timezone.utc).isoformat()})
+    if detail:
+        state["detail"] = detail
+    if status == "complete":
+        state["completed_at"] = state["updated_at"]
+    atomic_write_text(RUN_STATE_FILE, json.dumps(state, indent=2) + "\n")
+    if status in {"complete", "interrupted"}:
+        RUN_STATE_ACTIVE = False
 
 
 def fetch(url: str) -> str | None:
@@ -2543,24 +2598,31 @@ def main():
         result = run_diagnostic(date_str, odds_min, odds_max, odds_api_keys)
         print(json.dumps(result, indent=2))
         return
+    mode = "settlement" if args.settle_only else "revalidation" if args.revalidate_only else "daily"
+    begin_run_state(date_str, mode)
     settle_pending_bets(odds_api_keys)
+    update_run_state("settlement_complete")
     generate_performance_summary()
     save_source_health()
 
     if args.settle_only:
+        update_run_state("complete", "complete")
         log("Settlement-only run complete")
         return
 
     if args.revalidate_only:
         revalidate_pending_bets(odds_api_keys)
+        update_run_state("revalidation_complete")
         generate_performance_summary()
         save_source_health()
+        update_run_state("complete", "complete")
         log("Revalidation-only run complete")
         return
 
     if not args.force and (already_logged_today(date_str) or already_staged_today(date_str)):
         log(f"Bets already logged or awaiting revalidation for {date_str}. Skipping to avoid duplicates.")
         log("(Use --force to override.)")
+        update_run_state("duplicate_safe_skip", "complete")
         return
 
     bankroll = load_bankroll(args.bankroll)
@@ -2580,7 +2642,9 @@ def main():
         report = f"# {title}\n\nDate: {date_str}\n\n{explanation}\n\nNo bets were staged and no bankroll was changed.\n"
         log(f"{title}: {explanation}")
         save_report(date_str, report); save_source_health(); print("\n" + report)
+        update_run_state("no_data_complete", "complete", LAST_FIXTURE_STATUS)
         return
+    update_run_state("collection_complete", detail=f"{len(all_matches)} verified matches")
 
     # Attach odds
     qualified = attach_odds(all_matches, odds_min, odds_max)
@@ -2635,7 +2699,13 @@ def main():
         statistical_candidates,
     )
     save_source_health()
+    update_run_state("complete", "complete")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        if RUN_STATE_ACTIVE:
+            update_run_state("interrupted", "interrupted", type(exc).__name__)
+        raise
