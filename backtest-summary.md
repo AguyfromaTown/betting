@@ -42,3 +42,12 @@ Flat-unit ROI makes segments comparable; fewer than 30 settled bets is a small s
 
 | Segment | Bets | Win rate | Flat-unit ROI | Brier | Avg CLV | Reliability |
 |---|---:|---:|---:|---:|---:|---|
+
+## Walk-forward staking comparison
+
+Bets are sized from the bankroll available before that match date; outcomes from the same date cannot affect one another.
+
+| Strategy | Bets | Ending bankroll | Profit | ROI on stakes | Max drawdown |
+|---|---:|---:|---:|---:|---:|
+| Fixed €1 unit | 0 | €100.00 | €0.00 | N/A | 0.00% |
+| Capped quarter-Kelly | 0 | €100.00 | €0.00 | N/A | 0.00% |
