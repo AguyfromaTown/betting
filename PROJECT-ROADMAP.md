@@ -161,9 +161,9 @@ Status conventions:
 ## Reliability and recovery
 
 - [x] Make daily generation, revalidation and settlement duplicate-safe.
-- [ ] Use atomic writes for all state files.
+- [x] Use atomic writes for all state files.
 - [x] Use atomic replacement for bankroll, reports, health summaries and other text state.
-- [ ] Convert CSV state mutations to atomic replacement.
+- [x] Convert CSV state mutations to atomic replacement.
 - [x] Use GitHub concurrency groups to avoid overlapping workflows.
 - [x] Migrate prediction CSV schemas while preserving legacy rows.
 - [ ] Back up state before every schema migration.

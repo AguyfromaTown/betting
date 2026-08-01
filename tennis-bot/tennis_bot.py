@@ -87,6 +87,33 @@ def atomic_write_text(path: Path, content: str, encoding: str = "utf-8"):
         raise
 
 
+def atomic_write_csv(path: Path, headers: list[str], rows: list, dict_rows: bool = True):
+    """Write a complete CSV beside the destination and atomically replace it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+            if dict_rows:
+                writer = csv.DictWriter(handle, fieldnames=headers, extrasaction="ignore")
+                writer.writeheader(); writer.writerows(rows)
+            else:
+                writer = csv.writer(handle); writer.writerow(headers); writer.writerows(rows)
+            handle.flush(); os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except Exception:
+        try: os.unlink(temporary)
+        except OSError: pass
+        raise
+
+
+def read_csv_rows(path: Path) -> tuple[list[str], list[dict]]:
+    if not path.exists() or not path.stat().st_size:
+        return [], []
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        return list(reader.fieldnames or []), list(reader)
+
+
 def save_source_health():
     payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "fixture_status": LAST_FIXTURE_STATUS,
                "requests": SOURCE_HEALTH, "failures": sum(not item["ok"] for item in SOURCE_HEALTH)}
@@ -638,12 +665,11 @@ def save_player_alias(provider_name: str, canonical_name: str, confidence: float
     provider_key = normalize_player_name(provider_name)
     if not provider_key or provider_key in aliases:
         return
-    write_header = not PLAYER_ALIASES_FILE.exists() or not PLAYER_ALIASES_FILE.stat().st_size
-    with PLAYER_ALIASES_FILE.open("a", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        if write_header:
-            writer.writerow(["PROVIDER_NAME", "CANONICAL_NAME", "SOURCE", "CONFIDENCE"])
-        writer.writerow([provider_name, canonical_name, "auto_unique", f"{confidence:.3f}"])
+    headers = ["PROVIDER_NAME", "CANONICAL_NAME", "SOURCE", "CONFIDENCE"]
+    _, rows = read_csv_rows(PLAYER_ALIASES_FILE)
+    rows.append({"PROVIDER_NAME": provider_name, "CANONICAL_NAME": canonical_name,
+                 "SOURCE": "auto_unique", "CONFIDENCE": f"{confidence:.3f}"})
+    atomic_write_csv(PLAYER_ALIASES_FILE, headers, rows)
 
 
 def resolve_profile_key(player: str, profiles: dict[str, dict], aliases: dict[str, str]) -> str | None:
@@ -1720,9 +1746,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
             for row in old_rows:
                 row.setdefault("REASON", "legacy")
                 row.setdefault("QUALITY_GRADE", "legacy")
-            with open(AUDIT_FILE, "w", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=headers, extrasaction="ignore")
-                writer.writeheader(); writer.writerows(old_rows)
+            atomic_write_csv(AUDIT_FILE, headers, old_rows)
     validated = {normalize_player_name(item["player"]): item for item in recommendations}
     selected = {normalize_player_name(item["player"]) for item in authorized}
     existing = set()
@@ -1791,12 +1815,9 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
             ])
     if not rows:
         return
-    write_header = not AUDIT_FILE.exists() or not AUDIT_FILE.stat().st_size
-    with open(AUDIT_FILE, "a", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        if write_header:
-            writer.writerow(headers)
-        writer.writerows(rows)
+    _, existing_rows = read_csv_rows(AUDIT_FILE)
+    existing_rows.extend(dict(zip(headers, row)) for row in rows)
+    atomic_write_csv(AUDIT_FILE, headers, existing_rows)
     log(f"Audited {len(rows)} evaluated player(s) to {AUDIT_FILE.name}")
 
 
@@ -1816,9 +1837,7 @@ def update_audit_result(date_str, pick_key, result, closing_odds):
                 row["CLV"] = f"{opening / closing_odds - 1:.6f}" if opening else ""
             changed = True
     if changed:
-        with open(AUDIT_FILE, "w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=headers)
-            writer.writeheader(); writer.writerows(rows)
+        atomic_write_csv(AUDIT_FILE, list(headers or []), rows)
 
 
 def tennis_void_reason(event: dict) -> str | None:
@@ -1910,8 +1929,7 @@ def settle_pending_bets(api_keys: list[str]) -> int:
         update_audit_result(row.get("DATE", ""), pick, row["RESULT"], closing)
     if settled:
         headers = ["DATE", "MATCH", "BET", "ODDS", "STAKE", "RESULT", "RETURN", "STARTING BALANCE"]
-        with open(LOG_FILE, "w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=headers); writer.writeheader(); writer.writerows(rows)
+        atomic_write_csv(LOG_FILE, headers, rows)
         balance = float(BANKROLL_FILE.read_text().strip() or 0) + credited
         atomic_write_text(BANKROLL_FILE, f"{balance:.2f}")
         log(f"Settled {settled} bet(s); credited €{credited:.2f}")
@@ -1930,8 +1948,7 @@ def settle_pending_bets(api_keys: list[str]) -> int:
         won = (home_pick and home_score > away_score) or (not home_pick and away_score > home_score)
         odds = float(row.get("ODDS") or 0); row["RESULT"] = "W" if won else "L"; row["FLAT_RETURN"] = f"{odds - 1 if won else -1:.3f}"; policy_settled += 1
     if policy_settled:
-        with POLICY_FILE.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=POLICY_HEADERS); writer.writeheader(); writer.writerows(policy_rows)
+        atomic_write_csv(POLICY_FILE, POLICY_HEADERS, policy_rows)
         log(f"Settled {policy_settled} counterfactual policy decision(s)")
     return settled
 
@@ -2077,9 +2094,7 @@ def stage_pending_bets(date_str: str, recommendations: list[dict], odds_min: flo
         })
         existing.add(key); staged += 1
     if staged:
-        with PENDING_FILE.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=PENDING_HEADERS, extrasaction="ignore")
-            writer.writeheader(); writer.writerows(rows)
+        atomic_write_csv(PENDING_FILE, PENDING_HEADERS, rows)
     log(f"Staged {staged} candidate(s) for pre-match revalidation")
     return staged
 
@@ -2094,8 +2109,7 @@ def update_audit_lifecycle(date_str: str, pick: str, decision: str, reason: str)
         if row.get("DATE") == date_str and normalize_player_name(row.get("PICK", "")) == normalize_player_name(pick):
             row["DECISION"], row["REASON"] = decision, reason; changed = True
     if changed:
-        with AUDIT_FILE.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=headers); writer.writeheader(); writer.writerows(rows)
+        atomic_write_csv(AUDIT_FILE, list(headers or []), rows)
 
 
 def match_time_state(value: str, now: datetime, window_minutes: int = 90) -> str:
@@ -2117,14 +2131,13 @@ def match_time_state(value: str, now: datetime, window_minutes: int = 90) -> str
 
 def append_price_snapshot(now: datetime, row: dict, match: dict | None, baseline: dict | None):
     path = PENDING_FILE.with_name("price-history.csv")
-    write_header = not path.exists() or not path.stat().st_size
+    headers = ["TIMESTAMP", "DATE", "MATCH", "PICK", "ODDS", "BOOKMAKERS", "DISPERSION", "SOURCE", "EVENT_STATUS"]
+    _, rows = read_csv_rows(path)
     dispersion = player_market_dispersion(match, row.get("PICK", "")) if match else None
-    with path.open("a", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        if write_header: writer.writerow(["TIMESTAMP", "DATE", "MATCH", "PICK", "ODDS", "BOOKMAKERS", "DISPERSION", "SOURCE", "EVENT_STATUS"])
-        writer.writerow([now.isoformat(), row.get("DATE", ""), row.get("MATCH", ""), row.get("PICK", ""),
+    rows.append(dict(zip(headers, [now.isoformat(), row.get("DATE", ""), row.get("MATCH", ""), row.get("PICK", ""),
                          f"{baseline['player_odds']:.3f}" if baseline else "", (match or {}).get("bookmaker_count", 0),
-                         f"{dispersion:.6f}" if dispersion is not None else "", (match or {}).get("odds_source", ""), (match or {}).get("status", "")])
+                         f"{dispersion:.6f}" if dispersion is not None else "", (match or {}).get("odds_source", ""), (match or {}).get("status", "")])))
+    atomic_write_csv(path, headers, rows)
 
 
 POLICY_HEADERS = ["DATE", "MODEL_VERSION", "EVENT_ID", "MATCH", "PLAYER1", "PLAYER2", "PICK", "DECISION", "RULE",
@@ -2142,8 +2155,7 @@ def record_policy_decision(now: datetime, row: dict, match: dict | None, baselin
                  "PICK": row.get("PICK", ""), "DECISION": decision, "RULE": rule,
                  "ODDS": f"{baseline['player_odds']:.3f}" if baseline else "", "PROBABILITY": f"{baseline['assessed_probability']:.6f}" if baseline else "",
                  "EV": f"{baseline['ev']:.6f}" if baseline else "", "TIMESTAMP": now.isoformat(), "RESULT": "", "FLAT_RETURN": ""})
-    with POLICY_FILE.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=POLICY_HEADERS); writer.writeheader(); writer.writerows(rows)
+    atomic_write_csv(POLICY_FILE, POLICY_HEADERS, rows)
 
 
 def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) -> tuple[int, int]:
@@ -2233,9 +2245,7 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
         total_stake += log_bets(date_str, recs, authorized_matches, bankroll - total_stake if bankroll is not None else None)
     if total_stake:
         save_bankroll(bankroll, total_stake)
-    with PENDING_FILE.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=PENDING_HEADERS, extrasaction="ignore")
-        writer.writeheader(); writer.writerows(rows)
+    atomic_write_csv(PENDING_FILE, PENDING_HEADERS, rows)
     recent = [row for row in rows if row.get("REVALIDATED_AT") == now.isoformat()]
     lines = ["# Tennis Bet Lifecycle", "", f"Updated: {now.isoformat()}", "", "| Match | Pick | Status | Reason | Final odds | Final EV |", "|---|---|---|---|---:|---:|"]
     for row in recent:
@@ -2327,17 +2337,14 @@ def log_bets(
         log("No bets to log.")
         return total_stake
 
-    # Write to CSV
-    write_header = not file_exists or LOG_FILE.stat().st_size == 0
-    with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        if write_header:
-            writer.writerow(["DATE", "MATCH", "BET", "ODDS", "STAKE", "RESULT", "RETURN", "STARTING BALANCE"])
-        for row in rows_to_append:
-            writer.writerow([
-                row["date"], row["match"], row["bet"], row["odds"],
-                row["stake"], row["result"], row["return"], row["starting_balance"],
-            ])
+    headers = ["DATE", "MATCH", "BET", "ODDS", "STAKE", "RESULT", "RETURN", "STARTING BALANCE"]
+    _, existing_rows = read_csv_rows(LOG_FILE)
+    existing_rows.extend({
+        "DATE": row["date"], "MATCH": row["match"], "BET": row["bet"], "ODDS": row["odds"],
+        "STAKE": row["stake"], "RESULT": row["result"], "RETURN": row["return"],
+        "STARTING BALANCE": row["starting_balance"],
+    } for row in rows_to_append)
+    atomic_write_csv(LOG_FILE, headers, existing_rows)
 
     log(f"Logged {len(rows_to_append)} bets to {LOG_FILE.name}")
     return total_stake

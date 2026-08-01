@@ -19,6 +19,31 @@ class TennisBotTests(unittest.TestCase):
             self.assertEqual(target.read_text(encoding="utf-8"), "new")
             self.assertEqual(list(Path(directory).glob("*.tmp")), [])
 
+    def test_atomic_csv_write_replaces_complete_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "state.csv"
+            target.write_text("NAME,VALUE\nold,1\n", encoding="utf-8")
+
+            bot.atomic_write_csv(target, ["NAME", "VALUE"], [{"NAME": "new", "VALUE": "2"}])
+
+            headers, rows = bot.read_csv_rows(target)
+            self.assertEqual(headers, ["NAME", "VALUE"])
+            self.assertEqual(rows, [{"NAME": "new", "VALUE": "2"}])
+            self.assertEqual(list(Path(directory).glob("*.tmp")), [])
+
+    def test_atomic_csv_failure_preserves_previous_file_and_cleans_temp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "state.csv"
+            original = "NAME,VALUE\nold,1\n"
+            target.write_text(original, encoding="utf-8")
+
+            with patch.object(bot.os, "replace", side_effect=OSError("simulated interruption")):
+                with self.assertRaises(OSError):
+                    bot.atomic_write_csv(target, ["NAME", "VALUE"], [{"NAME": "new", "VALUE": "2"}])
+
+            self.assertEqual(target.read_text(encoding="utf-8"), original)
+            self.assertEqual(list(Path(directory).glob("*.tmp")), [])
+
     def test_diagnostic_summary_has_no_mutating_actions(self):
         with patch.object(bot, "fetch_matches_from_odds_api", return_value=[]):
             result = bot.run_diagnostic("2026-08-01", 1.5, 1.6, ["key"])
