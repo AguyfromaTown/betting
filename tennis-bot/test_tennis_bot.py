@@ -1958,7 +1958,38 @@ class TennisBotTests(unittest.TestCase):
         self.assertNotEqual(headers, bot.REQUEST_HEADERS)
 
     def test_completion_limit_fits_groq_tpm_budget(self):
-        self.assertLessEqual(bot.MAX_COMPLETION_TOKENS, 2048)
+        self.assertLessEqual(
+            bot.MAX_COMPLETION_TOKENS + bot.GROQ_TPM_SAFETY_RESERVE,
+            bot.GROQ_TPM_LIMIT,
+        )
+
+    def test_prompt_budget_uses_conservative_utf8_estimate(self):
+        self.assertEqual(bot.estimate_prompt_tokens("a" * 7), 3)
+        self.assertGreater(bot.estimate_prompt_tokens("é" * 7), 3)
+
+    @patch.object(bot, "build_prompt")
+    @patch.object(bot, "select_analysis_matches")
+    def test_bounded_prompt_drops_lowest_ranked_matches(self, select, build):
+        matches = [{"id": index} for index in range(20)]
+        select.return_value = list(matches)
+        build.side_effect = lambda _date, selected, _bankroll, _low, _high: (
+            "x" * (1_000 + len(selected) * 2_000)
+        )
+
+        prompt, selected = bot.build_bounded_prompt(
+            "2026-08-02", matches, 53.10, 1.5, 2.5
+        )
+
+        self.assertTrue(bot.prompt_fits_groq_tpm(prompt))
+        self.assertLess(len(selected), len(matches))
+        self.assertEqual(selected, matches[:len(selected)])
+
+    def test_call_ai_rejects_oversized_prompt_before_http_request(self):
+        oversized = "x" * (bot.GROQ_TPM_LIMIT * 3)
+        with patch.object(bot.requests, "post") as post:
+            with self.assertRaisesRegex(ValueError, "safe Groq token budget"):
+                bot.call_ai(oversized, ["secret"])
+        post.assert_not_called()
 
     def test_parser_accepts_named_odds_and_complex_names(self):
         report = """## TOP PICKS
@@ -2486,7 +2517,7 @@ class TennisBotTests(unittest.TestCase):
             "Bearer secret-key",
         )
         self.assertEqual(kwargs["json"]["model"], "llama-3.3-70b-versatile")
-        self.assertEqual(kwargs["json"]["max_tokens"], 2048)
+        self.assertEqual(kwargs["json"]["max_tokens"], bot.MAX_COMPLETION_TOKENS)
 
     @patch.object(bot.requests, "post")
     def test_call_ai_rotates_key_after_rate_limit(self, post):

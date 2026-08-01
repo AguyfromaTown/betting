@@ -81,7 +81,9 @@ DEFAULT_UNRESOLVED_ALERT_HOURS = 48
 TRANSIENT_HTTP_STATUSES = {408, 425, 500, 502, 503, 504}
 CIRCUIT_FAILURE_THRESHOLD = 3
 CIRCUIT_COOLDOWN_SECONDS = 300
-MAX_COMPLETION_TOKENS = 2048
+GROQ_TPM_LIMIT = 12_000
+GROQ_TPM_SAFETY_RESERVE = 1_000
+MAX_COMPLETION_TOKENS = 1_536
 GROQ_MODEL = "llama-3.3-70b-versatile"
 MAX_AI_MATCHES = 20
 MAX_DAILY_EXPOSURE = 0.08
@@ -4172,10 +4174,49 @@ Direct and analytical. Quantify confidence. No marketing language. Aim for 500-8
     return prompt
 
 
+def estimate_prompt_tokens(prompt: str) -> int:
+    """Conservatively estimate Groq input tokens without a tokenizer dependency."""
+    return (len(prompt.encode("utf-8")) + 2) // 3
+
+
+def prompt_fits_groq_tpm(prompt: str) -> bool:
+    """Leave room for the completion and provider-side tokenization variance."""
+    return (
+        estimate_prompt_tokens(prompt)
+        + MAX_COMPLETION_TOKENS
+        + GROQ_TPM_SAFETY_RESERVE
+        <= GROQ_TPM_LIMIT
+    )
+
+
+def build_bounded_prompt(
+    date_str: str,
+    matches: list[dict],
+    bankroll: float | None,
+    odds_min: float,
+    odds_max: float,
+) -> tuple[str, list[dict]]:
+    """Build a prompt that cannot exceed the on-demand Groq TPM allowance.
+
+    Matches arrive in descending analytical value, so removing from the end
+    preserves the strongest deterministic candidates for optional AI review.
+    """
+    selected = select_analysis_matches(matches)
+    while True:
+        prompt = build_prompt(date_str, selected, bankroll, odds_min, odds_max)
+        if prompt_fits_groq_tpm(prompt):
+            return prompt, selected
+        if not selected:
+            raise ValueError("Base analysis prompt exceeds the safe Groq token budget")
+        selected.pop()
+
+
 def call_ai(prompt: str, api_keys: list[str]) -> str:
     """Call Groq, rotating API keys while keeping the model fixed."""
     if not api_keys:
         raise ValueError("No Groq API keys configured")
+    if not prompt_fits_groq_tpm(prompt):
+        raise ValueError("Analysis prompt exceeds the safe Groq token budget")
     provider = "api.groq.com"
     if not allow_provider_request(provider):
         raise RuntimeError("Groq circuit is open")
@@ -6511,12 +6552,18 @@ def main():
     log(f"Found {len(statistical_candidates)} positive-EV Elo/market candidates")
 
     # Stage 2 & 3: AI Analysis
-    analysis_matches = select_analysis_matches(qualified)
+    prompt, analysis_matches = build_bounded_prompt(
+        date_str, qualified, bankroll, odds_min, odds_max
+    )
     log(
         f"Building bounded analysis prompt with {len(analysis_matches)}/"
         f"{len(qualified)} qualifying matches..."
     )
-    prompt = build_prompt(date_str, analysis_matches, bankroll, odds_min, odds_max)
+    log(
+        f"Prompt budget: ~{estimate_prompt_tokens(prompt)} input + "
+        f"{MAX_COMPLETION_TOKENS} output tokens "
+        f"({GROQ_TPM_SAFETY_RESERVE} reserved)"
+    )
 
     groq_api_keys = [
         value for value in (
