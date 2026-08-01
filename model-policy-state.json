@@ -1,0 +1,13 @@
+{
+  "model_mode": "eligible_for_challenger",
+  "policy_mode": "standard",
+  "model_rollback": false,
+  "policy_rollback": false,
+  "model_sample": 0,
+  "active_brier": null,
+  "baseline_brier": null,
+  "policy_sample": 0,
+  "policy_roi": null,
+  "policy_clv": null,
+  "updated_at": "2026-08-01T18:10:51.279634+00:00"
+}
