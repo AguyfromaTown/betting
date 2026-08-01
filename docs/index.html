@@ -395,6 +395,29 @@
       </div>
     </section>
 
+    <section class="card table-card" style="margin-top:12px">
+      <div class="table-toolbar">
+        <div><h2 class="panel-title">API and source health</h2><div class="panel-kicker">Latest workflow run; credentials and unrestricted response headers are never published</div></div>
+        <span class="count" id="health-updated">Health data unavailable</span>
+      </div>
+      <div class="table-scroll">
+        <table id="source-health-table">
+          <thead><tr><th>Source</th><th>Status</th><th>Events</th><th>Success</th><th>Failure</th><th>Average latency</th><th>p95 latency</th><th>Cache</th><th>Stale</th></tr></thead>
+          <tbody id="source-health-body"></tbody>
+        </table>
+      </div>
+      <div class="table-toolbar">
+        <div><h3 class="panel-title">Quota and rate limits</h3><div class="panel-kicker">Keys are identified only by configured position</div></div>
+        <span class="count" id="quota-row-count">0 metered requests</span>
+      </div>
+      <div class="table-scroll">
+        <table id="quota-health-table">
+          <thead><tr><th>Provider</th><th>Key</th><th>Requests</th><th>Latest HTTP status</th><th>Safe quota headers</th></tr></thead>
+          <tbody id="quota-health-body"></tbody>
+        </table>
+      </div>
+    </section>
+
     <footer class="footer"><span>Edgebook performance dashboard</span><span>Synced from betting, prediction and counterfactual ledgers</span></footer>
 
   </main>
@@ -408,11 +431,13 @@
     const PENDING_URL = RAW_ROOT + "pending-bets.csv";
     const POLICY_URL = RAW_ROOT + "counterfactual-log.csv";
     const KILL_SWITCH_URL = RAW_ROOT + "kill-switch.json";
+    const SOURCE_HEALTH_URL = RAW_ROOT + "source-health.json";
     let allRows = [];
     let pendingRows = [];
     let auditRows = [];
     let policyRows = [];
     let killSwitchState = { active: true, valid: false, reason: "safety_state_unavailable" };
+    let sourceHealth = null;
     let currentBankroll = null;
     let performanceText = "";
 
@@ -708,6 +733,37 @@
       el("policy-version").textContent = latestPolicy?.policy_id || "—";
     }
 
+    function renderSourceHealth(payload) {
+      const summaries = Array.isArray(payload?.summary) ? payload.summary : [];
+      el("source-health-body").innerHTML = summaries.map(item => {
+        const failures = Number(item.failures) || 0;
+        const stale = Number(item.stale_responses) || 0;
+        const label = stale ? "Stale" : failures ? "Degraded" : "Healthy";
+        const badge = stale || failures ? "loss" : "win";
+        return `<tr><td>${safe(item.source || "Unknown")}</td><td><span class="badge ${badge}">${label}</span></td><td>${Number(item.events) || 0}</td><td>${Number(item.successes) || 0}</td><td>${failures}</td><td>${Number(item.average_latency_ms || 0).toFixed(1)} ms</td><td>${Number(item.p95_latency_ms || 0).toFixed(1)} ms</td><td>${Number(item.cache_responses) || 0}</td><td>${stale}</td></tr>`;
+      }).join("");
+      el("source-health-table").style.display = summaries.length ? "table" : "none";
+      el("health-updated").textContent = payload?.generated_at
+        ? `Updated ${new Date(payload.generated_at).toLocaleString()}` : "Health data unavailable";
+
+      const quota = Array.isArray(payload?.api_quota) ? payload.api_quota : [];
+      const grouped = new Map();
+      quota.forEach(item => {
+        const key = `${item.provider || "Unknown"}\u0000${item.key || "unknown"}`;
+        const current = grouped.get(key) || { provider: item.provider || "Unknown", key: item.key || "unknown", count: 0, latest: item };
+        current.count += 1; current.latest = item; grouped.set(key, current);
+      });
+      const quotaRows = [...grouped.values()].sort((a, b) => `${a.provider}${a.key}`.localeCompare(`${b.provider}${b.key}`));
+      el("quota-health-body").innerHTML = quotaRows.map(group => {
+        const status = Number(group.latest.status);
+        const badge = status >= 200 && status < 400 ? "win" : "loss";
+        const metrics = Object.entries(group.latest.metrics || {}).sort().map(([name, value]) => `${name}=${value}`).join("; ") || "Not supplied";
+        return `<tr><td>${safe(group.provider)}</td><td>${safe(group.key)}</td><td>${group.count}</td><td><span class="badge ${badge}">${safe(group.latest.status || "unknown")}</span></td><td>${safe(metrics)}</td></tr>`;
+      }).join("");
+      el("quota-health-table").style.display = quotaRows.length ? "table" : "none";
+      el("quota-row-count").textContent = `${quota.length} metered ${quota.length === 1 ? "request" : "requests"}`;
+    }
+
     function refreshAll() {
       const rows = allRows.map(row => ({ ...row }));
       renderStats(rows);
@@ -718,6 +774,7 @@
       renderCounterfactualByRule(policyRows);
       renderPerformanceSegments(auditRows);
       renderRuntimeSafety(auditRows, policyRows);
+      renderSourceHealth(sourceHealth);
       renderPending(pendingRows);
       drawChart(allRows);
       updateStatus(allRows);
@@ -787,7 +844,7 @@
         if (!required[1].ok) throw new Error(`bankroll.txt returned ${required[1].status}`);
         allRows = normalizeRows(await required[0].text());
         currentBankroll = Number.parseFloat((await required[1].text()).trim());
-        const optional = await Promise.all([fetch(AUDIT_URL), fetch(PERFORMANCE_URL), fetch(PENDING_URL), fetch(POLICY_URL), fetch(KILL_SWITCH_URL)]);
+        const optional = await Promise.all([fetch(AUDIT_URL), fetch(PERFORMANCE_URL), fetch(PENDING_URL), fetch(POLICY_URL), fetch(KILL_SWITCH_URL), fetch(SOURCE_HEALTH_URL)]);
         auditRows = optional[0].ok ? parseCSV(await optional[0].text()) : [];
         performanceText = optional[1].ok ? await optional[1].text() : "";
         pendingRows = optional[2].ok ? parseCSV(await optional[2].text()) : [];
@@ -800,6 +857,14 @@
               : { active: true, valid: false, reason: "invalid_kill_switch_configuration" };
           } catch (_) {
             killSwitchState = { active: true, valid: false, reason: "invalid_kill_switch_configuration" };
+          }
+        }
+        if (optional[5].ok) {
+          try {
+            const health = JSON.parse(await optional[5].text());
+            sourceHealth = health && Array.isArray(health.summary) && Array.isArray(health.api_quota) ? health : null;
+          } catch (_) {
+            sourceHealth = null;
           }
         }
         refreshAll();
