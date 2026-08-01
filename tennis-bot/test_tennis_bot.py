@@ -299,17 +299,29 @@ class TennisBotTests(unittest.TestCase):
 
     def test_workload_measures_rest_matches_and_sets(self):
         history = [
-            {"tourney_date": "20260731", "winner_name": "Player One", "loser_name": "Other", "score": "6-4 6-4", "tourney_name": "Event A"},
-            {"tourney_date": "20260729", "winner_name": "Other", "loser_name": "Player One", "score": "6-4 4-6 6-3", "tourney_name": "Event A"},
+            {"tourney_date": "20260731", "winner_name": "Player One", "loser_name": "Other", "score": "6-4 6-4", "tourney_name": "Event A", "minutes": "120", "_source_url": "verified-a.csv"},
+            {"tourney_date": "20260729", "winner_name": "Other", "loser_name": "Player One", "score": "6-4 4-6 6-3", "tourney_name": "Event A", "minutes": "180", "_source_url": "verified-a.csv"},
             {"tourney_date": "20260727", "winner_name": "Player One", "loser_name": "Other", "score": "7-6 6-7 6-4", "tourney_name": "Event B"},
-            {"tourney_date": "20260710", "winner_name": "Player One", "loser_name": "Other", "score": "6-4 6-4", "tourney_name": "Event Old"},
-            {"tourney_date": "20260630", "winner_name": "Player One", "loser_name": "Other", "score": "6-4 6-4", "tourney_name": "Event Too Old"},
+            {"tourney_date": "20260710", "winner_name": "Player One", "loser_name": "Other", "score": "6-4 6-4", "tourney_name": "Event Old", "minutes": "90", "_source_url": "verified-b.csv"},
+            {"tourney_date": "20260630", "winner_name": "Player One", "loser_name": "Other", "score": "6-4 6-4", "tourney_name": "Event Too Old", "minutes": "80"},
         ]
         workload = bot.calculate_workload(history, "Player One", "2026-08-01", "Event C")
         self.assertEqual((workload["rest_days"], workload["matches_7"], workload["sets_7"]), (1, 3, 8))
         self.assertEqual(workload["matches_14"], 3)
         self.assertEqual(workload["matches_30"], 4)
+        self.assertEqual(workload["last_match_minutes"], 120)
+        self.assertEqual((workload["minutes_7"], workload["minutes_14"], workload["minutes_30"]), (300, 300, 390))
+        self.assertEqual(workload["duration_sample_30"], 3)
+        self.assertEqual(workload["duration_source"], "verified-a.csv;verified-b.csv")
         self.assertGreater(workload["penalty"], 0)
+
+    def test_workload_never_estimates_missing_match_duration(self):
+        history = [{"tourney_date": "20260731", "winner_name": "Player", "loser_name": "Other", "score": "6-4 6-4", "minutes": ""}]
+        workload = bot.calculate_workload(history, "Player", "2026-08-01")
+        self.assertIsNone(workload["last_match_minutes"])
+        self.assertIsNone(workload["latest_verified_minutes"])
+        self.assertEqual(workload["minutes_30"], 0)
+        self.assertEqual(workload["duration_sample_30"], 0)
 
     def test_tennis_context_and_match_format(self):
         self.assertEqual(bot.tennis_context_uncertainty({"tournament": "ITF Madrid", "level": "ITF"})[0], .02)
@@ -853,7 +865,9 @@ class TennisBotTests(unittest.TestCase):
             "player1_physical_status": {"status": "cleared", "detail": "Available", "expires_date": "2026-08-02", "source": "official"},
             "player2_physical_status": {"status": "injured", "detail": "Official withdrawal", "expires_date": "2026-08-10", "source": "https://www.wtatennis.com/news"},
             "player1_workload": {"rest_days": 2, "matches_7": 2, "matches_14": 3, "matches_30": 5, "sets_7": 5, "penalty": 0},
-            "player2_workload": {"rest_days": 1, "matches_7": 3, "matches_14": 4, "matches_30": 7, "sets_7": 8, "penalty": 0.015},
+            "player2_workload": {"rest_days": 1, "matches_7": 3, "matches_14": 4, "matches_30": 7, "sets_7": 8,
+                                 "last_match_minutes": 185, "minutes_7": 410, "minutes_14": 610, "minutes_30": 920,
+                                 "duration_sample_30": 6, "duration_source": "verified-history.csv", "penalty": 0.015},
         }
         with tempfile.TemporaryDirectory() as directory:
             audit_file = Path(directory) / "prediction-audit.csv"
@@ -888,6 +902,9 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["PHYSICAL_BLOCK"], "True")
         self.assertEqual(second["REASON"], "verified_physical_status:injured")
         self.assertEqual(second["MATCHES_30"], "7")
+        self.assertEqual(second["LAST_MATCH_MINUTES"], "185")
+        self.assertEqual(second["MINUTES_30"], "920")
+        self.assertEqual(second["DURATION_SOURCE"], "verified-history.csv")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
