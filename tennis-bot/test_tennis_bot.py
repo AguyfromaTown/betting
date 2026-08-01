@@ -846,6 +846,8 @@ class TennisBotTests(unittest.TestCase):
             "player2_best_of_five": {"match_win_rate": 0.40, "match_sample": 8, "set_win_rate": 0.45,
                                      "set_sample": 32, "five_set_win_rate": 0.42, "five_set_sample": 4,
                                      "comeback_0_2_rate": 0.30, "comeback_0_2_sample": 2, "source": "historical_match_records"},
+            "player1_physical_status": {"status": "cleared", "detail": "Available", "expires_date": "2026-08-02", "source": "official"},
+            "player2_physical_status": {"status": "injured", "detail": "Official withdrawal", "expires_date": "2026-08-10", "source": "https://www.wtatennis.com/news"},
         }
         with tempfile.TemporaryDirectory() as directory:
             audit_file = Path(directory) / "prediction-audit.csv"
@@ -876,6 +878,9 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["BO5_MATCH_WIN_RATE"], "0.400000")
         self.assertEqual(second["BO5_FIVE_SET_SAMPLE"], "4")
         self.assertEqual(second["BO5_SOURCE"], "historical_match_records")
+        self.assertEqual(second["PHYSICAL_STATUS"], "injured")
+        self.assertEqual(second["PHYSICAL_BLOCK"], "True")
+        self.assertEqual(second["REASON"], "verified_physical_status:injured")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -945,6 +950,32 @@ class TennisBotTests(unittest.TestCase):
             "winner_hand": "U", "winner_ioc": "Unknown",
         }]
         self.assertIsNone(bot.calculate_player_bio(history, "Test Player", "2026-08-01"))
+
+    def test_verified_player_status_requires_active_official_citation(self):
+        header = "PLAYER,STATUS,EFFECTIVE_DATE,EXPIRES_DATE,SOURCE_URL,VERIFIED_AT,DETAIL\n"
+        rows = (
+            "Active Player,injured,2026-07-30,2026-08-10,https://www.atptour.com/en/news/verified,2026-07-30T12:00:00Z,Official injury report\n"
+            "Expired Player,injured,2026-06-01,2026-06-10,https://www.wtatennis.com/news/verified,2026-06-01T12:00:00Z,Old\n"
+            "Rumor Player,injured,2026-07-30,2026-08-10,https://rumors.example/news,2026-07-30T12:00:00Z,Unverified\n"
+            "Future Player,injured,2026-07-30,2026-08-10,https://www.itftennis.com/news,2026-08-02T12:00:00Z,Future knowledge\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            status_file = Path(directory) / "verified-player-status.csv"
+            status_file.write_text(header + rows, encoding="utf-8")
+            with patch.object(bot, "PLAYER_STATUS_FILE", status_file):
+                statuses = bot.load_verified_player_status("2026-08-01")
+        self.assertEqual(set(statuses), {bot.normalize_player_name("Active Player")})
+        self.assertEqual(statuses[bot.normalize_player_name("Active Player")]["status"], "injured")
+
+    def test_recent_retirement_flags_only_retiring_player_without_inventing_cause(self):
+        history = [
+            {"tourney_date": "20260720", "winner_name": "Winner", "loser_name": "Retired Player", "score": "6-4 RET", "_source_url": "verified.csv"},
+            {"tourney_date": "20260802", "winner_name": "Winner", "loser_name": "Retired Player", "score": "RET"},
+        ]
+        status = bot.calculate_recent_retirement(history, "Retired Player", "2026-08-01")
+        self.assertEqual(status["status"], "recent_retirement")
+        self.assertIn("cause not verified", status["detail"])
+        self.assertIsNone(bot.calculate_recent_retirement(history, "Winner", "2026-08-01"))
 
     def test_head_to_head_is_leakage_safe_surface_weighted_and_symmetric(self):
         history = [
@@ -1309,6 +1340,21 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(bo5["bo5_match_win_rate"], 0.60)
         self.assertIsNone(bo3["bo5_match_win_rate"])
         self.assertAlmostEqual(bo5["assessed_probability"], bo3["assessed_probability"])
+
+    def test_verified_unavailable_status_blocks_baseline_reliability(self):
+        match = {
+            "player1": "Player", "player2": "Opponent", "home_odds": 2.0, "away_odds": 2.0,
+            "player1_profile": {"elo": 1700}, "player2_profile": {"elo": 1700},
+            "player1_physical_status": {"status": "injured", "source": "https://www.atptour.com/news",
+                                        "detail": "Official withdrawal", "expires_date": "2026-08-10"},
+        }
+        with patch.object(bot, "load_resolved_predictions", return_value=[]):
+            blocked = bot.calculate_tennis_baseline(match, "Player")
+            available = bot.calculate_tennis_baseline(match, "Opponent")
+        self.assertTrue(blocked["physical_block"])
+        self.assertFalse(bot.tennis_baseline_is_reliable(blocked))
+        self.assertFalse(available["physical_block"])
+        self.assertTrue(bot.tennis_baseline_is_reliable(available))
 
     def test_evidence_quality_rewards_surface_profiles_and_bookmakers(self):
         match = {

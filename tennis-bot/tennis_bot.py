@@ -21,6 +21,7 @@ import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -43,6 +44,7 @@ EXTERNAL_CACHE_FILE = REPO_ROOT / "external-cache.json"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
 ALIAS_REVIEW_FILE = REPO_ROOT / "player-alias-review.csv"
+PLAYER_STATUS_FILE = REPO_ROOT / "verified-player-status.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
 ROLLBACK_STATE_FILE = REPO_ROOT / "model-policy-state.json"
 BACKUPS_DIR = REPO_ROOT / "state-backups"
@@ -72,6 +74,11 @@ MAX_PRICE_MOVEMENT = 0.10
 MAX_BOOKMAKER_DISPERSION = 0.12
 MAX_BETS_PER_TOURNAMENT = 2
 DEFAULT_TOUR_EXPOSURE_CAPS = {"ATP": .08, "WTA": .08, "Challenger": .05, "ITF": .03, "Unknown": .03}
+OFFICIAL_STATUS_DOMAINS = {
+    "atptour.com", "wtatennis.com", "itftennis.com", "ausopen.com",
+    "rolandgarros.com", "wimbledon.com", "usopen.org",
+}
+BLOCKING_PHYSICAL_STATUSES = {"questionable", "injured", "withdrawn", "unavailable", "suspended"}
 MAX_CACHE_ENTRY_BYTES = 2_000_000
 MAX_CACHE_ENTRIES = 20
 MODEL_VERSION = "tennis-2026.08-quality-v2"
@@ -1628,6 +1635,90 @@ def calculate_player_bio(history: list[dict], player: str, as_of: str) -> dict |
     }
 
 
+def official_status_source(url: str) -> bool:
+    try:
+        host = (urlparse(url).hostname or "").casefold()
+    except ValueError:
+        return False
+    return url.startswith("https://") and any(host == domain or host.endswith("." + domain) for domain in OFFICIAL_STATUS_DOMAINS)
+
+
+def load_verified_player_status(as_of: str) -> dict[str, dict]:
+    """Load active, time-bounded physical statuses cited to official tennis sources."""
+    if not PLAYER_STATUS_FILE.exists() or not PLAYER_STATUS_FILE.stat().st_size:
+        return {}
+    cutoff = datetime.strptime(as_of, "%Y-%m-%d")
+    accepted = {"cleared", "questionable", "injured", "withdrawn", "unavailable", "suspended"}
+    active = {}
+    with PLAYER_STATUS_FILE.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            player_key = normalize_player_name(row.get("PLAYER", ""))
+            status = str(row.get("STATUS") or "").strip().casefold()
+            try:
+                effective = datetime.strptime(str(row.get("EFFECTIVE_DATE") or ""), "%Y-%m-%d")
+                expires = datetime.strptime(str(row.get("EXPIRES_DATE") or ""), "%Y-%m-%d")
+                verified = datetime.fromisoformat(str(row.get("VERIFIED_AT") or "").replace("Z", "+00:00")).replace(tzinfo=None)
+            except (TypeError, ValueError):
+                continue
+            source = str(row.get("SOURCE_URL") or "").strip()
+            if (not player_key or status not in accepted or not official_status_source(source)
+                    or effective > cutoff or expires < cutoff or verified > cutoff + timedelta(days=1)
+                    or expires < effective or (expires - effective).days > 90):
+                continue
+            candidate = {
+                "status": status, "effective_date": effective.strftime("%Y-%m-%d"),
+                "expires_date": expires.strftime("%Y-%m-%d"), "verified_at": verified.isoformat(),
+                "source": source, "detail": str(row.get("DETAIL") or "").strip(), "kind": "official_status",
+            }
+            previous = active.get(player_key)
+            if not previous or candidate["verified_at"] > previous["verified_at"]:
+                active[player_key] = candidate
+    return active
+
+
+def calculate_recent_retirement(history: list[dict], player: str, as_of: str, lookback_days: int = 45) -> dict | None:
+    """Flag an objectively recorded recent retirement without guessing its medical cause."""
+    player_key = normalize_player_name(player)
+    cutoff = datetime.strptime(as_of, "%Y-%m-%d")
+    observations = []
+    for row in history:
+        if normalize_player_name(row.get("loser_name", "")) != player_key or "RET" not in str(row.get("score") or "").upper():
+            continue
+        try:
+            played = datetime.strptime(str(row.get("tourney_date") or ""), "%Y%m%d")
+        except ValueError:
+            continue
+        age = (cutoff - played).days
+        if 0 < age <= lookback_days:
+            observations.append((played, str(row.get("_source_url") or "historical_match_records")))
+    if not observations:
+        return None
+    played, source = max(observations)
+    return {
+        "status": "recent_retirement", "effective_date": played.strftime("%Y-%m-%d"),
+        "expires_date": (played + timedelta(days=lookback_days)).strftime("%Y-%m-%d"),
+        "verified_at": played.strftime("%Y-%m-%d"), "source": source,
+        "detail": "Recorded retirement; medical cause not verified", "kind": "match_record",
+    }
+
+
+def physical_status_for_player(match: dict, side: str, player: str, official: dict[str, dict],
+                               history: list[dict], as_of: str) -> dict:
+    provider_status = str(match.get("status") or "").casefold()
+    if any(token in provider_status for token in ("withdraw", "walkover", "cancel", "suspend")):
+        return {"status": "unavailable", "effective_date": as_of, "expires_date": as_of,
+                "verified_at": as_of, "source": match.get("odds_source") or "fixture_provider",
+                "detail": f"Fixture status: {match.get('status')}", "kind": "fixture_status"}
+    cited = official.get(normalize_player_name(player))
+    if cited:
+        return cited
+    recent = calculate_recent_retirement(history, player, as_of)
+    if recent:
+        return recent
+    return {"status": "unknown", "effective_date": "", "expires_date": "", "verified_at": "",
+            "source": "", "detail": "No active verified physical-status report", "kind": "none"}
+
+
 def calculate_head_to_head(history: list[dict], player1: str, player2: str,
                            surface: str | None, as_of: str) -> dict | None:
     """Calculate a recency/surface-weighted H2H with strong small-sample shrinkage."""
@@ -1982,6 +2073,7 @@ def fetch_recent_match_history(matches: list[dict], date_str: str) -> list[dict]
 
 def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
     history = fetch_recent_match_history(matches, date_str)
+    official_statuses = load_verified_player_status(date_str)
     for match in matches:
         match["head_to_head"] = calculate_head_to_head(
             history, match["player1"], match["player2"], match.get("surface"), date_str
@@ -2001,6 +2093,9 @@ def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
             bio = calculate_player_bio(history, match[side], date_str)
             match[f"{side}_ranking_history"] = ranking_history
             match[f"{side}_bio"] = bio
+            match[f"{side}_physical_status"] = physical_status_for_player(
+                match, side, match[side], official_statuses, history, date_str
+            )
             if match.get(f"{side}_profile") is not None:
                 match[f"{side}_profile"]["ranking_history"] = ranking_history
                 match[f"{side}_profile"]["handedness"] = (bio or {}).get("handedness")
@@ -2200,6 +2295,7 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         serve_return = calculate_serve_return_matchup(player_serve_profile, match.get("player2_serve_return"))
         clutch = match.get("player1_clutch") or {}
         best_of_five_profile = match.get("player1_best_of_five") or {}
+        physical_status = match.get("player1_physical_status") or {"status": "unknown"}
         workload = match.get("player1_workload") or {}
         h2h_probability = (match.get("head_to_head") or {}).get("player1_probability")
     elif player_key == normalize_player_name(match["player2"]):
@@ -2211,11 +2307,13 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         serve_return = calculate_serve_return_matchup(player_serve_profile, match.get("player1_serve_return"))
         clutch = match.get("player2_clutch") or {}
         best_of_five_profile = match.get("player2_best_of_five") or {}
+        physical_status = match.get("player2_physical_status") or {"status": "unknown"}
         workload = match.get("player2_workload") or {}
         h2h_probability = (match.get("head_to_head") or {}).get("player2_probability")
     else:
         return None
     active_best_of_five = best_of_five_profile if match_best_of == 5 else {}
+    physical_block = str(physical_status.get("status") or "unknown").casefold() in BLOCKING_PHYSICAL_STATUSES
 
     consensus_home = match.get("consensus_home_odds") or home_odds
     consensus_away = match.get("consensus_away_odds") or away_odds
@@ -2307,6 +2405,11 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "bo5_comeback_0_2_rate": active_best_of_five.get("comeback_0_2_rate"),
         "bo5_comeback_0_2_sample": active_best_of_five.get("comeback_0_2_sample", 0),
         "bo5_source": active_best_of_five.get("source", ""),
+        "physical_status": physical_status.get("status", "unknown"),
+        "physical_status_detail": physical_status.get("detail", ""),
+        "physical_status_source": physical_status.get("source", ""),
+        "physical_status_expires": physical_status.get("expires_date", ""),
+        "physical_block": physical_block,
         "component_weights": component_weights,
         "raw_probability": raw_probability,
         "challenger_probability": challenger_probability,
@@ -2343,6 +2446,7 @@ def tennis_baseline_is_reliable(baseline: dict | None) -> bool:
         and baseline["elo_market_gap"] <= MAX_ELO_MARKET_GAP
         and not baseline.get("segment_suspended")
         and not baseline.get("kill_switch")
+        and not baseline.get("physical_block")
     )
 
 
@@ -2451,10 +2555,13 @@ def build_prompt(
                 if baseline.get("bo5_match_sample"):
                     bo5_parts.append(f"same-surface matches n={baseline['bo5_same_surface_sample']}")
                 bo5_text = ", ".join(bo5_parts) if bo5_parts else "not applicable/unavailable"
+                physical_text = baseline.get("physical_status") or "unknown"
+                if baseline.get("physical_status_detail"):
+                    physical_text += f" ({baseline['physical_status_detail']})"
                 baseline_lines.append(
                     f"  Python baseline for {player}: market fair "
                     f"{baseline['market_probability']:.1%}, Elo "
-                    f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, serve/return {serve_text}, H2H {h2h_text}, clutch {clutch_text}, BO5 {bo5_text}, "
+                    f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, serve/return {serve_text}, H2H {h2h_text}, clutch {clutch_text}, BO5 {bo5_text}, physical status {physical_text}, "
                     f"blended assessed "
                     f"{baseline['assessed_probability']:.1%}, EV "
                     f"{baseline['ev']:.2%}, score {baseline['score']:.2f}"
@@ -2808,10 +2915,10 @@ def validate_recommendations(
 
         baseline = calculate_tennis_baseline(match_info, verified_player)
         if not tennis_baseline_is_reliable(baseline):
-            log(
-                f"  Rejected {verified_player}: missing Elo, excessive market "
-                "margin, or large Elo/market disagreement"
-            )
+            if baseline and baseline.get("physical_block"):
+                log(f"  Rejected {verified_player}: verified physical status is {baseline['physical_status']}")
+            else:
+                log(f"  Rejected {verified_player}: missing Elo, excessive market margin, or large Elo/market disagreement")
             continue
         if abs(probability - baseline["assessed_probability"]) > 0.005:
             log(
@@ -2992,6 +3099,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "OPPONENT_RANK_AS_OF", "OPPONENT_RANK_DATE", "OPPONENT_RANK_90D", "OPPONENT_RANK_IMPROVEMENT_90D", "OPPONENT_RANK_SAMPLES_365",
         "PICK_HANDEDNESS", "PICK_NATIONALITY", "PICK_BIO_DATE", "PICK_BIO_SOURCE",
         "OPPONENT_HANDEDNESS", "OPPONENT_NATIONALITY", "OPPONENT_BIO_DATE", "OPPONENT_BIO_SOURCE",
+        "PHYSICAL_STATUS", "PHYSICAL_STATUS_DETAIL", "PHYSICAL_STATUS_EXPIRES", "PHYSICAL_STATUS_SOURCE", "PHYSICAL_BLOCK",
         "OPENING_ODDS",
         "MARKET_PROBABILITY", "ELO_PROBABILITY", "MODEL_PROBABILITY",
         "FORM_PROBABILITY", "FORM_SAMPLE", "H2H_PROBABILITY", "H2H_SAMPLE", "H2H_SURFACE_SAMPLE", "H2H_WEIGHT", "H2H_SOURCE", "SERVE_RETURN_PROBABILITY",
@@ -3051,6 +3159,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 reason = "portfolio_limit"
             elif item:
                 reason = "below_staking_threshold"
+            elif baseline.get("physical_block"):
+                reason = f"verified_physical_status:{baseline.get('physical_status', 'unavailable')}"
             elif not tennis_baseline_is_reliable(baseline):
                 reason = "missing_elo_or_market_disagreement"
             elif baseline["ev"] <= 0:
@@ -3076,6 +3186,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 pick_bio.get("handedness_date") or pick_bio.get("nationality_date") or "", pick_bio.get("source", ""),
                 opponent_bio.get("handedness", ""), opponent_bio.get("nationality", ""),
                 opponent_bio.get("handedness_date") or opponent_bio.get("nationality_date") or "", opponent_bio.get("source", ""),
+                baseline.get("physical_status", "unknown"), baseline.get("physical_status_detail", ""),
+                baseline.get("physical_status_expires", ""), baseline.get("physical_status_source", ""), baseline.get("physical_block", False),
                 f"{baseline['player_odds']:.3f}",
                 f"{baseline['market_probability']:.6f}",
                 f"{baseline['elo_probability']:.6f}",
@@ -3660,6 +3772,8 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
                 reason = "surface_changed"
             elif not float(row["ODDS_MIN"]) <= baseline["player_odds"] <= float(row["ODDS_MAX"]):
                 reason = "price_outside_range"
+            elif baseline.get("physical_block"):
+                reason = f"verified_physical_status:{baseline.get('physical_status', 'unavailable')}"
             elif not tennis_baseline_is_reliable(baseline):
                 reason = "model_disagreement"
             elif baseline.get("risk_adjusted_ev", baseline["ev"]) <= 0.05:

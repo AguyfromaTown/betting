@@ -49,7 +49,7 @@ Status conventions:
 - [x] Calculate expected hold from service-point performance.
 - [x] Add break-rate, tiebreak and deciding-set features.
 - [x] Add dedicated best-of-five historical features.
-- [ ] Add verified injury and physical-status data.
+- [x] Add verified injury and physical-status data.
 - [x] Prevent AI narrative from overriding verified Python calculations.
 
 ## Workload and fatigue
