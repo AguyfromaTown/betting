@@ -64,6 +64,11 @@ RUN_STATE_FILE = REPO_ROOT / "run-state.json"
 ROLLBACK_STATE_FILE = REPO_ROOT / "model-policy-state.json"
 BACKUPS_DIR = REPO_ROOT / "state-backups"
 TRANSACTION_HEADERS = ["ID", "TIMESTAMP", "TYPE", "REFERENCE", "AMOUNT", "BALANCE", "PREVIOUS_HASH", "HASH"]
+BET_HEADERS = [
+    "DATE", "MATCH", "BET", "ODDS", "BOOKMAKER", "STAKE", "RESULT", "RETURN", "STARTING BALANCE",
+    "SETTLEMENT_RULE", "MODEL_VERSION", "MODEL_PROBABILITY", "EV", "GRADE", "EVENT_ID", "TOUR", "SURFACE",
+    "AUTHORIZED_AT", "CLOSING_ODDS", "CLV", "BRIER_SCORE",
+]
 REPORTS_DIR = REPO_ROOT / "reports"
 REQUEST_TIMEOUT = 30
 MAX_TRANSIENT_RETRIES = 2
@@ -611,7 +616,8 @@ def backup_state_for_migration(path: Path, old_headers: list[str], new_headers: 
     content = path.read_bytes()
     digest = hashlib.sha256(content).hexdigest()[:12]
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    backup_dir = BACKUPS_DIR / path.stem
+    backup_root = BACKUPS_DIR if path.is_relative_to(REPO_ROOT) else path.parent / "state-backups"
+    backup_dir = backup_root / path.stem
     backup_path = backup_dir / f"{path.name}.{timestamp}.{digest}.bak"
     atomic_write_bytes(backup_path, content)
     metadata = {
@@ -625,6 +631,14 @@ def backup_state_for_migration(path: Path, old_headers: list[str], new_headers: 
     atomic_write_text(backup_path.with_suffix(backup_path.suffix + ".json"), json.dumps(metadata, indent=2) + "\n")
     log(f"Backed up {path.name} before schema migration: {backup_path.relative_to(REPO_ROOT) if path.is_relative_to(REPO_ROOT) else backup_path}")
     return backup_path
+
+
+def write_bet_log(path: Path, rows: list[dict]):
+    """Persist the versioned bet schema, backing up any older non-empty schema first."""
+    old_headers, _ = read_csv_rows(path)
+    if old_headers and old_headers != BET_HEADERS:
+        backup_state_for_migration(path, old_headers, BET_HEADERS)
+    atomic_write_csv(path, BET_HEADERS, rows)
 
 
 def save_source_health():
@@ -1048,6 +1062,7 @@ def parse_args():
     parser.add_argument("--state-audit", action="store_true", help="Read-only financial ledger and bankroll integrity audit")
     parser.add_argument("--migrate-legacy-ledger", action="store_true", help="One-time guarded migration of exact historical bankroll transactions")
     parser.add_argument("--counterfactual-audit", action="store_true", help="Read-only active rejection-rule evidence coverage audit")
+    parser.add_argument("--paper-readiness", action="store_true", help="Read-only frozen-policy paper evidence audit")
     return parser.parse_args()
 
 
@@ -4716,19 +4731,26 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
         stake, odds = float(row.get("STAKE") or 0), float(row.get("ODDS") or 0)
         returned = stake * odds if won else 0.0
         row["RESULT"], row["RETURN"] = ("W" if won else "L"), f"{returned:.2f}"
+        if closing:
+            row["CLOSING_ODDS"] = f"{closing:.3f}"
+            row["CLV"] = f"{odds / closing - 1:.6f}"
+        try:
+            probability = float(row.get("MODEL_PROBABILITY") or "")
+            if 0 <= probability <= 1:
+                row["BRIER_SCORE"] = f"{(probability - (1.0 if won else 0.0)) ** 2:.6f}"
+        except (TypeError, ValueError):
+            pass
         if not is_paper: credited += returned
         if is_paper: paper_settled += 1
         else: settled += 1
         update_audit_result(row.get("DATE", ""), pick, row["RESULT"], closing)
     if settled:
-        headers = ["DATE", "MATCH", "BET", "ODDS", "BOOKMAKER", "STAKE", "RESULT", "RETURN", "STARTING BALANCE", "SETTLEMENT_RULE"]
-        atomic_write_csv(LOG_FILE, headers, rows)
+        write_bet_log(LOG_FILE, rows)
         balance = reconcile_bankroll()
         log(f"Settled {settled} bet(s); credited €{credited:.2f}")
         log(f"Bankroll reconciled to ledger: €{balance:.2f}")
     if paper_settled:
-        headers = ["DATE", "MATCH", "BET", "ODDS", "BOOKMAKER", "STAKE", "RESULT", "RETURN", "STARTING BALANCE", "SETTLEMENT_RULE"]
-        atomic_write_csv(PAPER_LOG_FILE, headers, paper_rows)
+        write_bet_log(PAPER_LOG_FILE, paper_rows)
         log(f"Settled {paper_settled} paper bet(s); real bankroll unchanged")
     policy_settled = 0
     for row in policy_rows:
@@ -5478,6 +5500,64 @@ def counterfactual_coverage_audit(rows: list[dict] | None = None) -> dict:
     }
 
 
+def paper_readiness_audit(rows: list[dict] | None = None) -> dict:
+    """Evaluate frozen-policy duration, CLV, and calibration evidence from paper bets."""
+    if rows is None:
+        _, rows = read_csv_rows(PAPER_LOG_FILE)
+    supported_tours = ("ATP", "WTA", "Challenger", "ITF")
+    supported_surfaces = ("Hard", "Clay", "Grass")
+    versioned = [row for row in rows if row.get("MODEL_VERSION")]
+    current = [row for row in versioned if row.get("MODEL_VERSION") == MODEL_VERSION]
+    settled = [row for row in current if row.get("RESULT") in {"W", "L"}]
+    dates = []
+    for row in current:
+        try:
+            dates.append(datetime.strptime(row.get("DATE", ""), "%Y-%m-%d").date())
+        except ValueError:
+            pass
+    span_days = (max(dates) - min(dates)).days + 1 if dates else 0
+    versions = sorted({row.get("MODEL_VERSION") for row in versioned})
+    frozen_policy = bool(current and len(versions) == 1 and not any(not row.get("MODEL_VERSION") for row in rows))
+    clv_values = []
+    for row in settled:
+        try:
+            if row.get("CLV") not in {None, ""}:
+                clv_values.append(float(row["CLV"]))
+        except (TypeError, ValueError):
+            pass
+    average_clv = sum(clv_values) / len(clv_values) if clv_values else None
+
+    def segment(kind: str, value: str) -> dict:
+        group = [row for row in settled if str(row.get(kind) or "").casefold() == value.casefold()]
+        metrics = probability_metrics(group)
+        ready = (
+            metrics["sample"] >= MIN_SEGMENT_SAMPLE and metrics["brier"] is not None
+            and metrics["brier"] <= .25 and metrics["ece"] is not None and metrics["ece"] <= .10
+        )
+        return {"segment": value, "sample": metrics["sample"], "brier": metrics["brier"],
+                "log_loss": metrics["log_loss"], "ece": metrics["ece"],
+                "status": "acceptable" if ready else "collecting_or_unacceptable"}
+
+    tour_calibration = [segment("TOUR", value) for value in supported_tours]
+    surface_calibration = [segment("SURFACE", value) for value in supported_surfaces]
+    duration_ready = frozen_policy and span_days >= 90
+    clv_ready = len(clv_values) >= MIN_CALIBRATION_SAMPLE and average_clv is not None and average_clv > 0
+    calibration_ready = all(item["status"] == "acceptable" for item in tour_calibration + surface_calibration)
+    return {
+        "status": "review_ready" if duration_ready and clv_ready and calibration_ready else "collecting_data",
+        "model_version": MODEL_VERSION, "recorded_versions": versions,
+        "paper_rows": len(rows), "versioned_current_rows": len(current), "settled_rows": len(settled),
+        "unversioned_rows": sum(not row.get("MODEL_VERSION") for row in rows),
+        "span_days": span_days, "minimum_span_days": 90, "frozen_policy": frozen_policy,
+        "duration_ready": duration_ready, "clv_sample": len(clv_values),
+        "minimum_clv_sample": MIN_CALIBRATION_SAMPLE, "average_clv": average_clv,
+        "positive_clv_ready": clv_ready, "segment_minimum": MIN_SEGMENT_SAMPLE,
+        "maximum_segment_brier": .25, "maximum_segment_ece": .10,
+        "calibration_ready": calibration_ready,
+        "tour_calibration": tour_calibration, "surface_calibration": surface_calibration,
+    }
+
+
 def record_policy_decision(now: datetime, row: dict, match: dict | None, baseline: dict | None, decision: str, rule: str,
                            policy_id: str = "active-v1", policy_role: str = "active", thresholds: str = ""):
     rows = []
@@ -5777,6 +5857,12 @@ def log_bets(
             "result": "",
             "return": "",
             "starting_balance": balance_str,
+            "model_version": MODEL_VERSION,
+            "model_probability": f"{float(rec['assessed_probability']):.6f}",
+            "ev": f"{float(rec.get('ev') or (float(rec['assessed_probability']) * float(rec['odds']) - 1)):.6f}",
+            "grade": rec["grade"], "event_id": match_info.get("event_id", ""),
+            "tour": canonical_tour(match_info.get("level")), "surface": match_info.get("surface") or "",
+            "authorized_at": datetime.now(timezone.utc).isoformat(),
         })
         existing_bets.add(bet_key)
 
@@ -5787,14 +5873,17 @@ def log_bets(
         log("No bets to log.")
         return total_stake
 
-    headers = ["DATE", "MATCH", "BET", "ODDS", "BOOKMAKER", "STAKE", "RESULT", "RETURN", "STARTING BALANCE", "SETTLEMENT_RULE"]
     _, existing_rows = read_csv_rows(target_log)
     existing_rows.extend({
         "DATE": row["date"], "MATCH": row["match"], "BET": row["bet"], "ODDS": row["odds"], "BOOKMAKER": row["bookmaker"],
         "STAKE": row["stake"], "RESULT": row["result"], "RETURN": row["return"],
         "STARTING BALANCE": row["starting_balance"], "SETTLEMENT_RULE": "",
+        "MODEL_VERSION": row["model_version"], "MODEL_PROBABILITY": row["model_probability"],
+        "EV": row["ev"], "GRADE": row["grade"], "EVENT_ID": row["event_id"],
+        "TOUR": row["tour"], "SURFACE": row["surface"], "AUTHORIZED_AT": row["authorized_at"],
+        "CLOSING_ODDS": "", "CLV": "", "BRIER_SCORE": "",
     } for row in rows_to_append)
-    atomic_write_csv(target_log, headers, existing_rows)
+    write_bet_log(target_log, existing_rows)
 
     log(f"Logged {len(rows_to_append)} {'paper ' if paper_trading else ''}bets to {target_log.name}")
     return total_stake
@@ -5978,6 +6067,12 @@ def main():
         return
     if args.counterfactual_audit:
         result = counterfactual_coverage_audit()
+        print(json.dumps(result, indent=2))
+        if result["status"] != "review_ready":
+            raise SystemExit(2)
+        return
+    if args.paper_readiness:
+        result = paper_readiness_audit()
         print(json.dumps(result, indent=2))
         if result["status"] != "review_ready":
             raise SystemExit(2)

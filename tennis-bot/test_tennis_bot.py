@@ -4,6 +4,7 @@ import re
 import tempfile
 import unittest
 from contextlib import ExitStack
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -2708,6 +2709,28 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(complete["review_ready_rules"], len(bot.ACTIVE_REJECTION_RULES))
         self.assertTrue(complete["tunable_thresholds_ready"])
         self.assertEqual(complete["unknown_recorded_rules"], [])
+
+    def test_paper_readiness_requires_frozen_duration_clv_and_segment_calibration(self):
+        empty = bot.paper_readiness_audit([])
+        self.assertEqual(empty["status"], "collecting_data")
+        tours = ("ATP", "WTA", "Challenger", "ITF")
+        surfaces = ("Hard", "Clay", "Grass")
+        rows = []
+        start = datetime(2026, 1, 1)
+        for index in range(120):
+            won = index % 2 == 0
+            rows.append({
+                "DATE": (start + timedelta(days=index)).strftime("%Y-%m-%d"),
+                "MODEL_VERSION": bot.MODEL_VERSION, "RESULT": "W" if won else "L",
+                "MODEL_PROBABILITY": ".95" if won else ".05", "CLV": ".01", "BRIER_SCORE": ".0025",
+                "TOUR": tours[index % len(tours)], "SURFACE": surfaces[index % len(surfaces)],
+            })
+        ready = bot.paper_readiness_audit(rows)
+        self.assertEqual(ready["status"], "review_ready")
+        self.assertTrue(ready["duration_ready"])
+        self.assertTrue(ready["positive_clv_ready"])
+        self.assertTrue(ready["calibration_ready"])
+        self.assertEqual(ready["span_days"], 120)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,8 @@ The format follows Keep a Changelog categories: Added, Changed, Deprecated, Remo
 - Added a read-only financial state auditor for hash integrity, running balances, exact bet transaction coverage, orphan detection, and bankroll projection agreement.
 - Added a guarded one-time legacy-ledger migration with input/output hashes, atomic output, self-audit, and a recovery manifest.
 - Added a read-only completeness audit covering all active rejection rules and their settled, CLV, and Brier sample maturity.
+- Versioned paper-bet evidence now retains decision probability, EV, grade, event, tour, surface, authorization time, closing odds, CLV, and Brier score with pre-schema-migration backups.
+- Added a read-only paper-readiness audit for frozen-policy duration, meaningful positive CLV, and calibration across every supported tour and surface.
 
 ### Fixed
 

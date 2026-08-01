@@ -248,8 +248,11 @@ Status conventions:
 ## Production validation
 
 - [ ] Complete several months of paper trading under the frozen policy.
+  - [x] Persist model version and decision-time evidence in every new paper row and audit a minimum 90-day single-version span.
 - [ ] Demonstrate positive closing-line value over a meaningful sample.
+  - [x] Persist paper closing odds/CLV and audit at least 100 observations with positive mean CLV.
 - [ ] Confirm calibration across supported tours and surfaces.
+  - [x] Persist paper probability/tour/surface evidence and audit minimum sample, Brier, and ECE gates per supported segment.
 - [x] Reconcile every bankroll transaction.
   - [x] Add a strict read-only audit that identifies missing, legacy, duplicate, orphaned, amount-mismatched and balance-mismatched transactions.
 - [ ] Review counterfactual performance for every active rejection rule.

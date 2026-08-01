@@ -47,6 +47,11 @@ jobs:
         continue-on-error: true
         run: python tennis-bot/tennis_bot.py --counterfactual-audit > counterfactual-coverage-audit.json
 
+      - name: Audit paper-trading readiness without mutation
+        id: paper-readiness
+        continue-on-error: true
+        run: python tennis-bot/tennis_bot.py --paper-readiness > paper-readiness-audit.json
+
       - name: Publish weekly maintenance summary
         if: always()
         run: |
@@ -71,6 +76,14 @@ jobs:
             cat counterfactual-coverage-audit.json >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
+          if [ "${{ steps.paper-readiness.outcome }}" != "success" ]; then
+            echo "::warning::Frozen-policy paper duration, CLV, or segmented calibration evidence is incomplete"
+          fi
+          if [ -f paper-readiness-audit.json ]; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat paper-readiness-audit.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [ -f maintenance-coverage.txt ]; then
             echo '```text' >> "$GITHUB_STEP_SUMMARY"
             cat maintenance-coverage.txt >> "$GITHUB_STEP_SUMMARY"
@@ -92,6 +105,7 @@ jobs:
             maintenance-coverage.txt
             financial-state-audit.json
             counterfactual-coverage-audit.json
+            paper-readiness-audit.json
             performance-summary.md
             weekly-policy-health.md
             monthly-policy-report.md

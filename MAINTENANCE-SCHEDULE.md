@@ -45,6 +45,8 @@ Weekly artifacts are evidence, not authorization to change thresholds. Any propo
 
 The workflow also runs `--counterfactual-audit`. Every active cancellation rule remains `collecting_data` until it has at least 30 settled outcomes, 30 closing-price observations, and 30 Brier observations. The audit separately identifies the tunable bookmaker-dispersion, data-quality, price-movement, and uncertainty-adjusted-EV thresholds. Hard safety rules are never relaxed automatically even after their performance sample matures.
 
+`--paper-readiness` verifies that paper evidence is attributable to one immutable current `MODEL_VERSION` for at least 90 calendar days, includes at least 100 settled closing-line observations with positive mean CLV, and has at least 30 probability outcomes in every supported ATP/WTA/Challenger/ITF and hard/clay/grass segment. Segment readiness requires Brier score at most 0.25 and expected calibration error at most 0.10. These are minimum review gates, not proof of future profitability.
+
 ## Monthly provider review — first day 08:00 UTC
 
 The monthly job packages the committed provider contract and health inputs without making external calls. The reviewer then evaluates each production source:
