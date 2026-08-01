@@ -2442,6 +2442,25 @@ class TennisBotTests(unittest.TestCase):
             self.assertIn(required, providers)
         self.assertIn("not called by the production `fetch_verified_matches` path", providers)
 
+    def test_model_reference_documents_formulas_weights_and_safety_rules(self):
+        reference = MODULE_PATH.parent.parent.joinpath("MODEL-REFERENCE.md").read_text(encoding="utf-8")
+        for required in (
+            "De-vigged market probability",
+            "P(Elo win)",
+            "Recent-form model",
+            "Serve and return model",
+            "Static component weights",
+            "Head-to-head adjustment",
+            "Calibration, uncertainty, and EV",
+            "Risk-adjusted EV",
+            "Full Kelly",
+            "Learned challengers",
+            "Drift, suspension, and rollback",
+            "Brier score",
+            "tennis-2026.08-bookmaker-retirement-rules-v1",
+        ):
+            self.assertIn(required, reference)
+
 
 if __name__ == "__main__":
     unittest.main()
