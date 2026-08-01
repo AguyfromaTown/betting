@@ -97,6 +97,8 @@ If bankroll values appear wrong:
 
 Manual bankroll changes must use the supported `--bankroll` override, which records a `manual_adjustment` transaction. Never change only `bankroll.txt`.
 
+For a repository that predates the transaction ledger, `--migrate-legacy-ledger` is a one-time guarded migration. It refuses an existing ledger, invalid or duplicate bets, unexplained starting balances, returns on unresolved bets, or any opening/closing mismatch. A successful migration writes an input/output-hashed manifest under `state-backups/bankroll-transactions/` and must pass `--state-audit`. Never rerun it by deleting an existing ledger.
+
 ## State corruption and schema recovery
 
 All normal state writes use a temporary file and atomic replacement, so an interrupted write should preserve the previous complete destination. Before a CSV schema migration, the bot writes an exact timestamped `.bak` plus JSON metadata under `state-backups/<file-stem>/` containing the source name, SHA-256, and old/new headers.

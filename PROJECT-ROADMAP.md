@@ -250,7 +250,7 @@ Status conventions:
 - [ ] Complete several months of paper trading under the frozen policy.
 - [ ] Demonstrate positive closing-line value over a meaningful sample.
 - [ ] Confirm calibration across supported tours and surfaces.
-- [ ] Reconcile every bankroll transaction.
+- [x] Reconcile every bankroll transaction.
   - [x] Add a strict read-only audit that identifies missing, legacy, duplicate, orphaned, amount-mismatched and balance-mismatched transactions.
 - [ ] Review counterfactual performance for every active rejection rule.
 - [ ] Disable persistently unreliable tours, segments or sources.
@@ -263,7 +263,7 @@ Status conventions:
 The project can be treated as production-complete when:
 
 - [ ] All financially consequential paths are tested and recoverable.
-- [ ] Bankroll transactions reconcile exactly.
+- [x] Bankroll transactions reconcile exactly.
 - [ ] Provider failures cannot be mistaken for valid analysis.
 - [ ] Model and policy changes are reproducible, versioned and evaluated out of sample.
 - [ ] Counterfactual evidence supports every active rejection threshold.

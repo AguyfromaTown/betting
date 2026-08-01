@@ -1343,6 +1343,44 @@ class TennisBotTests(unittest.TestCase):
             self.assertFalse(broken["exactly_reconciled"])
             self.assertIn("bankroll_projection_mismatch", {item["code"] for item in broken["issues"]})
 
+    def test_legacy_ledger_migration_is_exact_guarded_and_auditable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log_path = root / "bets-log.csv"
+            bankroll_path = root / "bankroll.txt"
+            transaction_path = root / "bankroll-transactions.csv"
+            backups = root / "state-backups"
+            log_path.write_text(
+                "DATE,MATCH,BET,ODDS,STAKE,RESULT,RETURN,STARTING BALANCE\n"
+                "2026-07-29,A vs B,A,2.00,1.80,,,60.00\n"
+                "2026-07-29,C vs D,C,2.00,1.20,,,60.00\n"
+                "2026-07-30,E vs F,E,2.00,1.14,W,2.28,57.00\n",
+                encoding="utf-8",
+            )
+            bankroll_path.write_text("58.14", encoding="utf-8")
+            with (
+                patch.object(bot, "REPO_ROOT", root),
+                patch.object(bot, "LOG_FILE", log_path),
+                patch.object(bot, "BANKROLL_FILE", bankroll_path),
+                patch.object(bot, "TRANSACTION_FILE", transaction_path),
+                patch.object(bot, "BACKUPS_DIR", backups),
+            ):
+                result = bot.migrate_legacy_financial_ledger()
+                _, transactions = bot.read_csv_rows(transaction_path)
+                manifest = root / result["manifest"]
+                with self.assertRaisesRegex(RuntimeError, "already exists"):
+                    bot.migrate_legacy_financial_ledger()
+
+            self.assertTrue(result["exactly_reconciled"])
+            self.assertEqual(result["exact_stakes"], 3)
+            self.assertEqual(result["exact_returns"], 1)
+            self.assertEqual([row["TYPE"] for row in transactions], ["opening_balance", "stake", "stake", "stake", "return"])
+            self.assertTrue(manifest.exists())
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            self.assertEqual(payload["opening_balance"], "60.00")
+            self.assertEqual(payload["closing_balance"], "58.14")
+            self.assertTrue(payload["audit"]["exactly_reconciled"])
+
     def test_log_bets_deduplicates_same_player_and_date(self):
         recommendation = {
             "player": "Darderi, Luciano",

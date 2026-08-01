@@ -23,6 +23,7 @@ import time
 import unicodedata
 import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
@@ -1045,6 +1046,7 @@ def parse_args():
     parser.add_argument("--diagnostic", action="store_true", help="Collect and validate data without writing files, calling AI, staking, or settling")
     parser.add_argument("--paper-trading", action="store_true", help="Simulate authorized bets without changing the real bankroll")
     parser.add_argument("--state-audit", action="store_true", help="Read-only financial ledger and bankroll integrity audit")
+    parser.add_argument("--migrate-legacy-ledger", action="store_true", help="One-time guarded migration of exact historical bankroll transactions")
     return parser.parse_args()
 
 
@@ -1244,6 +1246,118 @@ def audit_financial_state() -> dict:
         "ending_ledger_balance": previous_balance, "bankroll_balance": bankroll_balance,
         "issues": issues,
     }
+
+
+def migrate_legacy_financial_ledger() -> dict:
+    """Create an exact initial ledger only when legacy bet and bankroll evidence reconciles."""
+    _, existing = read_csv_rows(TRANSACTION_FILE)
+    if existing or TRANSACTION_FILE.exists():
+        raise RuntimeError("Refusing migration: bankroll transaction ledger already exists")
+    _, bets = read_csv_rows(LOG_FILE)
+    if not bets:
+        raise RuntimeError("Refusing migration: no historical bets are available")
+    if not BANKROLL_FILE.exists():
+        raise RuntimeError("Refusing migration: bankroll projection is missing")
+
+    def cents(value, field: str) -> int:
+        try:
+            amount = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except (InvalidOperation, TypeError, ValueError):
+            raise RuntimeError(f"Refusing migration: invalid {field}") from None
+        if not amount.is_finite():
+            raise RuntimeError(f"Refusing migration: non-finite {field}")
+        return int(amount * 100)
+
+    current_cents = cents(BANKROLL_FILE.read_text(encoding="utf-8").strip(), "bankroll")
+    parsed = []
+    seen_references = set()
+    total_stakes = total_returns = 0
+    for index, bet in enumerate(bets, 1):
+        reference = bankroll_reference(bet)
+        if not reference or reference in seen_references:
+            raise RuntimeError(f"Refusing migration: duplicate or empty bet reference at row {index}")
+        seen_references.add(reference)
+        stake_cents = cents(bet.get("STAKE"), f"stake at row {index}")
+        if stake_cents < 0:
+            raise RuntimeError(f"Refusing migration: negative stake at row {index}")
+        settled = bet.get("RESULT") in {"W", "L", "V"}
+        if settled:
+            return_cents = cents(bet.get("RETURN"), f"return at row {index}")
+            if return_cents < 0:
+                raise RuntimeError(f"Refusing migration: negative return at row {index}")
+        else:
+            if str(bet.get("RETURN") or "").strip():
+                raise RuntimeError(f"Refusing migration: unsettled row {index} has a return")
+            return_cents = 0
+        starting_cents = cents(bet.get("STARTING BALANCE"), f"starting balance at row {index}")
+        parsed.append((bet, reference, stake_cents, return_cents, starting_cents, settled))
+        total_stakes += stake_cents
+        total_returns += return_cents
+
+    opening_cents = current_cents + total_stakes - total_returns
+    if parsed[0][4] != opening_cents:
+        raise RuntimeError(
+            f"Refusing migration: inferred opening balance {opening_cents / 100:.2f} "
+            f"does not match first recorded balance {parsed[0][4] / 100:.2f}"
+        )
+    observed_balances = {opening_cents}
+    running_cents = opening_cents
+    for index, (_, _, stake_cents, return_cents, starting_cents, _) in enumerate(parsed, 1):
+        if starting_cents not in observed_balances:
+            raise RuntimeError(f"Refusing migration: unexplained starting balance at row {index}")
+        running_cents -= stake_cents
+        observed_balances.add(running_cents)
+        running_cents += return_cents
+        observed_balances.add(running_cents)
+    if running_cents != current_cents:
+        raise RuntimeError("Refusing migration: reconstructed closing balance does not match bankroll")
+
+    created_at = datetime.now(timezone.utc)
+    rows = [seal_transaction({
+        "ID": transaction_id("opening_balance", "ledger"),
+        "TIMESTAMP": created_at.isoformat(), "TYPE": "opening_balance", "REFERENCE": "ledger",
+        "AMOUNT": f"{opening_cents / 100:.2f}", "BALANCE": f"{opening_cents / 100:.2f}",
+    }, "GENESIS")]
+    running_cents = opening_cents
+    sequence = 1
+    for _, reference, stake_cents, return_cents, _, settled in parsed:
+        running_cents -= stake_cents
+        timestamp = (created_at + timedelta(microseconds=sequence)).isoformat(); sequence += 1
+        rows.append(seal_transaction({
+            "ID": transaction_id("stake", reference), "TIMESTAMP": timestamp, "TYPE": "stake",
+            "REFERENCE": reference, "AMOUNT": f"{-stake_cents / 100:.2f}",
+            "BALANCE": f"{running_cents / 100:.2f}",
+        }, rows[-1]["HASH"]))
+        if settled:
+            running_cents += return_cents
+            timestamp = (created_at + timedelta(microseconds=sequence)).isoformat(); sequence += 1
+            rows.append(seal_transaction({
+                "ID": transaction_id("return", reference), "TIMESTAMP": timestamp, "TYPE": "return",
+                "REFERENCE": reference, "AMOUNT": f"{return_cents / 100:.2f}",
+                "BALANCE": f"{running_cents / 100:.2f}",
+            }, rows[-1]["HASH"]))
+    validate_transaction_ledger(rows)
+    atomic_write_csv(TRANSACTION_FILE, TRANSACTION_HEADERS, rows)
+    audit = audit_financial_state()
+    if not audit["exactly_reconciled"]:
+        raise RuntimeError("Migration created a ledger that did not pass exact reconciliation")
+
+    migration_id = created_at.strftime("%Y%m%dT%H%M%S%fZ")
+    manifest = {
+        "schema_version": 1, "migration_id": migration_id, "created_at": created_at.isoformat(),
+        "source_bets": LOG_FILE.name, "source_bets_sha256": hashlib.sha256(LOG_FILE.read_bytes()).hexdigest(),
+        "source_bankroll": BANKROLL_FILE.name, "source_bankroll_sha256": hashlib.sha256(BANKROLL_FILE.read_bytes()).hexdigest(),
+        "output_ledger": TRANSACTION_FILE.name, "output_ledger_sha256": hashlib.sha256(TRANSACTION_FILE.read_bytes()).hexdigest(),
+        "bet_count": len(bets), "settled_bet_count": sum(item[5] for item in parsed),
+        "opening_balance": f"{opening_cents / 100:.2f}", "closing_balance": f"{current_cents / 100:.2f}",
+        "total_stakes": f"{total_stakes / 100:.2f}", "total_returns": f"{total_returns / 100:.2f}",
+        "audit": audit,
+    }
+    manifest_dir = BACKUPS_DIR / "bankroll-transactions"
+    manifest_path = manifest_dir / f"legacy-ledger-migration.{migration_id}.json"
+    atomic_write_text(manifest_path, json.dumps(manifest, indent=2) + "\n")
+    return {**audit, "migration_id": migration_id,
+            "manifest": str(manifest_path.relative_to(REPO_ROOT)).replace("\\", "/")}
 
 
 def ensure_bankroll_ledger(balance: float) -> list[dict]:
@@ -5774,6 +5888,9 @@ def main():
         print(json.dumps(result, indent=2))
         if not result["exactly_reconciled"]:
             raise SystemExit(2)
+        return
+    if args.migrate_legacy_ledger:
+        print(json.dumps(migrate_legacy_financial_ledger(), indent=2))
         return
 
     date_str = resolve_date(args.date)
