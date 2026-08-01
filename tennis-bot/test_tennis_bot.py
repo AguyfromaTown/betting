@@ -2653,7 +2653,10 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("function renderSourceHealth(payload)", dashboard)
         self.assertIn("item.stale_responses", dashboard)
         self.assertIn("group.latest.metrics", dashboard)
-        self.assertNotIn("localstorage", lowered)
+        self.assertIn("localstorage", lowered)
+        self.assertIn("edgebook-tennis-manual-results-v1", lowered)
+        self.assertIn('class="result-select"', lowered)
+        self.assertIn('resultsource: automaticresult ? "automatic"', lowered)
         self.assertNotIn("copy-csv", lowered)
         self.assertNotIn("showresultpicker", lowered)
 

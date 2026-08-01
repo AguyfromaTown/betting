@@ -167,6 +167,15 @@
     .badge.win { color: var(--lime); background: var(--lime-soft); }
     .badge.loss { color: var(--red); background: var(--red-soft); }
     .badge.pending { color: var(--amber); background: var(--amber-soft); }
+    .result-select {
+      min-width: 82px; padding: 6px 28px 6px 10px; color: var(--amber); font: 700 11px Inter, "Segoe UI", sans-serif;
+      background: var(--amber-soft); border: 1px solid rgba(243,184,75,.28); border-radius: 999px;
+      cursor: pointer; outline: none; appearance: auto;
+    }
+    .result-select:hover, .result-select:focus { border-color: var(--amber); }
+    .result-select.manual-win { color: var(--lime); background: var(--lime-soft); border-color: rgba(184,243,75,.3); }
+    .result-select.manual-loss { color: var(--red); background: var(--red-soft); border-color: rgba(255,107,107,.3); }
+    .result-note { display: block; margin-top: 4px; color: var(--muted-2); font-size: 9px; }
 
     .empty { display: none; padding: 64px 20px; border-top: 1px solid var(--line); text-align: center; }
     .empty-icon { display: grid; place-items: center; width: 48px; height: 48px; margin: 0 auto 15px; color: var(--lime); background: var(--lime-soft); border: 1px solid rgba(184,243,75,.15); border-radius: 14px; }
@@ -313,7 +322,7 @@
 
     <section class="card table-card">
       <div class="table-toolbar">
-        <div><h2 class="panel-title">Bet history</h2><div class="panel-kicker">Automatically settled by the tennis workflow</div></div>
+        <div><h2 class="panel-title">Bet history</h2><div class="panel-kicker">Automatic results are authoritative. Open rows can be marked locally and stay saved in this browser.</div></div>
         <div class="table-tools">
           <span class="count" id="row-count">0 entries</span>
           <label class="search">
@@ -440,6 +449,8 @@
     let sourceHealth = null;
     let currentBankroll = null;
     let performanceText = "";
+    const RESULT_STORAGE_KEY = "edgebook-tennis-manual-results-v1";
+    let manualResults = loadManualResults();
 
     const el = id => document.getElementById(id);
     const money = value => new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR" }).format(value || 0);
@@ -448,6 +459,23 @@
       const number = Number.parseFloat(value);
       return Number.isFinite(number) ? (number * 100).toFixed(1) + "%" : "—";
     };
+
+    function loadManualResults() {
+      try {
+        const stored = JSON.parse(localStorage.getItem(RESULT_STORAGE_KEY) || "{}");
+        return stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
+      } catch (_) {
+        return {};
+      }
+    }
+
+    function saveManualResults() {
+      try { localStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(manualResults)); } catch (_) { /* read-only browser */ }
+    }
+
+    function betRowKey(row) {
+      return [row.date, row.match, row.bet || row.selection, row.odds, row.stake].map(value => String(value || "").trim()).join("|");
+    }
 
     // ─── CSV parsing ───
     function parseCSV(text) {
@@ -475,15 +503,24 @@
         const odds = Number.parseFloat(row.odds) || 0;
         const stake = Number.parseFloat(row.stake) || 0;
         const value = (row.result || "").trim().toLowerCase();
-        const rawResult = ["w","win","won"].includes(value) ? "win" : ["l","loss","lost"].includes(value) ? "loss" : "";
+        const automaticResult = ["w","win","won"].includes(value) ? "win" : ["l","loss","lost"].includes(value) ? "loss" : "";
+        const key = betRowKey(row);
+        const manualResult = ["win", "loss"].includes(manualResults[key]) ? manualResults[key] : "";
+        if (automaticResult && manualResults[key]) {
+          delete manualResults[key];
+          saveManualResults();
+        }
+        const resolvedResult = automaticResult || manualResult;
         return {
+          key: key,
           date: row.date || "",
           match: row.match || "",
           bet: row.bet || row.selection || "",
           odds: odds,
           stake: stake,
-          result: rawResult,
-          ret: Number.parseFloat(row.return) || 0,
+          result: resolvedResult,
+          resultSource: automaticResult ? "automatic" : manualResult ? "manual" : "open",
+          ret: automaticResult ? (Number.parseFloat(row.return) || 0) : manualResult === "win" ? stake * odds : 0,
           balance: Number.parseFloat(row["starting balance"] || row.balance),
         };
       }).filter(row => row.date || row.match || row.bet);
@@ -546,7 +583,19 @@
         } else if (lost) {
           resultCell = `<span class="badge loss">Lost</span>`;
         } else {
-          resultCell = `<span class="badge pending">Open</span>`;
+          resultCell = `<select class="result-select" data-row-key="${safe(r.key)}" aria-label="Set a local result for ${safe(r.match)}">
+            <option value="" selected>Open</option>
+            <option value="win">Won</option>
+            <option value="loss">Lost</option>
+          </select><span class="result-note">Saved on this device</span>`;
+        }
+        if (r.resultSource === "manual") {
+          const tone = won ? "manual-win" : "manual-loss";
+          resultCell = `<select class="result-select ${tone}" data-row-key="${safe(r.key)}" aria-label="Change the local result for ${safe(r.match)}">
+            <option value="">Open</option>
+            <option value="win" ${won ? "selected" : ""}>Won</option>
+            <option value="loss" ${lost ? "selected" : ""}>Lost</option>
+          </select><span class="result-note">Local until auto-settled</span>`;
         }
 
         return `<tr>
@@ -880,6 +929,20 @@
 
     // ─── Event wiring ───
     el("search").addEventListener("input", updateSearch);
+    el("log-body").addEventListener("change", event => {
+      const picker = event.target.closest(".result-select");
+      if (!picker) return;
+      const row = allRows.find(item => item.key === picker.dataset.rowKey);
+      if (!row || row.resultSource === "automatic") return;
+      const result = ["win", "loss"].includes(picker.value) ? picker.value : "";
+      if (result) manualResults[row.key] = result; else delete manualResults[row.key];
+      saveManualResults();
+      row.result = result;
+      row.resultSource = result ? "manual" : "open";
+      row.ret = result === "win" ? row.stake * row.odds : 0;
+      refreshAll();
+      updateSearch();
+    });
     window.addEventListener("resize", () => drawChart(allRows));
 
     loadLog();
