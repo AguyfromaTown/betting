@@ -195,7 +195,7 @@ Status conventions:
 ## Monitoring and alerts
 
 - [x] Report API quota consumption.
-- [ ] Report source latency and stale responses.
+- [x] Report source latency and stale responses.
 - [ ] Report unresolved player identities in a dedicated queue.
 - [x] Publish authorization and cancellation reasons in GitHub Actions summaries.
 - [x] Add settlement-failure alerts.

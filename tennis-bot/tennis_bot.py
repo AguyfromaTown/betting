@@ -42,6 +42,7 @@ PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
 MONTHLY_POLICY_FILE = REPO_ROOT / "monthly-policy-report.md"
 SETTLEMENT_ALERT_FILE = REPO_ROOT / "settlement-alerts.md"
 API_QUOTA_FILE = REPO_ROOT / "api-quota.md"
+SOURCE_HEALTH_FILE = REPO_ROOT / "source-health.md"
 SCHEMA_ALERT_FILE = REPO_ROOT / "provider-schema-alerts.md"
 MANUAL_KILL_SWITCH_FILE = REPO_ROOT / "kill-switch.json"
 RISK_CONFIG_FILE = REPO_ROOT / "risk-config.json"
@@ -124,9 +125,13 @@ def log(msg: str):
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
 
-def record_source_health(source: str, ok: bool, detail: str, started: float):
+def record_source_health(source: str, ok: bool, detail: str, started: float, *, mode: str = "network",
+                         cache_age_seconds: float | None = None, stale: bool = False):
     SOURCE_HEALTH.append({"source": source, "ok": ok, "detail": detail,
                           "latency_ms": round((time.monotonic() - started) * 1000),
+                          "mode": mode, "cache_age_seconds": (round(cache_age_seconds, 1)
+                                                                if cache_age_seconds is not None else None),
+                          "stale": stale,
                           "timestamp": datetime.now(timezone.utc).isoformat()})
 
 
@@ -296,13 +301,21 @@ def load_external_cache() -> dict:
 
 
 def get_cached_response(namespace: str, url: str, max_age_seconds: int) -> str | None:
+    content, _ = get_cached_response_info(namespace, url, max_age_seconds)
+    return content
+
+
+def get_cached_response_info(namespace: str, url: str, max_age_seconds: int) -> tuple[str | None, float | None]:
     entry = load_external_cache()["entries"].get(external_cache_key(namespace, url))
-    if not entry or time.time() - float(entry.get("cached_at", 0)) > max_age_seconds:
-        return None
+    if not entry:
+        return None, None
+    age = max(0.0, time.time() - float(entry.get("cached_at", 0)))
+    if age > max_age_seconds:
+        return None, age
     try:
-        return zlib.decompress(base64.b64decode(entry["content"])).decode("utf-8")
+        return zlib.decompress(base64.b64decode(entry["content"])).decode("utf-8"), age
     except (KeyError, TypeError, ValueError, zlib.error, UnicodeDecodeError):
-        return None
+        return None, age
 
 
 def cache_external_response(namespace: str, url: str, content: str):
@@ -506,10 +519,49 @@ def backup_state_for_migration(path: Path, old_headers: list[str], new_headers: 
 
 
 def save_source_health():
-    payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "fixture_status": LAST_FIXTURE_STATUS,
-               "requests": SOURCE_HEALTH, "failures": sum(not item["ok"] for item in SOURCE_HEALTH),
+    generated_at = datetime.now(timezone.utc).isoformat()
+    grouped = {}
+    for item in SOURCE_HEALTH:
+        grouped.setdefault(item["source"], []).append(item)
+    summaries = []
+    for source, items in sorted(grouped.items()):
+        latencies = sorted(float(item.get("latency_ms") or 0) for item in items)
+        p95_index = max(0, math.ceil(len(latencies) * .95) - 1)
+        summaries.append({"source": source, "events": len(items), "successes": sum(bool(item["ok"]) for item in items),
+                          "failures": sum(not item["ok"] for item in items),
+                          "average_latency_ms": round(sum(latencies) / len(latencies), 1),
+                          "p95_latency_ms": round(latencies[p95_index], 1), "maximum_latency_ms": round(max(latencies), 1),
+                          "stale_responses": sum(bool(item.get("stale")) for item in items),
+                          "cache_responses": sum(item.get("mode") in {"fresh_cache", "stale_cache"} for item in items)})
+    payload = {"generated_at": generated_at, "fixture_status": LAST_FIXTURE_STATUS,
+               "requests": SOURCE_HEALTH, "summary": summaries,
+               "failures": sum(not item["ok"] for item in SOURCE_HEALTH),
+               "stale_responses": sum(bool(item.get("stale")) for item in SOURCE_HEALTH),
                "api_quota": API_QUOTA, "schema_alerts": SCHEMA_ALERTS}
     atomic_write_text(REPO_ROOT / "source-health.json", json.dumps(payload, indent=2) + "\n")
+    lines = ["# Tennis Source Health", "", f"Updated: {generated_at}", "", f"Fixture status: `{LAST_FIXTURE_STATUS}`", ""]
+    if payload["stale_responses"]:
+        lines.extend(["## STALE RESPONSES DETECTED", "",
+                      f"{payload['stale_responses']} stale cached response(s) were used after provider failure or an open circuit.", ""])
+    lines.extend(["| Source | Events | Success | Failure | Avg latency | p95 latency | Max latency | Cache | Stale |",
+                  "|---|---:|---:|---:|---:|---:|---:|---:|---:|"])
+    for item in summaries:
+        lines.append(f"| {item['source']} | {item['events']} | {item['successes']} | {item['failures']} | "
+                     f"{item['average_latency_ms']:.1f} ms | {item['p95_latency_ms']:.1f} ms | "
+                     f"{item['maximum_latency_ms']:.1f} ms | {item['cache_responses']} | {item['stale_responses']} |")
+    if not summaries:
+        lines.append("| No source activity | 0 | 0 | 0 | N/A | N/A | N/A | 0 | 0 |")
+    lines.extend(["", "## Request events", "",
+                  "| Time | Source | Status | Mode | Latency | Cache age | Stale | Detail |",
+                  "|---|---|---|---|---:|---:|---|---|"])
+    for item in SOURCE_HEALTH:
+        cache_age = f"{float(item['cache_age_seconds']):.1f} s" if item.get("cache_age_seconds") is not None else "N/A"
+        lines.append(f"| {item.get('timestamp', '')} | {item['source']} | {'ok' if item['ok'] else 'failed'} | "
+                     f"{item.get('mode', 'network')} | {item.get('latency_ms', 0)} ms | {cache_age} | "
+                     f"{'yes' if item.get('stale') else 'no'} | {item.get('detail', '')} |")
+    if not SOURCE_HEALTH:
+        lines.append("| N/A | No source activity | N/A | N/A | N/A | N/A | no | N/A |")
+    atomic_write_text(SOURCE_HEALTH_FILE, "\n".join(lines) + "\n")
     save_api_quota_report()
     save_schema_alert_report()
 
@@ -659,13 +711,22 @@ def tour_exposure_bucket(match: dict) -> str:
 def fetch(url: str, cache_ttl: int = 0, stale_if_error: int = 0) -> str | None:
     provider = url.split("/")[2]
     if cache_ttl:
-        cached = get_cached_response("direct", url, cache_ttl)
+        cache_started = time.monotonic()
+        cached, cache_age = get_cached_response_info("direct", url, cache_ttl)
         if cached is not None:
+            record_source_health(provider, True, "fresh cache hit", cache_started, mode="fresh_cache",
+                                 cache_age_seconds=cache_age)
             log(f"  Using fresh cached response for {provider}")
             return cached
     if not allow_provider_request(provider):
         if stale_if_error:
-            return get_cached_response("direct", url, stale_if_error)
+            cache_started = time.monotonic()
+            cached, cache_age = get_cached_response_info("direct", url, stale_if_error)
+            if cached is not None:
+                record_source_health(provider, True, "stale cache after open circuit", cache_started,
+                                     mode="stale_cache", cache_age_seconds=cache_age, stale=True)
+                return cached
+        record_source_health(provider, False, "circuit open", time.monotonic(), mode="circuit_open")
         return None
     for attempt in range(MAX_TRANSIENT_RETRIES + 1):
         started = time.monotonic()
@@ -682,13 +743,17 @@ def fetch(url: str, cache_ttl: int = 0, stale_if_error: int = 0) -> str | None:
             return resp.text
         except requests.RequestException as exc:
             if attempt < MAX_TRANSIENT_RETRIES and getattr(exc, "response", None) is None:
+                record_source_health(provider, False, f"{type(exc).__name__} retry {attempt + 1}", started)
                 wait_before_retry(provider, attempt); continue
             record_source_health(provider, False, type(exc).__name__, started)
             record_provider_failure(provider, type(exc).__name__)
             log(f"  Failed to fetch {url}: {exc}")
             if stale_if_error:
-                cached = get_cached_response("direct", url, stale_if_error)
+                cache_started = time.monotonic()
+                cached, cache_age = get_cached_response_info("direct", url, stale_if_error)
                 if cached is not None:
+                    record_source_health(provider, True, "stale cache after provider failure", cache_started,
+                                         mode="stale_cache", cache_age_seconds=cache_age, stale=True)
                     log(f"  Using stale cached response for {provider} after provider failure")
                     return cached
             return None
@@ -708,37 +773,55 @@ def fetch_reader(target_url: str, cache_ttl: int = 0, stale_if_error: int = 0) -
 
     provider = "r.jina.ai"
     if cache_ttl:
-        cached = get_cached_response("reader", target_url, cache_ttl)
+        cache_started = time.monotonic()
+        cached, cache_age = get_cached_response_info("reader", target_url, cache_ttl)
         if cached is not None:
+            record_source_health(provider, True, "fresh cache hit", cache_started, mode="fresh_cache",
+                                 cache_age_seconds=cache_age)
             log("  Using fresh cached Jina Reader response")
             return cached
     if not allow_provider_request(provider):
         if stale_if_error:
-            return get_cached_response("reader", target_url, stale_if_error)
+            cache_started = time.monotonic()
+            cached, cache_age = get_cached_response_info("reader", target_url, stale_if_error)
+            if cached is not None:
+                record_source_health(provider, True, "stale cache after open circuit", cache_started,
+                                     mode="stale_cache", cache_age_seconds=cache_age, stale=True)
+                return cached
+        record_source_health(provider, False, "circuit open", time.monotonic(), mode="circuit_open")
         return None
     for target in targets:
         reader_url = f"https://r.jina.ai/{target}"
         for attempt in range(MAX_TRANSIENT_RETRIES + 1):
+            started = time.monotonic()
             try:
                 response = requests.get(reader_url, headers=reader_headers, timeout=REQUEST_TIMEOUT)
                 if response.status_code in TRANSIENT_HTTP_STATUSES and attempt < MAX_TRANSIENT_RETRIES:
+                    record_source_health(provider, False, f"HTTP {response.status_code} retry {attempt + 1}", started)
                     wait_before_retry("Jina Reader", attempt, response); continue
                 response.raise_for_status()
                 if response.text.strip():
+                    record_source_health(provider, True, f"HTTP {response.status_code}", started)
                     record_provider_success(provider)
                     if cache_ttl:
                         cache_external_response("reader", target_url, response.text)
                     return response.text
+                record_source_health(provider, False, "empty response", started)
                 break
             except requests.RequestException as exc:
                 if attempt < MAX_TRANSIENT_RETRIES and getattr(exc, "response", None) is None:
+                    record_source_health(provider, False, f"{type(exc).__name__} retry {attempt + 1}", started)
                     wait_before_retry("Jina Reader", attempt); continue
+                record_source_health(provider, False, type(exc).__name__, started)
                 log(f"  Reader request failed for {target}: {exc}")
                 record_provider_failure(provider, type(exc).__name__)
                 break
     if stale_if_error:
-        cached = get_cached_response("reader", target_url, stale_if_error)
+        cache_started = time.monotonic()
+        cached, cache_age = get_cached_response_info("reader", target_url, stale_if_error)
         if cached is not None:
+            record_source_health(provider, True, "stale cache after provider failure", cache_started,
+                                 mode="stale_cache", cache_age_seconds=cache_age, stale=True)
             log("  Using stale cached Jina Reader response after provider failure")
             return cached
     return None

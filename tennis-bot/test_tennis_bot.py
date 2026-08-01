@@ -625,14 +625,19 @@ class TennisBotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory) / "external-cache.json"
             url = "https://tennisabstract.com/reports/atp_elo_ratings.html"
+            bot.SOURCE_HEALTH.clear()
             with patch.object(bot, "EXTERNAL_CACHE_FILE", cache), patch.object(bot.time, "time", return_value=1000.0):
                 bot.cache_external_response("direct", url, "cached leaderboard")
                 with patch.object(bot.requests, "get") as get:
                     result = bot.fetch(url, cache_ttl=3600, stale_if_error=7200)
             self.assertEqual(result, "cached leaderboard")
             get.assert_not_called()
+            self.assertEqual(bot.SOURCE_HEALTH[-1]["mode"], "fresh_cache")
+            self.assertFalse(bot.SOURCE_HEALTH[-1]["stale"])
+            bot.SOURCE_HEALTH.clear()
 
     def test_stale_external_cache_is_used_only_after_provider_failure(self):
+        bot.SOURCE_HEALTH.clear()
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory) / "external-cache.json"
             url = "https://tennisabstract.com/reports/wta_elo_ratings.html"
@@ -647,6 +652,35 @@ class TennisBotTests(unittest.TestCase):
                 result = bot.fetch(url, cache_ttl=60, stale_if_error=7200)
             self.assertEqual(result, "older leaderboard")
             self.assertEqual(get.call_count, bot.MAX_TRANSIENT_RETRIES + 1)
+            self.assertEqual(bot.SOURCE_HEALTH[-1]["mode"], "stale_cache")
+            self.assertTrue(bot.SOURCE_HEALTH[-1]["stale"])
+            self.assertGreater(bot.SOURCE_HEALTH[-1]["cache_age_seconds"], 0)
+            bot.SOURCE_HEALTH.clear()
+
+    def test_source_health_report_summarizes_latency_and_stale_cache(self):
+        events = [
+            {"source": "example.test", "ok": True, "detail": "HTTP 200", "latency_ms": 100,
+             "mode": "network", "cache_age_seconds": None, "stale": False, "timestamp": "2026-08-01T10:00:00Z"},
+            {"source": "example.test", "ok": False, "detail": "ConnectionError", "latency_ms": 300,
+             "mode": "network", "cache_age_seconds": None, "stale": False, "timestamp": "2026-08-01T10:01:00Z"},
+            {"source": "example.test", "ok": True, "detail": "stale cache after provider failure", "latency_ms": 2,
+             "mode": "stale_cache", "cache_age_seconds": 4000.0, "stale": True, "timestamp": "2026-08-01T10:01:01Z"},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bot.SOURCE_HEALTH[:] = events
+            try:
+                with (patch.object(bot, "REPO_ROOT", root), patch.object(bot, "SOURCE_HEALTH_FILE", root / "source-health.md"),
+                      patch.object(bot, "save_api_quota_report"), patch.object(bot, "save_schema_alert_report")):
+                    bot.save_source_health()
+                report = (root / "source-health.md").read_text(encoding="utf-8")
+                payload = json.loads((root / "source-health.json").read_text(encoding="utf-8"))
+            finally:
+                bot.SOURCE_HEALTH.clear()
+        self.assertIn("## STALE RESPONSES DETECTED", report)
+        self.assertIn("| example.test | 3 | 2 | 1 | 134.0 ms | 300.0 ms | 300.0 ms | 1 | 1 |", report)
+        self.assertEqual(payload["stale_responses"], 1)
+        self.assertEqual(payload["summary"][0]["p95_latency_ms"], 300.0)
 
     def test_api_quota_report_tracks_safe_headers_without_credentials(self):
         response = unittest.mock.Mock(

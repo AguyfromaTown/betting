@@ -70,6 +70,15 @@ jobs:
           if [ -f api-quota.md ]; then
             cat api-quota.md >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Publish source latency and freshness
+        if: always()
+        run: |
+          if [ -f source-health.md ]; then
+            cat source-health.md >> "$GITHUB_STEP_SUMMARY"
+            if grep -q "STALE RESPONSES DETECTED" source-health.md; then
+              echo "::warning::The tennis bot used one or more stale cached source responses"
+            fi
+          fi
       - name: Publish provider schema health
         if: always()
         run: |
