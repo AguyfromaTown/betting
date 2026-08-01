@@ -23,7 +23,7 @@ Status conventions:
 - [x] Add persistent external-response caching.
 - [x] Rotate Odds and Groq API keys after quota/authentication failures.
 - [x] Track provider request latency and failures in `source-health.json`.
-- [ ] Track API quota consumption.
+- [x] Track API quota consumption.
 - [ ] Add provider schema-change alarms.
 
 ## Player identity
@@ -194,7 +194,7 @@ Status conventions:
 
 ## Monitoring and alerts
 
-- [ ] Report API quota consumption.
+- [x] Report API quota consumption.
 - [ ] Report source latency and stale responses.
 - [ ] Report unresolved player identities in a dedicated queue.
 - [x] Publish authorization and cancellation reasons in GitHub Actions summaries.

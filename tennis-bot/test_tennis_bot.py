@@ -296,6 +296,31 @@ class TennisBotTests(unittest.TestCase):
             self.assertEqual(result, "older leaderboard")
             self.assertEqual(get.call_count, bot.MAX_TRANSIENT_RETRIES + 1)
 
+    def test_api_quota_report_tracks_safe_headers_without_credentials(self):
+        response = unittest.mock.Mock(
+            status_code=200,
+            headers={
+                "x-ratelimit-remaining-requests": "14370",
+                "x-ratelimit-remaining-tokens": "17997",
+                "Authorization": "Bearer secret-value",
+                "Set-Cookie": "private-cookie",
+            },
+        )
+        bot.API_QUOTA.clear()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                report = Path(directory) / "api-quota.md"
+                with patch.object(bot, "API_QUOTA_FILE", report):
+                    bot.record_api_quota("Groq", response, "key-2")
+                    bot.save_api_quota_report()
+                text = report.read_text(encoding="utf-8")
+            self.assertIn("Groq | key-2 | 1 | 200", text)
+            self.assertIn("x-ratelimit-remaining-tokens=17997", text)
+            self.assertNotIn("secret-value", text)
+            self.assertNotIn("private-cookie", text)
+        finally:
+            bot.API_QUOTA.clear()
+
     def test_calibration_requires_mature_probability_bucket(self):
         rows = [{"MODEL_PROBABILITY": ".60", "RESULT": "W"} for _ in range(99)]
         self.assertEqual(bot.calibrate_probability(.60, rows), (.60, 99))

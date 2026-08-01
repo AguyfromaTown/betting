@@ -81,6 +81,13 @@ jobs:
           fi
           python tennis-bot/tennis_bot.py $ARGS
 
+      - name: Publish API quota summary
+        if: always()
+        run: |
+          if [ -f api-quota.md ]; then
+            cat api-quota.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Commit results
         if: always()
         run: |

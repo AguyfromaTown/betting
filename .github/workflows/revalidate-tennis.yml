@@ -37,6 +37,12 @@ jobs:
           if [ -f lifecycle-summary.md ]; then
             cat lifecycle-summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Publish API quota summary
+        if: always()
+        run: |
+          if [ -f api-quota.md ]; then
+            cat api-quota.md >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Commit lifecycle updates
         if: always()
         run: |

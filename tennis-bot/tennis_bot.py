@@ -35,6 +35,7 @@ POLICY_FILE = REPO_ROOT / "counterfactual-log.csv"
 TRANSACTION_FILE = REPO_ROOT / "bankroll-transactions.csv"
 PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
 SETTLEMENT_ALERT_FILE = REPO_ROOT / "settlement-alerts.md"
+API_QUOTA_FILE = REPO_ROOT / "api-quota.md"
 MANUAL_KILL_SWITCH_FILE = REPO_ROOT / "kill-switch.json"
 RISK_CONFIG_FILE = REPO_ROOT / "risk-config.json"
 EXTERNAL_CACHE_FILE = REPO_ROOT / "external-cache.json"
@@ -80,6 +81,7 @@ REQUEST_HEADERS = {
     )
 }
 SOURCE_HEALTH = []
+API_QUOTA = []
 LAST_FIXTURE_STATUS = "not_run"
 DIAGNOSTIC_MODE = False
 PAPER_TRADING_MODE = False
@@ -97,6 +99,46 @@ def record_source_health(source: str, ok: bool, detail: str, started: float):
     SOURCE_HEALTH.append({"source": source, "ok": ok, "detail": detail,
                           "latency_ms": round((time.monotonic() - started) * 1000),
                           "timestamp": datetime.now(timezone.utc).isoformat()})
+
+
+def record_api_quota(provider: str, response, key_label: str):
+    """Capture safe rate-limit metadata and request counts without credentials."""
+    allowed = {
+        "retry-after", "x-ratelimit-limit-requests", "x-ratelimit-limit-tokens",
+        "x-ratelimit-remaining-requests", "x-ratelimit-remaining-tokens",
+        "x-ratelimit-reset-requests", "x-ratelimit-reset-tokens",
+        "x-requests-limit", "x-requests-used", "x-requests-remaining",
+        "x-rate-limit-limit", "x-rate-limit-remaining", "x-rate-limit-reset",
+    }
+    metrics = {}
+    try:
+        header_items = list(response.headers.items())
+    except (AttributeError, TypeError):
+        header_items = []
+    for name, value in header_items:
+        normalized = str(name).casefold()
+        if normalized in allowed:
+            metrics[normalized] = str(value)[:100]
+    status = response.status_code if isinstance(getattr(response, "status_code", None), int) else "unknown"
+    API_QUOTA.append({"provider": provider, "key": key_label, "status": status,
+                      "timestamp": datetime.now(timezone.utc).isoformat(), "metrics": metrics})
+
+
+def save_api_quota_report():
+    grouped = {}
+    for item in API_QUOTA:
+        grouped.setdefault((item["provider"], item["key"]), []).append(item)
+    lines = ["# API Quota and Rate-Limit Health", "", f"Updated: {datetime.now(timezone.utc).isoformat()}", "",
+             "Keys are represented only by their configured position; no credential values are stored.", "",
+             "| Provider | Key | Requests this run | Latest status | Latest quota headers |",
+             "|---|---|---:|---:|---|"]
+    for (provider, key), items in sorted(grouped.items()):
+        latest = items[-1]
+        metrics = "; ".join(f"{name}={value}" for name, value in sorted(latest["metrics"].items())) or "not supplied"
+        lines.append(f"| {provider} | {key} | {len(items)} | {latest['status']} | {metrics} |")
+    if not grouped:
+        lines.append("| No metered API requests | — | 0 | — | — |")
+    atomic_write_text(API_QUOTA_FILE, "\n".join(lines) + "\n")
 
 
 def transient_retry_delay(attempt: int, response=None) -> float:
@@ -270,8 +312,10 @@ def backup_state_for_migration(path: Path, old_headers: list[str], new_headers: 
 
 def save_source_health():
     payload = {"generated_at": datetime.now(timezone.utc).isoformat(), "fixture_status": LAST_FIXTURE_STATUS,
-               "requests": SOURCE_HEALTH, "failures": sum(not item["ok"] for item in SOURCE_HEALTH)}
+               "requests": SOURCE_HEALTH, "failures": sum(not item["ok"] for item in SOURCE_HEALTH),
+               "api_quota": API_QUOTA}
     atomic_write_text(REPO_ROOT / "source-health.json", json.dumps(payload, indent=2) + "\n")
+    save_api_quota_report()
 
 
 def load_run_state() -> dict:
@@ -519,6 +563,7 @@ def fetch_odds_json(
                     headers=REQUEST_HEADERS,
                     timeout=REQUEST_TIMEOUT,
                 )
+                record_api_quota("Odds-API.io", response, f"key-{candidate_index + 1}")
                 if response.status_code in {401, 403, 429}:
                     record_source_health("api.odds-api.io", False, f"HTTP {response.status_code} key {candidate_index + 1}", started)
                     log(
@@ -1926,6 +1971,7 @@ def call_ai(prompt: str, api_keys: list[str]) -> str:
                     json=payload,
                     timeout=120,
                 )
+                record_api_quota("Groq", response, f"key-{key_index + 1}")
                 last_response = response
                 if response.status_code in {401, 403, 429} and key_index < len(api_keys) - 1:
                     log(f"  Groq key unavailable ({response.status_code}); rotating to next key")

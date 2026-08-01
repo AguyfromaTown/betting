@@ -38,6 +38,12 @@ jobs:
               echo "::warning::One or more tennis outcomes are overdue and unresolved"
             fi
           fi
+      - name: Publish API quota summary
+        if: always()
+        run: |
+          if [ -f api-quota.md ]; then
+            cat api-quota.md >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Commit settlement
         if: always()
         run: |
