@@ -2024,7 +2024,8 @@ def calculate_serve_return_matchup(player_profile: dict | None, opponent_profile
     return {"probability": probability, "player_hold": player_hold, "opponent_hold": opponent_hold, "sample": min(player_profile["sample"], opponent_profile["sample"])}
 
 
-def calculate_workload(history: list[dict], player: str, as_of: str, current_tournament: str = "") -> dict:
+def calculate_workload(history: list[dict], player: str, as_of: str, current_tournament: str = "",
+                       current_surface: str | None = None) -> dict:
     """Measure recent match density, sets and rest without inventing unavailable durations."""
     key = normalize_player_name(player); cutoff = datetime.strptime(as_of, "%Y-%m-%d")
     played = []
@@ -2047,9 +2048,13 @@ def calculate_workload(history: list[dict], player: str, as_of: str, current_tou
         except (TypeError, ValueError):
             best_of = 3
         long_threshold = 240 if best_of == 5 else 180
+        historical_surface = str(row.get("surface") or "").strip().casefold()
+        if historical_surface not in {"hard", "clay", "grass", "carpet"}:
+            historical_surface = ""
         played.append((date, max(1, sets), row.get("tourney_name") or row.get("tournament") or "",
                        minutes, str(row.get("_source_url") or "historical_match_records"),
-                       best_of, bool(minutes is not None and minutes >= long_threshold), long_threshold))
+                       best_of, bool(minutes is not None and minutes >= long_threshold), long_threshold,
+                       historical_surface))
     played.sort(reverse=True)
     last = played[0] if played else None
     matches_7 = sum((cutoff - item[0]).days <= 7 for item in played)
@@ -2066,6 +2071,14 @@ def calculate_workload(history: list[dict], player: str, as_of: str, current_tou
     latest_long = next((item for item in played if item[6]), None)
     rest_days = (cutoff - last[0]).days if last else None
     tournament_change = bool(last and last[2] and current_tournament and normalize_player_name(last[2]) != normalize_player_name(current_tournament) and rest_days <= 5)
+    current_surface_key = str(current_surface or "").strip().casefold()
+    if current_surface_key not in {"hard", "clay", "grass", "carpet"}:
+        current_surface_key = ""
+    previous_tournament = next((item for item in played if item[2] and current_tournament and
+                                normalize_player_name(item[2]) != normalize_player_name(current_tournament)), None)
+    previous_surface = previous_tournament[8] if previous_tournament else ""
+    surface_change = (previous_surface != current_surface_key
+                      if previous_surface and current_surface_key else None)
     penalty = .025 if matches_7 >= 4 or sets_7 >= 10 else .015 if matches_7 >= 3 or sets_7 >= 8 else .01 if rest_days is not None and rest_days <= 1 else 0.0
     if tournament_change and rest_days is not None and rest_days <= 3: penalty += .005
     return {"matches_7": matches_7, "matches_14": matches_14, "matches_30": matches_30,
@@ -2083,6 +2096,12 @@ def calculate_workload(history: list[dict], player: str, as_of: str, current_tou
             "latest_long_match_date": latest_long[0].strftime("%Y-%m-%d") if latest_long else None,
             "latest_long_match_days_ago": (cutoff - latest_long[0]).days if latest_long else None,
             "latest_long_match_source": latest_long[4] if latest_long else "",
+            "previous_tournament": previous_tournament[2] if previous_tournament else "",
+            "previous_tournament_surface": previous_surface or None,
+            "previous_tournament_days_ago": (cutoff - previous_tournament[0]).days if previous_tournament else None,
+            "surface_transition_source": previous_tournament[4] if previous_tournament else "",
+            "current_surface": current_surface_key or None,
+            "surface_change": surface_change,
             "tournament_change": tournament_change, "penalty": min(.03, penalty)}
 
 
@@ -2122,8 +2141,8 @@ def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
         match["player2_clutch"] = calculate_clutch_profile(history, match["player2"], match.get("surface"), date_str)
         match["player1_best_of_five"] = calculate_best_of_five_profile(history, match["player1"], match.get("surface"), date_str)
         match["player2_best_of_five"] = calculate_best_of_five_profile(history, match["player2"], match.get("surface"), date_str)
-        match["player1_workload"] = calculate_workload(history, match["player1"], date_str, match.get("tournament", ""))
-        match["player2_workload"] = calculate_workload(history, match["player2"], date_str, match.get("tournament", ""))
+        match["player1_workload"] = calculate_workload(history, match["player1"], date_str, match.get("tournament", ""), match.get("surface"))
+        match["player2_workload"] = calculate_workload(history, match["player2"], date_str, match.get("tournament", ""), match.get("surface"))
         for side in ("player1", "player2"):
             ranking_history = calculate_ranking_history(history, match[side], date_str)
             bio = calculate_player_bio(history, match[side], date_str)
@@ -2603,6 +2622,10 @@ def build_prompt(
                     f"(30d duration n={workload.get('duration_sample_30', 0)}), long matches 7/30d="
                     f"{workload.get('long_matches_7', 0)}/{workload.get('long_matches_30', 0)}, "
                     f"last match long={'unknown' if workload.get('last_match_long') is None else workload.get('last_match_long')}"
+                    f", previous tournament={workload.get('previous_tournament') or 'unknown'} "
+                    f"({workload.get('previous_tournament_surface') or 'unknown'} -> "
+                    f"{workload.get('current_surface') or 'unknown'}, surface change="
+                    f"{'unknown' if workload.get('surface_change') is None else workload.get('surface_change')})"
                 )
                 baseline_lines.append(
                     f"  Python baseline for {player}: market fair "
@@ -3161,7 +3184,9 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "MINUTES_7", "MINUTES_14", "MINUTES_30", "DURATION_SAMPLE_30", "DURATION_SOURCE",
         "LAST_MATCH_LONG", "LAST_MATCH_LONG_THRESHOLD", "LONG_MATCHES_7", "LONG_MATCHES_30",
         "LATEST_LONG_MATCH_MINUTES", "LATEST_LONG_MATCH_DATE", "LATEST_LONG_MATCH_DAYS_AGO", "LATEST_LONG_MATCH_SOURCE",
-        "TOURNAMENT_CHANGE", "BEST_OF", "INDOOR",
+        "TOURNAMENT_CHANGE", "PREVIOUS_TOURNAMENT", "PREVIOUS_TOURNAMENT_SURFACE",
+        "PREVIOUS_TOURNAMENT_DAYS_AGO", "CURRENT_SURFACE", "SURFACE_CHANGE", "SURFACE_TRANSITION_SOURCE",
+        "BEST_OF", "INDOOR",
         "MARKET_DISPERSION", "DATA_QUALITY_SCORE", "DATA_QUALITY_GRADE",
         "UNCERTAINTY_MARGIN", "RISK_ADJUSTED_EV", "KILL_SWITCH", "KILL_SWITCH_REASON",
         "SEGMENT_SAMPLE", "SEGMENT_ROI", "SEGMENT_CLV", "SEGMENT_SUSPENDED",
@@ -3280,6 +3305,9 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 workload.get("latest_long_match_minutes", ""), workload.get("latest_long_match_date", ""),
                 workload.get("latest_long_match_days_ago", ""), workload.get("latest_long_match_source", ""),
                 workload.get("tournament_change", False),
+                workload.get("previous_tournament", ""), workload.get("previous_tournament_surface", ""),
+                workload.get("previous_tournament_days_ago", ""), workload.get("current_surface", ""),
+                workload.get("surface_change", ""), workload.get("surface_transition_source", ""),
                 baseline.get("best_of", 3), baseline.get("indoor", ""),
                 f"{data_quality['dispersion']:.6f}" if data_quality.get("dispersion") is not None else "",
                 data_quality["score"], data_quality["grade"], f"{baseline['uncertainty_margin']:.6f}",

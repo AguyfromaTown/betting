@@ -305,7 +305,7 @@ class TennisBotTests(unittest.TestCase):
             {"tourney_date": "20260710", "winner_name": "Player One", "loser_name": "Other", "score": "6-4 6-4", "tourney_name": "Event Old", "minutes": "90", "_source_url": "verified-b.csv"},
             {"tourney_date": "20260630", "winner_name": "Player One", "loser_name": "Other", "score": "6-4 6-4", "tourney_name": "Event Too Old", "minutes": "80"},
         ]
-        workload = bot.calculate_workload(history, "Player One", "2026-08-01", "Event C")
+        workload = bot.calculate_workload(history, "Player One", "2026-08-01", "Event C", "hard")
         self.assertEqual((workload["rest_days"], workload["matches_7"], workload["sets_7"]), (1, 3, 8))
         self.assertEqual(workload["matches_14"], 3)
         self.assertEqual(workload["matches_30"], 4)
@@ -318,6 +318,9 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(workload["long_matches_30"], 1)
         self.assertEqual(workload["latest_long_match_minutes"], 180)
         self.assertEqual(workload["latest_long_match_days_ago"], 3)
+        self.assertEqual(workload["previous_tournament"], "Event A")
+        self.assertIsNone(workload["previous_tournament_surface"])
+        self.assertIsNone(workload["surface_change"])
         self.assertGreater(workload["penalty"], 0)
 
     def test_workload_never_estimates_missing_match_duration(self):
@@ -339,6 +342,29 @@ class TennisBotTests(unittest.TestCase):
         self.assertFalse(workload_bo5["last_match_long"])
         self.assertEqual(workload_bo5["last_match_long_threshold"], 240)
         self.assertEqual(workload_bo3["penalty"], workload_bo5["penalty"])
+
+    def test_surface_change_uses_previous_different_tournament(self):
+        history = [
+            {"tourney_date": "20260731", "winner_name": "Player", "loser_name": "Other",
+             "score": "6-4 6-4", "tourney_name": "Current Event", "surface": "Hard"},
+            {"tourney_date": "20260728", "winner_name": "Player", "loser_name": "Other",
+             "score": "6-4 6-4", "tourney_name": "Previous Event", "surface": "Clay",
+             "_source_url": "verified-history.csv"},
+        ]
+        workload = bot.calculate_workload(history, "Player", "2026-08-01", "Current Event", "Hard")
+        self.assertEqual(workload["previous_tournament"], "Previous Event")
+        self.assertEqual(workload["previous_tournament_surface"], "clay")
+        self.assertEqual(workload["current_surface"], "hard")
+        self.assertTrue(workload["surface_change"])
+        self.assertEqual(workload["previous_tournament_days_ago"], 4)
+        self.assertEqual(workload["surface_transition_source"], "verified-history.csv")
+
+    def test_surface_change_is_unknown_without_two_verified_surfaces(self):
+        history = [{"tourney_date": "20260728", "winner_name": "Player", "loser_name": "Other",
+                    "score": "6-4 6-4", "tourney_name": "Previous Event", "surface": ""}]
+        workload = bot.calculate_workload(history, "Player", "2026-08-01", "Current Event", "Hard")
+        self.assertIsNone(workload["previous_tournament_surface"])
+        self.assertIsNone(workload["surface_change"])
 
     def test_tennis_context_and_match_format(self):
         self.assertEqual(bot.tennis_context_uncertainty({"tournament": "ITF Madrid", "level": "ITF"})[0], .02)
@@ -888,7 +914,10 @@ class TennisBotTests(unittest.TestCase):
                                  "last_match_long": True, "last_match_long_threshold": 180, "long_matches_7": 1,
                                  "long_matches_30": 2, "latest_long_match_minutes": 185,
                                  "latest_long_match_date": "2026-07-31", "latest_long_match_days_ago": 1,
-                                 "latest_long_match_source": "verified-history.csv", "penalty": 0.015},
+                                 "latest_long_match_source": "verified-history.csv", "tournament_change": True,
+                                 "previous_tournament": "WTA Clay Event", "previous_tournament_surface": "clay",
+                                 "previous_tournament_days_ago": 4, "current_surface": "hard", "surface_change": True,
+                                 "surface_transition_source": "verified-history.csv", "penalty": 0.015},
         }
         with tempfile.TemporaryDirectory() as directory:
             audit_file = Path(directory) / "prediction-audit.csv"
@@ -929,6 +958,11 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["LAST_MATCH_LONG"], "True")
         self.assertEqual(second["LONG_MATCHES_30"], "2")
         self.assertEqual(second["LATEST_LONG_MATCH_MINUTES"], "185")
+        self.assertEqual(second["PREVIOUS_TOURNAMENT"], "WTA Clay Event")
+        self.assertEqual(second["PREVIOUS_TOURNAMENT_SURFACE"], "clay")
+        self.assertEqual(second["CURRENT_SURFACE"], "hard")
+        self.assertEqual(second["SURFACE_CHANGE"], "True")
+        self.assertEqual(second["SURFACE_TRANSITION_SOURCE"], "verified-history.csv")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:

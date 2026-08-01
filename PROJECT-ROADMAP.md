@@ -62,7 +62,7 @@ Status conventions:
 - [x] Detect consecutive-day and dense schedules through workload rules.
 - [x] Explicitly identify unusually long previous matches.
 - [x] Detect recent tournament changes.
-- [ ] Detect surface changes between consecutive tournaments.
+- [x] Detect surface changes between consecutive tournaments.
 - [ ] Calculate verified travel distance and timezone changes.
 - [x] Apply conservative workload penalties of no more than three probability points.
 - [ ] Backtest and learn workload thresholds after adequate samples.
