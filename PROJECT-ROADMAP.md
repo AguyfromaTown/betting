@@ -144,7 +144,7 @@ Status conventions:
 - [x] Introduce an immutable bankroll transaction ledger.
 - [x] Add automatic bankroll reconciliation.
 - [x] Add an explicit paper-trading mode.
-- [ ] Add walk-forward simulations comparing fixed and Kelly staking.
+- [x] Add walk-forward simulations comparing fixed and Kelly staking.
 
 ## Settlement
 

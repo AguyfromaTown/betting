@@ -841,8 +841,8 @@ class TennisBotTests(unittest.TestCase):
 
     def test_backtest_summary_segments_settled_predictions(self):
         rows = [
-            {"DATE": "2026-07-01", "OPENING_ODDS": "1.60", "MODEL_PROBABILITY": "0.65", "EV": "0.04", "RESULT": "W", "CLV": "0.02", "TOUR": "ATP", "SURFACE": "clay", "QUALITY_GRADE": "A"},
-            {"DATE": "2026-07-02", "OPENING_ODDS": "1.70", "MODEL_PROBABILITY": "0.62", "EV": "0.03", "RESULT": "L", "CLV": "-0.01", "TOUR": "ATP", "SURFACE": "clay", "QUALITY_GRADE": "B"},
+            {"DATE": "2026-07-01", "OPENING_ODDS": "1.60", "MODEL_PROBABILITY": "0.65", "EV": "0.04", "RESULT": "W", "CLV": "0.02", "TOUR": "ATP", "SURFACE": "clay", "QUALITY_GRADE": "A", "DECISION": "Top Pick"},
+            {"DATE": "2026-07-02", "OPENING_ODDS": "1.70", "MODEL_PROBABILITY": "0.62", "EV": "0.03", "RESULT": "L", "CLV": "-0.01", "TOUR": "ATP", "SURFACE": "clay", "QUALITY_GRADE": "B", "DECISION": "Value Pick"},
         ]
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "backtest-summary.md"
@@ -854,6 +854,25 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("1.50–1.75 | 2 | 50.0%", report)
         self.assertIn("## Surface", report)
         self.assertIn("## Monthly performance", report)
+        self.assertIn("## Walk-forward staking comparison", report)
+        self.assertIn("Capped quarter-Kelly", report)
+
+    def test_walk_forward_staking_compares_fixed_and_capped_kelly(self):
+        rows = [
+            {"DATE": "2026-07-01", "EVENT_ID": "1", "PICK": "A", "OPENING_ODDS": "2.00",
+             "MODEL_PROBABILITY": ".70", "RESULT": "W", "DECISION": "Top Pick"},
+            {"DATE": "2026-07-01", "EVENT_ID": "2", "PICK": "B", "OPENING_ODDS": "2.00",
+             "MODEL_PROBABILITY": ".70", "RESULT": "L", "DECISION": "Top Pick"},
+            {"DATE": "2026-07-02", "EVENT_ID": "3", "PICK": "C", "OPENING_ODDS": "2.00",
+             "MODEL_PROBABILITY": ".70", "RESULT": "W", "DECISION": "Top Pick"},
+        ]
+
+        result = bot.walk_forward_staking_simulation(rows, 100.0)
+
+        self.assertEqual(result["bets"], 3)
+        self.assertEqual(result["fixed"]["ending_bankroll"], 101.0)
+        self.assertAlmostEqual(result["kelly"]["ending_bankroll"], 103.0)
+        self.assertEqual(result["kelly"]["max_drawdown"], 0)
 
     @patch.object(bot, "fetch_odds_json")
     def test_odds_api_uses_batches_of_ten(self, fetch_odds_json):

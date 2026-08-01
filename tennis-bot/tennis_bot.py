@@ -2434,6 +2434,58 @@ def _append_segment_table(lines: list[str], title: str, groups: list[tuple[str, 
         lines.append(f"| {label} | {count} | {win_rate:.1%} | {roi:.2%} | {brier:.4f} | {clv_text} | {reliability} |")
 
 
+def walk_forward_staking_simulation(rows: list[dict], starting_bankroll: float = 100.0) -> dict:
+    """Compare fixed-unit and capped quarter-Kelly staking without future-result leakage."""
+    eligible = [row for row in rows if row.get("RESULT") in {"W", "L"}
+                and row.get("DECISION") in {"Top Pick", "Value Pick"}]
+    by_date = {}
+    for row in sorted(eligible, key=lambda item: (item.get("DATE", ""), item.get("EVENT_ID", ""), item.get("PICK", ""))):
+        by_date.setdefault(row.get("DATE", ""), []).append(row)
+
+    balances = {"fixed": starting_bankroll, "kelly": starting_bankroll}
+    peaks = dict(balances)
+    drawdowns = {"fixed": 0.0, "kelly": 0.0}
+    staked = {"fixed": 0.0, "kelly": 0.0}
+    bets = 0
+    for date in sorted(by_date):
+        day_start = dict(balances)
+        day_profit = {"fixed": 0.0, "kelly": 0.0}
+        allocated = {"fixed": 0.0, "kelly": 0.0}
+        for row in by_date[date]:
+            try:
+                odds = float(row.get("OPENING_ODDS") or 0)
+                probability = float(row.get("MODEL_PROBABILITY") or 0)
+            except ValueError:
+                continue
+            if odds <= 1 or not 0 < probability < 1:
+                continue
+            bets += 1
+            fixed_stake = min(1.0, max(0.0, day_start["fixed"] - allocated["fixed"]))
+            full_kelly = max(0.0, (probability * odds - 1) / (odds - 1))
+            cap = .03 if row.get("DECISION") == "Top Pick" else .02
+            kelly_rate = min(cap, max(MIN_STAKE_RATE, full_kelly * KELLY_FRACTION))
+            kelly_stake = min(
+                day_start["kelly"] * kelly_rate,
+                max(0.0, day_start["kelly"] * MAX_DAILY_EXPOSURE - allocated["kelly"]),
+                max(0.0, day_start["kelly"] - allocated["kelly"]),
+            )
+            for name, stake in (("fixed", fixed_stake), ("kelly", kelly_stake)):
+                allocated[name] += stake
+                staked[name] += stake
+                day_profit[name] += stake * (odds - 1) if row["RESULT"] == "W" else -stake
+        for name in balances:
+            balances[name] = max(0.0, balances[name] + day_profit[name])
+            peaks[name] = max(peaks[name], balances[name])
+            if peaks[name] > 0:
+                drawdowns[name] = max(drawdowns[name], (peaks[name] - balances[name]) / peaks[name])
+    return {"bets": bets, **{
+        name: {"ending_bankroll": balances[name], "profit": balances[name] - starting_bankroll,
+               "staked": staked[name], "roi": (balances[name] - starting_bankroll) / staked[name] if staked[name] else None,
+               "max_drawdown": drawdowns[name]}
+        for name in balances
+    }}
+
+
 def generate_backtest_summary(resolved: list[dict]):
     """Create a leakage-free report using only predictions recorded before results."""
     lines = [
@@ -2456,6 +2508,15 @@ def generate_backtest_summary(resolved: list[dict]):
         _append_segment_table(lines, title, [(value, [r for r in resolved if (r.get(field) or "Unknown") == value]) for value in values])
     months = sorted({(row.get("DATE") or "")[:7] for row in resolved if row.get("DATE")})
     _append_segment_table(lines, "Monthly performance", [(month, [r for r in resolved if (r.get("DATE") or "").startswith(month)]) for month in months])
+    simulation = walk_forward_staking_simulation(resolved)
+    lines.extend(["", "## Walk-forward staking comparison", "",
+                  "Bets are sized from the bankroll available before that match date; outcomes from the same date cannot affect one another.", "",
+                  "| Strategy | Bets | Ending bankroll | Profit | ROI on stakes | Max drawdown |",
+                  "|---|---:|---:|---:|---:|---:|"])
+    for key, label in (("fixed", "Fixed €1 unit"), ("kelly", "Capped quarter-Kelly")):
+        result = simulation[key]
+        roi = f"{result['roi']:.2%}" if result["roi"] is not None else "N/A"
+        lines.append(f"| {label} | {simulation['bets']} | €{result['ending_bankroll']:.2f} | €{result['profit']:.2f} | {roi} | {result['max_drawdown']:.2%} |")
     atomic_write_text(BACKTEST_FILE, "\n".join(lines) + "\n")
     log(f"Backtest summary saved: {BACKTEST_FILE.name}")
 
