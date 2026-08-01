@@ -2536,6 +2536,31 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("never creates a player or profile", runbook)
         self.assertIn("must not write live bets, debit bankroll, or settle existing bets", runbook)
 
+    def test_changelog_and_release_ledger_track_current_model(self):
+        root = MODULE_PATH.parent.parent
+        changelog = root.joinpath("CHANGELOG.md").read_text(encoding="utf-8")
+        releases = root.joinpath("MODEL-POLICY-RELEASES.md").read_text(encoding="utf-8")
+        self.assertIn("## Unreleased", changelog)
+        self.assertIn("## 2026-08-01 — Production hardening and operations", changelog)
+        self.assertIn("## Maintenance rules", changelog)
+        self.assertIn(bot.MODEL_VERSION, releases)
+        self.assertIn("Status: current production version", releases)
+        self.assertIn("Release classification", releases)
+        self.assertIn("Required release entry template", releases)
+        self.assertIn("Release procedure", releases)
+        for historical in (
+            "tennis-2026.08-monthly-policy-report-v1",
+            "tennis-2026.08-threshold-challengers-v1",
+            "tennis-2026.08-tour-market-limits-v1",
+            "tennis-2026.08-price-freshness-v1",
+            "tennis-2026.08-environment-models-v1",
+            "tennis-2026.08-format-models-v1",
+            "tennis-2026.08-tour-calibration-v1",
+            "tennis-2026.08-workload-v1",
+            "tennis-2026.08-quality-v2",
+        ):
+            self.assertIn(historical, releases)
+
 
 if __name__ == "__main__":
     unittest.main()
