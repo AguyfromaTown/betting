@@ -154,7 +154,7 @@ Status conventions:
 - [ ] Make retirement settlement rules configurable per bookmaker.
 - [x] Store closing odds and CLV when available.
 - [x] Retry unresolved outcomes on later scheduled runs.
-- [ ] Alert when an outcome remains unresolved beyond a configured period.
+- [x] Alert when an outcome remains unresolved beyond a configured period.
 - [x] Reconcile every return against an immutable transaction ledger.
 - [x] Never infer an outcome when verified scores are unavailable.
 
@@ -198,7 +198,7 @@ Status conventions:
 - [ ] Report source latency and stale responses.
 - [ ] Report unresolved player identities in a dedicated queue.
 - [x] Publish authorization and cancellation reasons in GitHub Actions summaries.
-- [ ] Add settlement-failure alerts.
+- [x] Add settlement-failure alerts.
 - [x] Monitor CLV and probability calibration deterioration.
 - [ ] Alert on abnormal rejection and pick counts.
 - [x] Distinguish provider failure, a valid empty schedule and missing odds in reports.

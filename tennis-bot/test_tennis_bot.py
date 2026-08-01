@@ -330,6 +330,7 @@ class TennisBotTests(unittest.TestCase):
                 patch.object(bot, "PAPER_LOG_FILE", root / "paper-bets-log.csv"),
                 patch.object(bot, "BANKROLL_FILE", bankroll_path),
                 patch.object(bot, "TRANSACTION_FILE", transaction_path),
+                patch.object(bot, "SETTLEMENT_ALERT_FILE", root / "settlement-alerts.md"),
                 patch.object(bot, "fetch_odds_json", side_effect=[([event], 0), ([], 0)]),
                 patch.object(bot, "update_audit_result"),
             ):
@@ -396,6 +397,7 @@ class TennisBotTests(unittest.TestCase):
                 patch.object(bot, "BANKROLL_FILE", bankroll),
                 patch.object(bot, "TRANSACTION_FILE", root / "bankroll-transactions.csv"),
                 patch.object(bot, "POLICY_FILE", root / "policy.csv"),
+                patch.object(bot, "SETTLEMENT_ALERT_FILE", root / "settlement-alerts.md"),
                 patch.object(bot, "fetch_odds_json", side_effect=[([event], 0), ([], 0)]),
                 patch.object(bot, "update_audit_result"),
             ):
@@ -417,12 +419,29 @@ class TennisBotTests(unittest.TestCase):
                 patch.object(bot, "PAPER_LOG_FILE", root / "paper.csv"),
                 patch.object(bot, "POLICY_FILE", root / "policy.csv"),
                 patch.object(bot, "BANKROLL_FILE", root / "bankroll.txt"),
+                patch.object(bot, "SETTLEMENT_ALERT_FILE", root / "settlement-alerts.md"),
                 patch.object(bot, "fetch_odds_json") as fetch_odds,
             ):
                 settled = bot.settle_pending_bets(["key"], include_real=False)
             self.assertEqual(settled, 0)
             self.assertEqual(real_log.read_bytes(), original)
             fetch_odds.assert_not_called()
+
+    def test_overdue_unresolved_outcome_generates_configurable_alert(self):
+        from datetime import datetime, timezone
+        row = {"DATE": "2026-07-29", "MATCH": "A vs B", "BET": "A to win", "RESULT": ""}
+        with tempfile.TemporaryDirectory() as directory:
+            alert = Path(directory) / "settlement-alerts.md"
+            with patch.object(bot, "SETTLEMENT_ALERT_FILE", alert), patch.dict(
+                bot.os.environ, {"TENNIS_UNRESOLVED_HOURS": "24"}
+            ):
+                count = bot.save_settlement_alerts(
+                    [row], [], datetime(2026, 8, 1, 12, tzinfo=timezone.utc)
+                )
+            report = alert.read_text(encoding="utf-8")
+        self.assertEqual(count, 1)
+        self.assertIn("OVERDUE UNRESOLVED OUTCOMES", report)
+        self.assertIn("Alert threshold: 24 hours", report)
 
     def test_bankroll_ledger_reconciles_stake_return_and_duplicate_rerun(self):
         with tempfile.TemporaryDirectory() as directory:

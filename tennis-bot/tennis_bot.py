@@ -32,6 +32,7 @@ PENDING_FILE = REPO_ROOT / "pending-bets.csv"
 POLICY_FILE = REPO_ROOT / "counterfactual-log.csv"
 TRANSACTION_FILE = REPO_ROOT / "bankroll-transactions.csv"
 PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
+SETTLEMENT_ALERT_FILE = REPO_ROOT / "settlement-alerts.md"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
@@ -43,6 +44,7 @@ REQUEST_TIMEOUT = 30
 MAX_TRANSIENT_RETRIES = 2
 RETRY_BASE_SECONDS = 0.5
 MAX_RETRY_DELAY_SECONDS = 8.0
+DEFAULT_UNRESOLVED_ALERT_HOURS = 48
 TRANSIENT_HTTP_STATUSES = {408, 425, 500, 502, 503, 504}
 CIRCUIT_FAILURE_THRESHOLD = 3
 CIRCUIT_COOLDOWN_SECONDS = 300
@@ -2241,6 +2243,45 @@ def tennis_void_reason(event: dict) -> str | None:
     return None
 
 
+def unresolved_alert_hours() -> int:
+    try:
+        return max(1, int(os.environ.get("TENNIS_UNRESOLVED_HOURS", DEFAULT_UNRESOLVED_ALERT_HOURS)))
+    except ValueError:
+        return DEFAULT_UNRESOLVED_ALERT_HOURS
+
+
+def save_settlement_alerts(real_rows: list[dict], paper_rows: list[dict], now: datetime | None = None) -> int:
+    """Publish overdue unresolved outcomes for human review and workflow alerts."""
+    now = now or datetime.now(timezone.utc)
+    threshold = unresolved_alert_hours()
+    overdue = []
+    for mode, rows in (("live", real_rows), ("paper", paper_rows)):
+        for row in rows:
+            if row.get("RESULT", "").strip() or not row.get("DATE"):
+                continue
+            try:
+                match_day_end = datetime.strptime(row["DATE"], "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=timezone.utc
+                )
+            except ValueError:
+                continue
+            age_hours = (now - match_day_end).total_seconds() / 3600
+            if age_hours >= threshold:
+                overdue.append((mode, row, age_hours))
+    lines = ["# Tennis Settlement Alerts", "", f"Updated: {now.isoformat()}",
+             f"Alert threshold: {threshold} hours after the match date ends.", ""]
+    if overdue:
+        lines.extend(["## OVERDUE UNRESOLVED OUTCOMES", "",
+                      "| Mode | Date | Match | Bet | Age |", "|---|---|---|---|---:|"])
+        for mode, row, age in overdue:
+            lines.append(f"| {mode} | {row.get('DATE', '')} | {row.get('MATCH', '')} | {row.get('BET', '')} | {age:.0f}h |")
+        log(f"WARNING: {len(overdue)} outcome(s) remain unresolved beyond {threshold} hours")
+    else:
+        lines.extend(["## OK", "", "No outcomes are overdue."])
+    atomic_write_text(SETTLEMENT_ALERT_FILE, "\n".join(lines) + "\n")
+    return len(overdue)
+
+
 def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
     """Settle finished tennis bets and add bookmaker returns to bankroll."""
     if not api_keys:
@@ -2262,6 +2303,7 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
             policy_rows = list(csv.DictReader(handle))
     dates = sorted({r.get("DATE", "") for r in rows + paper_rows + policy_rows if not r.get("RESULT", "").strip() and r.get("DATE")})
     if not dates:
+        save_settlement_alerts(rows, paper_rows)
         return 0
     events = []
     key_index = 0
@@ -2353,6 +2395,7 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
     if policy_settled:
         atomic_write_csv(POLICY_FILE, POLICY_HEADERS, policy_rows)
         log(f"Settled {policy_settled} counterfactual policy decision(s)")
+    save_settlement_alerts(rows, paper_rows)
     return settled + paper_settled
 
 

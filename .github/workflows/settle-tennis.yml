@@ -29,6 +29,15 @@ jobs:
           ODDS_API_KEY_4: ${{ secrets.ODDS_API_KEY_4 }}
           ODDS_API_KEY_5: ${{ secrets.ODDS_API_KEY_5 }}
         run: python tennis-bot/tennis_bot.py --settle-only
+      - name: Publish settlement alerts
+        if: always()
+        run: |
+          if [ -f settlement-alerts.md ]; then
+            cat settlement-alerts.md >> "$GITHUB_STEP_SUMMARY"
+            if grep -q "OVERDUE UNRESOLVED OUTCOMES" settlement-alerts.md; then
+              echo "::warning::One or more tennis outcomes are overdue and unresolved"
+            fi
+          fi
       - name: Commit settlement
         if: always()
         run: |
