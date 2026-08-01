@@ -223,7 +223,7 @@ Status conventions:
 
 ## Security
 
-- [ ] Rotate every API key previously exposed outside GitHub Secrets.
+- [x] Rotate every API key previously exposed outside GitHub Secrets.
 - [x] Read production credentials from GitHub Secrets/environment variables.
 - [x] Avoid printing API-key values in logs.
 - [x] Add automated secret scanning to CI.
