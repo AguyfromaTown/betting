@@ -1365,6 +1365,11 @@ class TennisBotTests(unittest.TestCase):
                 patch.object(bot, "TRANSACTION_FILE", transaction_path),
                 patch.object(bot, "BACKUPS_DIR", backups),
             ):
+                legacy = bot.ensure_bankroll_ledger(58.14)
+                self.assertEqual(
+                    [row["TYPE"] for row in legacy],
+                    ["opening_balance", "legacy_stake", "legacy_stake", "legacy_stake", "legacy_return"],
+                )
                 result = bot.migrate_legacy_financial_ledger()
                 _, transactions = bot.read_csv_rows(transaction_path)
                 manifest = root / result["manifest"]
@@ -1377,6 +1382,8 @@ class TennisBotTests(unittest.TestCase):
             self.assertEqual([row["TYPE"] for row in transactions], ["opening_balance", "stake", "stake", "stake", "return"])
             self.assertTrue(manifest.exists())
             payload = json.loads(manifest.read_text(encoding="utf-8"))
+            self.assertTrue(payload["replaced_legacy_ledger"])
+            self.assertTrue((root / payload["source_legacy_ledger_backup"]).exists())
             self.assertEqual(payload["opening_balance"], "60.00")
             self.assertEqual(payload["closing_balance"], "58.14")
             self.assertTrue(payload["audit"]["exactly_reconciled"])

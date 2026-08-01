@@ -1250,9 +1250,20 @@ def audit_financial_state() -> dict:
 
 def migrate_legacy_financial_ledger() -> dict:
     """Create an exact initial ledger only when legacy bet and bankroll evidence reconciles."""
-    _, existing = read_csv_rows(TRANSACTION_FILE)
-    if existing or TRANSACTION_FILE.exists():
-        raise RuntimeError("Refusing migration: bankroll transaction ledger already exists")
+    existing_headers, existing = read_csv_rows(TRANSACTION_FILE)
+    legacy_replacement = False
+    existing_ledger_sha256 = None
+    if existing:
+        validate_transaction_ledger(existing)
+        allowed_legacy_types = {"opening_balance", "legacy_stake", "legacy_return"}
+        if any(row.get("TYPE") not in allowed_legacy_types for row in existing):
+            raise RuntimeError("Refusing migration: non-legacy bankroll transaction ledger already exists")
+        if sum(row.get("TYPE") == "opening_balance" for row in existing) != 1:
+            raise RuntimeError("Refusing migration: legacy ledger opening transaction is ambiguous")
+        existing_ledger_sha256 = hashlib.sha256(TRANSACTION_FILE.read_bytes()).hexdigest()
+        legacy_replacement = True
+    elif TRANSACTION_FILE.exists():
+        raise RuntimeError("Refusing migration: empty bankroll transaction ledger already exists")
     _, bets = read_csv_rows(LOG_FILE)
     if not bets:
         raise RuntimeError("Refusing migration: no historical bets are available")
@@ -1337,6 +1348,9 @@ def migrate_legacy_financial_ledger() -> dict:
                 "BALANCE": f"{running_cents / 100:.2f}",
             }, rows[-1]["HASH"]))
     validate_transaction_ledger(rows)
+    backup_path = None
+    if legacy_replacement:
+        backup_path = backup_state_for_migration(TRANSACTION_FILE, existing_headers, TRANSACTION_HEADERS)
     atomic_write_csv(TRANSACTION_FILE, TRANSACTION_HEADERS, rows)
     audit = audit_financial_state()
     if not audit["exactly_reconciled"]:
@@ -1347,6 +1361,10 @@ def migrate_legacy_financial_ledger() -> dict:
         "schema_version": 1, "migration_id": migration_id, "created_at": created_at.isoformat(),
         "source_bets": LOG_FILE.name, "source_bets_sha256": hashlib.sha256(LOG_FILE.read_bytes()).hexdigest(),
         "source_bankroll": BANKROLL_FILE.name, "source_bankroll_sha256": hashlib.sha256(BANKROLL_FILE.read_bytes()).hexdigest(),
+        "replaced_legacy_ledger": legacy_replacement,
+        "source_legacy_ledger_sha256": existing_ledger_sha256,
+        "source_legacy_ledger_backup": (str(backup_path.relative_to(REPO_ROOT)).replace("\\", "/")
+                                         if backup_path is not None else None),
         "output_ledger": TRANSACTION_FILE.name, "output_ledger_sha256": hashlib.sha256(TRANSACTION_FILE.read_bytes()).hexdigest(),
         "bet_count": len(bets), "settled_bet_count": sum(item[5] for item in parsed),
         "opening_balance": f"{opening_cents / 100:.2f}", "closing_balance": f"{current_cents / 100:.2f}",
