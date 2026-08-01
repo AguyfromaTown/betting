@@ -32,7 +32,7 @@ Status conventions:
 - [x] Normalize accents, punctuation and reversed names.
 - [x] Require unique, high-confidence fuzzy matches before saving aliases.
 - [x] Reject unresolved identities through the model/data-quality gates.
-- [ ] Add a manual alias-review queue.
+- [x] Add a manual alias-review queue.
 - [ ] Store explicit identity confidence in every audit row.
 
 ## Player information

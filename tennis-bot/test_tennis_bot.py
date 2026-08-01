@@ -720,11 +720,14 @@ class TennisBotTests(unittest.TestCase):
             "player1": "Darderi, Luciano",
             "player2": "Unknown Player",
         }]
-        with (
-            patch.object(bot, "fetch", side_effect=[None, None]),
-            patch.object(bot, "fetch_reader", side_effect=[row, None]),
-        ):
-            profiles = bot.fetch_tennis_abstract_profiles(matches)
+        with tempfile.TemporaryDirectory() as directory:
+            review_file = Path(directory) / "player-alias-review.csv"
+            with (
+                patch.object(bot, "fetch", side_effect=[None, None]),
+                patch.object(bot, "fetch_reader", side_effect=[row, None]),
+                patch.object(bot, "ALIAS_REVIEW_FILE", review_file),
+            ):
+                profiles = bot.fetch_tennis_abstract_profiles(matches)
 
         line = bot.compact_profile_line("Darderi, Luciano", profiles)
         self.assertIn("official rank=23", line)
@@ -740,6 +743,51 @@ class TennisBotTests(unittest.TestCase):
                 resolved = bot.resolve_profile_key("A. Zverev", profiles, aliases)
 
         self.assertEqual(resolved, bot.normalize_player_name("Alexander Zverev"))
+
+    def test_ambiguous_player_identity_is_queued_once_for_manual_review(self):
+        profiles = {
+            bot.normalize_player_name("Anna Smith"): {"name": "Anna Smith"},
+            bot.normalize_player_name("Anne Smith"): {"name": "Anne Smith"},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            review_file = Path(directory) / "player-alias-review.csv"
+            aliases_file = Path(directory) / "player-aliases.csv"
+            with (
+                patch.object(bot, "ALIAS_REVIEW_FILE", review_file),
+                patch.object(bot, "PLAYER_ALIASES_FILE", aliases_file),
+            ):
+                self.assertIsNone(bot.resolve_profile_key("Ann Smith", profiles, {}))
+                self.assertIsNone(bot.resolve_profile_key("Ann Smith", profiles, {}))
+            _, rows = bot.read_csv_rows(review_file)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["STATUS"], "pending")
+        self.assertEqual(rows[0]["REASON"], "ambiguous_high_confidence")
+        self.assertIn("Smith", rows[0]["SUGGESTED_CANONICAL"])
+
+    def test_manually_approved_review_resolves_profile_identity(self):
+        profiles = {bot.normalize_player_name("Alexander Zverev"): {"name": "Alexander Zverev"}}
+        with tempfile.TemporaryDirectory() as directory:
+            review_file = Path(directory) / "player-alias-review.csv"
+            aliases_file = Path(directory) / "player-aliases.csv"
+            review_file.write_text(
+                "PROVIDER_NAME,NORMALIZED_NAME,SUGGESTED_CANONICAL,SUGGESTED_CONFIDENCE,ALTERNATIVES,REASON,STATUS,REVIEWED_CANONICAL,CREATED_AT,UPDATED_AT\n"
+                "A. Zverev,azverev,Alexander Zverev,0.900,,low_confidence,approved,Alexander Zverev,2026-08-01,2026-08-01\n",
+                encoding="utf-8",
+            )
+            with (
+                patch.object(bot, "ALIAS_REVIEW_FILE", review_file),
+                patch.object(bot, "PLAYER_ALIASES_FILE", aliases_file),
+            ):
+                aliases = bot.load_player_aliases()
+                resolved = bot.resolve_profile_key("A. Zverev", profiles, aliases)
+        self.assertEqual(resolved, bot.normalize_player_name("Alexander Zverev"))
+
+    def test_diagnostic_mode_does_not_write_alias_review_queue(self):
+        with tempfile.TemporaryDirectory() as directory:
+            review_file = Path(directory) / "player-alias-review.csv"
+            with patch.object(bot, "ALIAS_REVIEW_FILE", review_file), patch.object(bot, "DIAGNOSTIC_MODE", True):
+                bot.queue_alias_review("Unknown Player", [], "no_candidate")
+            self.assertFalse(review_file.exists())
 
     def test_player_normalization_preserves_diacritic_identity(self):
         self.assertEqual(bot.normalize_player_name("Félix Auger-Aliassime"), bot.normalize_player_name("Felix Auger Aliassime"))

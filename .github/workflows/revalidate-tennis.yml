@@ -52,6 +52,17 @@ jobs:
               echo "::warning::A tennis data provider response no longer matches the expected schema"
             fi
           fi
+      - name: Publish alias review queue
+        if: always()
+        run: |
+          if [ -f player-alias-review.csv ]; then
+            PENDING=$(python -c "import csv; print(sum((r.get('STATUS') or '').strip().lower() == 'pending' for r in csv.DictReader(open('player-alias-review.csv', encoding='utf-8'))))")
+            echo "## Player alias review" >> "$GITHUB_STEP_SUMMARY"
+            echo "Pending identities: $PENDING" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$PENDING" -gt 0 ]; then
+              echo "::warning::$PENDING tennis player identity alias(es) require manual review"
+            fi
+          fi
       - name: Commit lifecycle updates
         if: always()
         run: |

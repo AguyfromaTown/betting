@@ -42,6 +42,7 @@ RISK_CONFIG_FILE = REPO_ROOT / "risk-config.json"
 EXTERNAL_CACHE_FILE = REPO_ROOT / "external-cache.json"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
+ALIAS_REVIEW_FILE = REPO_ROOT / "player-alias-review.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
 ROLLBACK_STATE_FILE = REPO_ROOT / "model-policy-state.json"
 BACKUPS_DIR = REPO_ROOT / "state-backups"
@@ -1304,14 +1305,52 @@ def parse_tennis_abstract_reader(text: str) -> dict[str, dict]:
 
 
 def load_player_aliases() -> dict[str, str]:
-    if not PLAYER_ALIASES_FILE.exists() or not PLAYER_ALIASES_FILE.stat().st_size:
-        return {}
-    with PLAYER_ALIASES_FILE.open(newline="", encoding="utf-8") as handle:
-        return {
+    aliases = {}
+    if PLAYER_ALIASES_FILE.exists() and PLAYER_ALIASES_FILE.stat().st_size:
+        with PLAYER_ALIASES_FILE.open(newline="", encoding="utf-8") as handle:
+            aliases.update({
             normalize_player_name(row.get("PROVIDER_NAME", "")): normalize_player_name(row.get("CANONICAL_NAME", ""))
             for row in csv.DictReader(handle)
             if row.get("PROVIDER_NAME") and row.get("CANONICAL_NAME")
-        }
+            })
+    if ALIAS_REVIEW_FILE.exists() and ALIAS_REVIEW_FILE.stat().st_size:
+        with ALIAS_REVIEW_FILE.open(newline="", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                if str(row.get("STATUS") or "").strip().casefold() not in {"approved", "applied"}:
+                    continue
+                canonical = row.get("REVIEWED_CANONICAL") or row.get("SUGGESTED_CANONICAL")
+                if row.get("PROVIDER_NAME") and canonical:
+                    aliases[normalize_player_name(row["PROVIDER_NAME"])] = normalize_player_name(canonical)
+    return aliases
+
+
+def queue_alias_review(player: str, candidates: list[tuple[float, str, str]], reason: str):
+    """Persist an unresolved identity once for manual approval or rejection."""
+    if DIAGNOSTIC_MODE:
+        return
+    provider_key = normalize_player_name(player)
+    if not provider_key:
+        return
+    headers = [
+        "PROVIDER_NAME", "NORMALIZED_NAME", "SUGGESTED_CANONICAL", "SUGGESTED_CONFIDENCE",
+        "ALTERNATIVES", "REASON", "STATUS", "REVIEWED_CANONICAL", "CREATED_AT", "UPDATED_AT",
+    ]
+    _, rows = read_csv_rows(ALIAS_REVIEW_FILE)
+    if any(normalize_player_name(row.get("PROVIDER_NAME", "")) == provider_key for row in rows):
+        return
+    suggestions = sorted(candidates, reverse=True)[:3]
+    best = suggestions[0] if suggestions else None
+    now = datetime.now(timezone.utc).isoformat()
+    rows.append({
+        "PROVIDER_NAME": player, "NORMALIZED_NAME": provider_key,
+        "SUGGESTED_CANONICAL": best[2] if best else "",
+        "SUGGESTED_CONFIDENCE": f"{best[0]:.3f}" if best else "",
+        "ALTERNATIVES": "; ".join(f"{item[2]} ({item[0]:.3f})" for item in suggestions[1:]),
+        "REASON": reason, "STATUS": "pending", "REVIEWED_CANONICAL": "",
+        "CREATED_AT": now, "UPDATED_AT": now,
+    })
+    atomic_write_csv(ALIAS_REVIEW_FILE, headers, rows)
+    log(f"  Queued player identity for manual review: {player}")
 
 
 def save_player_alias(provider_name: str, canonical_name: str, confidence: float):
@@ -1339,13 +1378,16 @@ def resolve_profile_key(player: str, profiles: dict[str, dict], aliases: dict[st
     candidates = []
     for candidate, profile in profiles.items():
         score = difflib.SequenceMatcher(None, key, candidate).ratio()
-        if score >= 0.92:
+        if score >= 0.72:
             candidates.append((score, candidate, profile["name"]))
     candidates.sort(reverse=True)
-    if len(candidates) == 1 or (candidates and len(candidates) > 1 and candidates[0][0] - candidates[1][0] >= 0.05):
-        score, candidate, canonical = candidates[0]
+    high_confidence = [item for item in candidates if item[0] >= 0.92]
+    if len(high_confidence) == 1 or (len(high_confidence) > 1 and high_confidence[0][0] - high_confidence[1][0] >= 0.05):
+        score, candidate, canonical = high_confidence[0]
         save_player_alias(player, canonical, score)
         return candidate
+    reason = "ambiguous_high_confidence" if high_confidence else "low_confidence" if candidates else "no_candidate"
+    queue_alias_review(player, candidates, reason)
     return None
 
 
