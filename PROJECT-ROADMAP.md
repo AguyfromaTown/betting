@@ -141,8 +141,8 @@ Status conventions:
 - [x] Treat detected voids as refunds.
 - [x] Deduct stakes only after pre-match authorization.
 - [x] Prevent duplicate deductions.
-- [ ] Introduce an immutable bankroll transaction ledger.
-- [ ] Add automatic bankroll reconciliation.
+- [x] Introduce an immutable bankroll transaction ledger.
+- [x] Add automatic bankroll reconciliation.
 - [ ] Add an explicit paper-trading mode.
 - [ ] Add walk-forward simulations comparing fixed and Kelly staking.
 
@@ -155,7 +155,7 @@ Status conventions:
 - [x] Store closing odds and CLV when available.
 - [x] Retry unresolved outcomes on later scheduled runs.
 - [ ] Alert when an outcome remains unresolved beyond a configured period.
-- [ ] Reconcile every return against an immutable transaction ledger.
+- [x] Reconcile every return against an immutable transaction ledger.
 - [x] Never infer an outcome when verified scores are unavailable.
 
 ## Reliability and recovery

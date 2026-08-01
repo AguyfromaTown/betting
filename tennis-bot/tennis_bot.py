@@ -29,12 +29,14 @@ LOG_FILE = REPO_ROOT / "bets-log.csv"
 AUDIT_FILE = REPO_ROOT / "predictions-log.csv"
 PENDING_FILE = REPO_ROOT / "pending-bets.csv"
 POLICY_FILE = REPO_ROOT / "counterfactual-log.csv"
+TRANSACTION_FILE = REPO_ROOT / "bankroll-transactions.csv"
 PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
 RUN_STATE_FILE = REPO_ROOT / "run-state.json"
 ROLLBACK_STATE_FILE = REPO_ROOT / "model-policy-state.json"
 BACKUPS_DIR = REPO_ROOT / "state-backups"
+TRANSACTION_HEADERS = ["ID", "TIMESTAMP", "TYPE", "REFERENCE", "AMOUNT", "BALANCE", "PREVIOUS_HASH", "HASH"]
 REPORTS_DIR = REPO_ROOT / "reports"
 REQUEST_TIMEOUT = 30
 MAX_TRANSIENT_RETRIES = 2
@@ -442,6 +444,13 @@ def resolve_date(raw: str | None) -> str:
 
 def load_bankroll(args_bankroll: float | None) -> float | None:
     if args_bankroll is not None:
+        previous = None
+        if BANKROLL_FILE.exists():
+            try: previous = float(BANKROLL_FILE.read_text().strip())
+            except ValueError: pass
+        if previous is not None:
+            ensure_bankroll_ledger(previous)
+            record_bankroll_transaction("manual_adjustment", f"override:{datetime.now(timezone.utc).isoformat()}", args_bankroll - previous)
         atomic_write_text(BANKROLL_FILE, str(args_bankroll))
         log(f"Bankroll overridden to €{args_bankroll:.2f}")
         return args_bankroll
@@ -463,9 +472,95 @@ def load_bankroll(args_bankroll: float | None) -> float | None:
 def save_bankroll(bankroll: float | None, total_stake: float):
     if bankroll is None:
         return
-    remaining = round(bankroll - total_stake, 2)
-    atomic_write_text(BANKROLL_FILE, str(remaining))
-    log(f"Bankroll saved: €{remaining:.2f} (was €{bankroll:.2f}, staked €{total_stake:.2f})")
+    remaining = reconcile_bankroll(bankroll)
+    log(f"Bankroll reconciled: €{remaining:.2f} (was €{bankroll:.2f}, newly staked €{total_stake:.2f})")
+
+
+def bankroll_reference(row: dict) -> str:
+    pick = normalize_player_name(re.sub(r"\s+to win\s*$", "", row.get("BET", ""), flags=re.I))
+    return f"{row.get('DATE', '')}|{pick}|{normalize_player_name(row.get('MATCH', ''))}"
+
+
+def transaction_id(kind: str, reference: str) -> str:
+    return hashlib.sha256(f"{kind}|{reference}".encode("utf-8")).hexdigest()[:24]
+
+
+def seal_transaction(row: dict, previous_hash: str) -> dict:
+    row = {**row, "PREVIOUS_HASH": previous_hash}
+    payload = "|".join(str(row.get(field, "")) for field in TRANSACTION_HEADERS[:-1])
+    row["HASH"] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return row
+
+
+def validate_transaction_ledger(rows: list[dict]) -> bool:
+    previous_hash = "GENESIS"
+    for row in rows:
+        expected = seal_transaction({key: value for key, value in row.items() if key not in {"PREVIOUS_HASH", "HASH"}}, previous_hash)
+        if row.get("PREVIOUS_HASH") != previous_hash or row.get("HASH") != expected["HASH"]:
+            raise RuntimeError(f"Bankroll ledger integrity failure at transaction {row.get('ID', 'unknown')}")
+        previous_hash = row["HASH"]
+    return True
+
+
+def ensure_bankroll_ledger(balance: float) -> list[dict]:
+    """Create a ledger baseline while marking pre-existing bets as already reflected."""
+    headers, rows = read_csv_rows(TRANSACTION_FILE)
+    if rows:
+        validate_transaction_ledger(rows)
+        return rows
+    now = datetime.now(timezone.utc).isoformat()
+    rows = [seal_transaction({"ID": transaction_id("opening_balance", "ledger"), "TIMESTAMP": now,
+             "TYPE": "opening_balance", "REFERENCE": "ledger", "AMOUNT": f"{balance:.2f}", "BALANCE": f"{balance:.2f}"}, "GENESIS")]
+    _, bets = read_csv_rows(LOG_FILE)
+    for bet in bets:
+        reference = bankroll_reference(bet)
+        rows.append(seal_transaction({"ID": transaction_id("stake", reference), "TIMESTAMP": now, "TYPE": "legacy_stake",
+                     "REFERENCE": reference, "AMOUNT": "0.00", "BALANCE": f"{balance:.2f}"}, rows[-1]["HASH"]))
+        if bet.get("RESULT") in {"W", "L", "V"}:
+            rows.append(seal_transaction({"ID": transaction_id("return", reference), "TIMESTAMP": now, "TYPE": "legacy_return",
+                         "REFERENCE": reference, "AMOUNT": "0.00", "BALANCE": f"{balance:.2f}"}, rows[-1]["HASH"]))
+    atomic_write_csv(TRANSACTION_FILE, TRANSACTION_HEADERS, rows)
+    return rows
+
+
+def record_bankroll_transaction(kind: str, reference: str, amount: float) -> float:
+    _, rows = read_csv_rows(TRANSACTION_FILE)
+    if not rows:
+        raise RuntimeError("Bankroll ledger must be initialized before recording transactions")
+    validate_transaction_ledger(rows)
+    identifier = transaction_id(kind, reference)
+    existing = next((row for row in rows if row.get("ID") == identifier), None)
+    if existing:
+        return float(existing["BALANCE"])
+    balance = round(float(rows[-1]["BALANCE"]) + amount, 2)
+    rows.append(seal_transaction(
+        {"ID": identifier, "TIMESTAMP": datetime.now(timezone.utc).isoformat(), "TYPE": kind,
+         "REFERENCE": reference, "AMOUNT": f"{amount:.2f}", "BALANCE": f"{balance:.2f}"},
+        rows[-1]["HASH"],
+    ))
+    atomic_write_csv(TRANSACTION_FILE, TRANSACTION_HEADERS, rows)
+    return balance
+
+
+def reconcile_bankroll(current_balance: float | None = None) -> float:
+    """Import missing bet transactions and make bankroll.txt match the ledger."""
+    if current_balance is None:
+        current_balance = float(BANKROLL_FILE.read_text().strip() or 0) if BANKROLL_FILE.exists() else 0.0
+    ensure_bankroll_ledger(current_balance)
+    _, bets = read_csv_rows(LOG_FILE)
+    for bet in bets:
+        reference = bankroll_reference(bet)
+        try: stake = float(bet.get("STAKE") or 0)
+        except ValueError: stake = 0.0
+        record_bankroll_transaction("stake", reference, -stake)
+        if bet.get("RESULT") in {"W", "L", "V"}:
+            try: returned = float(bet.get("RETURN") or 0)
+            except ValueError: returned = 0.0
+            record_bankroll_transaction("return", reference, returned)
+    _, transactions = read_csv_rows(TRANSACTION_FILE)
+    balance = round(float(transactions[-1]["BALANCE"]), 2)
+    atomic_write_text(BANKROLL_FILE, f"{balance:.2f}")
+    return balance
 
 
 # ─── Stage 1: Data Collection ────────────────────────────────────────
@@ -2151,6 +2246,9 @@ def settle_pending_bets(api_keys: list[str]) -> int:
     if LOG_FILE.exists() and LOG_FILE.stat().st_size:
         with open(LOG_FILE, newline="", encoding="utf-8") as handle:
             rows = list(csv.DictReader(handle))
+    if BANKROLL_FILE.exists():
+        try: reconcile_bankroll(float(BANKROLL_FILE.read_text().strip() or 0))
+        except ValueError: pass
     policy_rows = []
     if POLICY_FILE.exists() and POLICY_FILE.stat().st_size:
         with POLICY_FILE.open(newline="", encoding="utf-8") as handle:
@@ -2219,9 +2317,9 @@ def settle_pending_bets(api_keys: list[str]) -> int:
     if settled:
         headers = ["DATE", "MATCH", "BET", "ODDS", "STAKE", "RESULT", "RETURN", "STARTING BALANCE"]
         atomic_write_csv(LOG_FILE, headers, rows)
-        balance = float(BANKROLL_FILE.read_text().strip() or 0) + credited
-        atomic_write_text(BANKROLL_FILE, f"{balance:.2f}")
+        balance = reconcile_bankroll()
         log(f"Settled {settled} bet(s); credited €{credited:.2f}")
+        log(f"Bankroll reconciled to ledger: €{balance:.2f}")
     policy_settled = 0
     for row in policy_rows:
         if row.get("RESULT"): continue
@@ -2472,6 +2570,8 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
             ready_by_date.setdefault(row["DATE"], []).append(row)
 
     bankroll = float(BANKROLL_FILE.read_text().strip() or 0) if BANKROLL_FILE.exists() else None
+    if bankroll is not None:
+        bankroll = reconcile_bankroll(bankroll)
     authorized_recs, authorized_matches = [], []
     for date_str, candidates in ready_by_date.items():
         fresh = fetch_matches_from_odds_api(date_str, api_keys)

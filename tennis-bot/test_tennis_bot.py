@@ -318,6 +318,7 @@ class TennisBotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             log_path, bankroll_path = root / "bets-log.csv", root / "bankroll.txt"
+            transaction_path = root / "bankroll-transactions.csv"
             log_path.write_text(
                 "DATE,MATCH,BET,ODDS,STAKE,RESULT,RETURN,STARTING BALANCE\n"
                 "2026-08-01,Player One vs Player Two (ATP),Player One to win,2.00,3.00,,,100.00\n",
@@ -327,6 +328,7 @@ class TennisBotTests(unittest.TestCase):
             with (
                 patch.object(bot, "LOG_FILE", log_path),
                 patch.object(bot, "BANKROLL_FILE", bankroll_path),
+                patch.object(bot, "TRANSACTION_FILE", transaction_path),
                 patch.object(bot, "fetch_odds_json", side_effect=[([event], 0), ([], 0)]),
                 patch.object(bot, "update_audit_result"),
             ):
@@ -338,6 +340,49 @@ class TennisBotTests(unittest.TestCase):
             self.assertEqual(rows[0]["RESULT"], "W")
             self.assertEqual(rows[0]["RETURN"], "6.00")
             self.assertEqual(bankroll_path.read_text(), "103.00")
+
+    def test_bankroll_ledger_reconciles_stake_return_and_duplicate_rerun(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log_path = root / "bets-log.csv"
+            bankroll_path = root / "bankroll.txt"
+            transaction_path = root / "bankroll-transactions.csv"
+            bankroll_path.write_text("100.00", encoding="utf-8")
+            with (
+                patch.object(bot, "LOG_FILE", log_path),
+                patch.object(bot, "BANKROLL_FILE", bankroll_path),
+                patch.object(bot, "TRANSACTION_FILE", transaction_path),
+            ):
+                bot.ensure_bankroll_ledger(100.0)
+                stake = bot.log_bets(
+                    "2026-08-01",
+                    [{"player": "A", "grade": "Value Pick", "odds": 1.6, "assessed_probability": .7}],
+                    [{"player1": "A", "player2": "B", "tournament": "ATP"}],
+                    100.0,
+                )
+                after_stake = bot.reconcile_bankroll(100.0)
+                headers, bets = bot.read_csv_rows(log_path)
+                bets[0].update({"RESULT": "W", "RETURN": f"{stake * 1.6:.2f}"})
+                bot.atomic_write_csv(log_path, headers, bets)
+                after_return = bot.reconcile_bankroll(after_stake)
+                after_duplicate = bot.reconcile_bankroll(after_return)
+                _, transactions = bot.read_csv_rows(transaction_path)
+
+            self.assertEqual(after_stake, 98.0)
+            self.assertEqual(after_return, 101.2)
+            self.assertEqual(after_duplicate, 101.2)
+            self.assertEqual([row["TYPE"] for row in transactions], ["opening_balance", "stake", "return"])
+            self.assertTrue(bot.validate_transaction_ledger(transactions))
+
+    def test_bankroll_ledger_detects_historical_tampering(self):
+        opening = bot.seal_transaction({
+            "ID": "one", "TIMESTAMP": "2026-08-01T00:00:00Z", "TYPE": "opening_balance",
+            "REFERENCE": "ledger", "AMOUNT": "100.00", "BALANCE": "100.00",
+        }, "GENESIS")
+        changed = dict(opening)
+        changed["BALANCE"] = "1000.00"
+        with self.assertRaises(RuntimeError):
+            bot.validate_transaction_ledger([changed])
 
     def test_log_bets_deduplicates_same_player_and_date(self):
         recommendation = {
