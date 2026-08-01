@@ -228,7 +228,7 @@ Status conventions:
 - [x] Avoid printing API-key values in logs.
 - [x] Add automated secret scanning to CI.
 - [x] Use limited GitHub workflow permissions.
-- [ ] Pin GitHub Actions by immutable commit SHA.
+- [x] Pin GitHub Actions by immutable commit SHA.
 - [x] Escape externally sourced dashboard content.
 - [ ] Add automated dependency vulnerability scanning.
 

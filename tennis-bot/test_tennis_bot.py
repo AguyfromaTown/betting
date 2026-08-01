@@ -2386,6 +2386,16 @@ class TennisBotTests(unittest.TestCase):
         self.assertTrue(action_refs)
         self.assertTrue(all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in action_refs))
 
+    def test_every_external_github_action_is_immutably_pinned(self):
+        workflows = MODULE_PATH.parent.parent.joinpath(".github", "workflows").glob("*.yml")
+        found = []
+        for path in workflows:
+            text = path.read_text(encoding="utf-8")
+            for action, ref in re.findall(r"uses:\s*([^@\s]+)@([^\s#]+)", text):
+                found.append((path.name, action, ref))
+                self.assertRegex(ref, r"^[0-9a-f]{40}$", f"{path.name}: {action} is not pinned")
+        self.assertTrue(found)
+
 
 if __name__ == "__main__":
     unittest.main()
