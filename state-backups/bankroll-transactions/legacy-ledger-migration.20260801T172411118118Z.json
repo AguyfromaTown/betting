@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "migration_id": "20260801T172411118118Z",
+  "created_at": "2026-08-01T17:24:11.118118+00:00",
+  "source_bets": "bets-log.csv",
+  "source_bets_sha256": "5c4e413a6798122253161f6de7068ecb059a2d2f750cc6823af3477e56e1cdb1",
+  "source_bankroll": "bankroll.txt",
+  "source_bankroll_sha256": "b41210dadd4a266a33be26b30b76b0e1a629781b3892f19d0c4ed5366b839b60",
+  "replaced_legacy_ledger": true,
+  "source_legacy_ledger_sha256": "04e9b12be073339530b159a57bfb7b7022a6770f5cdedb80634e7644bcdabc7a",
+  "source_legacy_ledger_backup": "state-backups/bankroll-transactions/bankroll-transactions.csv.20260801T172411118282Z.04e9b12be073.bak",
+  "output_ledger": "bankroll-transactions.csv",
+  "output_ledger_sha256": "43dd8f42e6d2918ab65d357f7c1f4bf382754dbe9cbb8e6b75f0f9c1066ae432",
+  "bet_count": 5,
+  "settled_bet_count": 2,
+  "opening_balance": "60.00",
+  "closing_balance": "53.10",
+  "total_stakes": "6.90",
+  "total_returns": "0.00",
+  "audit": {
+    "status": "passed",
+    "exactly_reconciled": true,
+    "bet_count": 5,
+    "transaction_count": 8,
+    "exact_stakes": 5,
+    "exact_returns": 2,
+    "legacy_transactions": 0,
+    "ending_ledger_balance": 53.1,
+    "bankroll_balance": 53.1,
+    "issues": []
+  }
+}

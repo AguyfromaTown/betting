@@ -1,0 +1,26 @@
+{
+  "source": "bankroll-transactions.csv",
+  "backup": "bankroll-transactions.csv.20260801T172411118282Z.04e9b12be073.bak",
+  "created_at": "2026-08-01T17:24:11.120874+00:00",
+  "sha256": "04e9b12be073339530b159a57bfb7b7022a6770f5cdedb80634e7644bcdabc7a",
+  "old_headers": [
+    "ID",
+    "TIMESTAMP",
+    "TYPE",
+    "REFERENCE",
+    "AMOUNT",
+    "BALANCE",
+    "PREVIOUS_HASH",
+    "HASH"
+  ],
+  "new_headers": [
+    "ID",
+    "TIMESTAMP",
+    "TYPE",
+    "REFERENCE",
+    "AMOUNT",
+    "BALANCE",
+    "PREVIOUS_HASH",
+    "HASH"
+  ]
+}
