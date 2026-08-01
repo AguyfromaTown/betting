@@ -39,6 +39,7 @@ PENDING_FILE = REPO_ROOT / "pending-bets.csv"
 POLICY_FILE = REPO_ROOT / "counterfactual-log.csv"
 TRANSACTION_FILE = REPO_ROOT / "bankroll-transactions.csv"
 PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
+MONTHLY_POLICY_FILE = REPO_ROOT / "monthly-policy-report.md"
 SETTLEMENT_ALERT_FILE = REPO_ROOT / "settlement-alerts.md"
 API_QUOTA_FILE = REPO_ROOT / "api-quota.md"
 SCHEMA_ALERT_FILE = REPO_ROOT / "provider-schema-alerts.md"
@@ -78,6 +79,7 @@ MIN_WORKLOAD_TRAINING_SAMPLE = 200
 MIN_WORKLOAD_TRIGGER_SAMPLE = 30
 MIN_MARKET_LIMIT_TRAINING_SAMPLE = 200
 MIN_MARKET_LIMIT_TRIGGER_SAMPLE = 30
+MIN_MONTHLY_POLICY_SAMPLE = 30
 KELLY_FRACTION = 0.25
 MIN_STAKE_RATE = 0.005
 MAX_PRICE_MOVEMENT = 0.10
@@ -92,7 +94,7 @@ OFFICIAL_STATUS_DOMAINS = {
 BLOCKING_PHYSICAL_STATUSES = {"questionable", "injured", "withdrawn", "unavailable", "suspended"}
 MAX_CACHE_ENTRY_BYTES = 2_000_000
 MAX_CACHE_ENTRIES = 20
-MODEL_VERSION = "tennis-2026.08-threshold-challengers-v1"
+MODEL_VERSION = "tennis-2026.08-monthly-policy-report-v1"
 THRESHOLD_CHALLENGER_POLICIES = (
     {"id": "threshold-conservative-v1", "movement": .06, "dispersion": .08, "quality": 7, "risk_ev": .07},
     {"id": "threshold-standard-v1", "movement": .10, "dispersion": .12, "quality": 5, "risk_ev": .05},
@@ -444,6 +446,7 @@ def save_prediction_snapshot(date_str: str, match: dict, player: str, baseline: 
         "minimum_workload_trigger_sample": MIN_WORKLOAD_TRIGGER_SAMPLE,
         "minimum_market_limit_training_sample": MIN_MARKET_LIMIT_TRAINING_SAMPLE,
         "minimum_market_limit_trigger_sample": MIN_MARKET_LIMIT_TRIGGER_SAMPLE,
+        "minimum_monthly_policy_sample": MIN_MONTHLY_POLICY_SAMPLE,
         "maximum_market_overround": MAX_MARKET_OVERROUND,
         "maximum_elo_market_gap": MAX_ELO_MARKET_GAP,
         "maximum_bookmaker_dispersion": MAX_BOOKMAKER_DISPERSION,
@@ -4206,6 +4209,68 @@ def counterfactual_rule_metrics(rows: list[dict]) -> dict:
     }
 
 
+def monthly_threshold_recommendation(challenger: dict, active: dict) -> str:
+    """Return an advisory recommendation only after complete, mature counterfactual evidence."""
+    if (challenger["count"] < MIN_MONTHLY_POLICY_SAMPLE
+            or challenger["clv_sample"] < MIN_MONTHLY_POLICY_SAMPLE
+            or challenger["brier_sample"] < MIN_MONTHLY_POLICY_SAMPLE):
+        return "collecting data"
+    if challenger["roi"] <= 0 or challenger["clv"] is None or challenger["clv"] <= 0:
+        return "do not promote"
+    if (active["count"] < MIN_MONTHLY_POLICY_SAMPLE or active["clv"] is None
+            or active["brier"] is None or challenger["brier"] is None):
+        return "retain in shadow"
+    if (challenger["roi"] > active["roi"] and challenger["clv"] >= active["clv"]
+            and challenger["brier"] <= active["brier"]):
+        return "review for promotion"
+    return "retain in shadow"
+
+
+def generate_monthly_policy_report(policy_rows: list[dict], output_file: Path | None = None):
+    """Publish calendar-month counterfactual evidence and non-binding threshold recommendations."""
+    output_file = output_file or MONTHLY_POLICY_FILE
+    settled = [row for row in policy_rows if row.get("RESULT") in {"W", "L"} and re.fullmatch(r"\d{4}-\d{2}", (row.get("DATE") or "")[:7])]
+    months = sorted({row["DATE"][:7] for row in settled})
+    lines = ["# Monthly Tennis Policy Report", "", f"Model version: `{MODEL_VERSION}`", "",
+             f"Promotion recommendations require at least {MIN_MONTHLY_POLICY_SAMPLE} hypothetical authorizations with closing-price and probability evidence.",
+             "Recommendations are advisory and never alter live thresholds automatically."]
+    for month in months:
+        month_rows = [row for row in settled if row["DATE"].startswith(month)]
+        active_rows = [row for row in month_rows if (row.get("POLICY_ROLE") or "active") == "active"]
+        active_authorized = [row for row in active_rows if row.get("DECISION") == "authorized"]
+        active_metrics = counterfactual_rule_metrics(active_authorized)
+        lines.extend(["", f"## {month}", "", "### Active rejection rules", "",
+                      "| Rule | Rejections | Flat-unit ROI | Avg CLV | Brier |",
+                      "|---|---:|---:|---:|---:|"])
+        rejected = [row for row in active_rows if row.get("DECISION") == "cancelled"]
+        for rule in sorted({row.get("RULE") or "unknown" for row in rejected}):
+            metrics = counterfactual_rule_metrics([row for row in rejected if (row.get("RULE") or "unknown") == rule])
+            clv_text = f"{metrics['clv']:.2%}" if metrics["clv"] is not None else "N/A"
+            brier_text = f"{metrics['brier']:.4f}" if metrics["brier"] is not None else "N/A"
+            lines.append(f"| {rule} | {metrics['count']} | {metrics['roi']:.2%} | {clv_text} | {brier_text} |")
+        if not rejected:
+            lines.append("| No settled rejections | 0 | N/A | N/A | N/A |")
+        lines.extend(["", "### Threshold challengers", "",
+                      "| Policy | Thresholds | Evaluated | Would authorize | ROI | Avg CLV | Brier | Recommendation |",
+                      "|---|---|---:|---:|---:|---:|---:|---|"])
+        shadow_rows = [row for row in month_rows if row.get("POLICY_ROLE") == "shadow"]
+        for policy_id in sorted({row.get("POLICY_ID") or "unknown" for row in shadow_rows}):
+            group = [row for row in shadow_rows if (row.get("POLICY_ID") or "unknown") == policy_id]
+            authorized = [row for row in group if row.get("DECISION") == "authorized"]
+            metrics = counterfactual_rule_metrics(authorized)
+            recommendation = monthly_threshold_recommendation(metrics, active_metrics)
+            thresholds = next((row.get("THRESHOLDS") for row in group if row.get("THRESHOLDS")), "not recorded")
+            clv_text = f"{metrics['clv']:.2%}" if metrics["clv"] is not None else "N/A"
+            brier_text = f"{metrics['brier']:.4f}" if metrics["brier"] is not None else "N/A"
+            lines.append(f"| {policy_id} | {thresholds} | {len(group)} | {metrics['count']} | "
+                         f"{metrics['roi']:.2%} | {clv_text} | {brier_text} | {recommendation} |")
+        if not shadow_rows:
+            lines.append("| No settled shadow policies | not recorded | 0 | 0 | N/A | N/A | N/A | collecting data |")
+    if not months:
+        lines.extend(["", "## No settled monthly policy evidence", "", "Threshold challengers remain in shadow mode."])
+    atomic_write_text(output_file, "\n".join(lines) + "\n")
+
+
 def generate_performance_summary():
     bets = []
     if LOG_FILE.exists() and LOG_FILE.stat().st_size:
@@ -4282,6 +4347,7 @@ def generate_performance_summary():
                       f"{average_clv} | {brier_score_text} |")
     if not shadow_policy: health.append("| No settled shadow policies | 0 | 0 | N/A | N/A | N/A |")
     atomic_write_text(REPO_ROOT / "weekly-health.md", "\n".join(health) + "\n")
+    generate_monthly_policy_report(policy_resolved, REPO_ROOT / "monthly-policy-report.md")
     generate_backtest_summary(resolved)
     log(f"Performance summary saved: {PERFORMANCE_FILE.name}")
 

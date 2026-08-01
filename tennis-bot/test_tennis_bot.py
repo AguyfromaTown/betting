@@ -704,6 +704,38 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("## Simultaneous threshold challengers", report)
         self.assertIn("| threshold-standard-v1 | 1 | 1 | 60.00% | 4.00% | 0.0900 |", report)
 
+    def test_monthly_threshold_recommendations_require_mature_superior_evidence(self):
+        active = {"count": 30, "roi": .05, "clv": .01, "clv_sample": 30, "brier": .20, "brier_sample": 30}
+        immature = {"count": 29, "roi": .20, "clv": .03, "clv_sample": 29, "brier": .10, "brier_sample": 29}
+        superior = {"count": 30, "roi": .10, "clv": .02, "clv_sample": 30, "brier": .15, "brier_sample": 30}
+        harmful = {"count": 30, "roi": -.01, "clv": -.01, "clv_sample": 30, "brier": .15, "brier_sample": 30}
+        self.assertEqual(bot.monthly_threshold_recommendation(immature, active), "collecting data")
+        self.assertEqual(bot.monthly_threshold_recommendation(superior, active), "review for promotion")
+        self.assertEqual(bot.monthly_threshold_recommendation(harmful, active), "do not promote")
+
+    def test_monthly_policy_report_groups_calendar_months_and_keeps_advice_non_binding(self):
+        rows = [
+            {"DATE": "2026-07-10", "POLICY_ROLE": "active", "DECISION": "cancelled",
+             "RULE": "bookmaker_conflict", "RESULT": "L", "FLAT_RETURN": "-1",
+             "PROBABILITY": ".70", "BRIER_SCORE": ".49", "CLV": "-.02"},
+            {"DATE": "2026-07-10", "POLICY_ROLE": "shadow", "POLICY_ID": "threshold-standard-v1",
+             "THRESHOLDS": "movement<=.100", "DECISION": "authorized", "RESULT": "W",
+             "FLAT_RETURN": ".60", "PROBABILITY": ".70", "BRIER_SCORE": ".09", "CLV": ".03"},
+            {"DATE": "2026-08-02", "POLICY_ROLE": "shadow", "POLICY_ID": "threshold-standard-v1",
+             "THRESHOLDS": "movement<=.100", "DECISION": "authorized", "RESULT": "L",
+             "FLAT_RETURN": "-1", "PROBABILITY": ".70", "BRIER_SCORE": ".49", "CLV": "-.01"},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "monthly.md"
+            bot.generate_monthly_policy_report(rows, output)
+            report = output.read_text(encoding="utf-8")
+        self.assertIn("## 2026-07", report)
+        self.assertIn("## 2026-08", report)
+        self.assertIn("| bookmaker_conflict | 1 | -100.00% | -2.00% | 0.4900 |", report)
+        self.assertIn("threshold-standard-v1", report)
+        self.assertIn("collecting data", report)
+        self.assertIn("never alter live thresholds automatically", report)
+
     def test_tour_calibration_never_borrows_other_tours(self):
         rows = ([{"MODEL_PROBABILITY": ".60", "RESULT": "W", "TOUR": "ATP"} for _ in range(99)] +
                 [{"MODEL_PROBABILITY": ".60", "RESULT": "L", "TOUR": "WTA"} for _ in range(100)])
