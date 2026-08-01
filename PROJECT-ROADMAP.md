@@ -75,7 +75,7 @@ Status conventions:
 - [x] Calibrate ATP, WTA, Challenger and ITF independently after sufficient samples.
 - [x] Segment historical evaluation by surface and tour/level.
 - [x] Build separate best-of-three and best-of-five models.
-- [ ] Build indoor/outdoor models after sufficient data.
+- [x] Build indoor/outdoor models after sufficient data.
 - [x] Use chronological walk-forward training and holdout evaluation.
 - [x] Exclude future results from decision-time training.
 - [x] Require minimum sample sizes before learned weights activate.

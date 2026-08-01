@@ -87,7 +87,7 @@ OFFICIAL_STATUS_DOMAINS = {
 BLOCKING_PHYSICAL_STATUSES = {"questionable", "injured", "withdrawn", "unavailable", "suspended"}
 MAX_CACHE_ENTRY_BYTES = 2_000_000
 MAX_CACHE_ENTRIES = 20
-MODEL_VERSION = "tennis-2026.08-format-models-v1"
+MODEL_VERSION = "tennis-2026.08-environment-models-v1"
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -2350,6 +2350,54 @@ def learned_format_component_weights(rows: list[dict], best_of: int) -> dict | N
     return learned
 
 
+def canonical_environment(value) -> str | None:
+    if isinstance(value, bool):
+        return "Indoor" if value else "Outdoor"
+    text = str(value or "").strip().casefold()
+    if text in {"true", "1", "yes", "indoor"}:
+        return "Indoor"
+    if text in {"false", "0", "no", "outdoor"}:
+        return "Outdoor"
+    return None
+
+
+def learned_environment_component_weights(rows: list[dict], indoor) -> dict | None:
+    """Train indoor and outdoor component-weight challengers without cross-environment borrowing."""
+    environment = canonical_environment(indoor)
+    if environment is None:
+        return None
+    environment_rows = [row for row in rows if canonical_environment(row.get("INDOOR")) == environment]
+    learned = learned_component_weights(environment_rows)
+    if learned:
+        learned = {**learned, "environment": environment}
+    return learned
+
+
+def component_challenger_probability(learned: dict | None, components: dict[str, float]) -> tuple[float | None, dict]:
+    if not learned:
+        return None, {}
+    used = {name: learned["weights"][name] for name in components if name in learned["weights"]}
+    if not used:
+        return None, {}
+    probability = sum(components[name] * weight for name, weight in used.items()) / sum(used.values())
+    return probability, used
+
+
+def choose_promoted_component_model(candidates: list[dict], rollback: bool) -> dict | None:
+    """Choose one proven challenger by relative holdout improvement; never blend overlapping models."""
+    if rollback:
+        return None
+    eligible = [candidate for candidate in candidates if candidate.get("learned") and
+                candidate["learned"].get("promoted") and candidate.get("probability") is not None]
+    if not eligible:
+        return None
+    def ratio(candidate):
+        active = candidate["learned"].get("active_brier")
+        challenger = candidate["learned"].get("challenger_brier")
+        return challenger / active if active and challenger is not None else float("inf")
+    return min(eligible, key=lambda candidate: (ratio(candidate), candidate["name"]))
+
+
 def workload_policy_penalty(values: dict, policy: dict) -> float:
     """Apply a bounded workload policy to either live lower-case or audit upper-case fields."""
     def number(lower: str, upper: str, default=0.0):
@@ -2638,21 +2686,33 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         component_weights = "elo=.55;market=.45;form=0;serve_return=0"
     decision_date = str(match.get("start_time") or "")[:10] or None
     history = load_resolved_predictions(decision_date)
-    comparable = [row for row in history if (row.get("SURFACE") or "Unknown") == (surface or "Unknown")]
-    challenger = learned_format_component_weights(history, match_best_of)
+    format_challenger = learned_format_component_weights(history, match_best_of)
+    environment_challenger = learned_environment_component_weights(history, match.get("indoor"))
     rollback = automated_rollback_state(history)
-    challenger_probability = None
-    if challenger:
-        components = {"elo": elo_probability, "market": market_probability}
-        if recent_form:
-            components["form"] = recent_form["probability"]
-        if serve_return:
-            components["serve_return"] = serve_return["probability"]
-        used = {name: challenger["weights"][name] for name in components if name in challenger["weights"]}
-        challenger_probability = sum(components[name] * weight for name, weight in used.items()) / sum(used.values())
-        if challenger["promoted"] and not rollback["model_rollback"]:
-            assessed_probability = challenger_probability
-            component_weights = "learned:" + ";".join(f"{name}={weight:.3f}" for name, weight in sorted(used.items()))
+    components = {"elo": elo_probability, "market": market_probability}
+    if recent_form:
+        components["form"] = recent_form["probability"]
+    if serve_return:
+        components["serve_return"] = serve_return["probability"]
+    format_probability, format_used = component_challenger_probability(format_challenger, components)
+    environment_probability, environment_used = component_challenger_probability(environment_challenger, components)
+    candidates = [
+        {"name": f"format:BO{match_best_of}", "learned": format_challenger,
+         "probability": format_probability, "weights": format_used},
+        {"name": f"environment:{canonical_environment(match.get('indoor')) or 'Unknown'}",
+         "learned": environment_challenger, "probability": environment_probability, "weights": environment_used},
+    ]
+    selected_challenger = choose_promoted_component_model(candidates, rollback["model_rollback"])
+    shadow_challenger = selected_challenger or next((candidate for candidate in candidates if candidate["probability"] is not None), None)
+    challenger_probability = shadow_challenger["probability"] if shadow_challenger else None
+    challenger = shadow_challenger["learned"] if shadow_challenger else None
+    active_component_model = "static"
+    if selected_challenger:
+        assessed_probability = selected_challenger["probability"]
+        active_component_model = selected_challenger["name"]
+        component_weights = "learned:" + ";".join(
+            f"{name}={weight:.3f}" for name, weight in sorted(selected_challenger["weights"].items())
+        )
     h2h_weight = float((match.get("head_to_head") or {}).get("model_weight") or 0)
     if h2h_probability is not None and h2h_weight > 0:
         assessed_probability = (1 - h2h_weight) * assessed_probability + h2h_weight * float(h2h_probability)
@@ -2715,11 +2775,18 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "raw_probability": raw_probability,
         "challenger_probability": challenger_probability,
         "challenger_sample": challenger["sample"] if challenger else 0,
-        "challenger_promoted": bool(challenger and challenger["promoted"] and not rollback["model_rollback"]),
+        "challenger_promoted": bool(selected_challenger),
         "format_model": f"BO{match_best_of}",
-        "format_model_sample": challenger["sample"] if challenger else 0,
-        "format_model_holdout": challenger["holdout"] if challenger else 0,
-        "format_model_promoted": bool(challenger and challenger["promoted"] and not rollback["model_rollback"]),
+        "format_model_probability": format_probability,
+        "format_model_sample": format_challenger["sample"] if format_challenger else 0,
+        "format_model_holdout": format_challenger["holdout"] if format_challenger else 0,
+        "format_model_promoted": bool(format_challenger and format_challenger["promoted"] and not rollback["model_rollback"]),
+        "environment_model": canonical_environment(match.get("indoor")) or "Unknown",
+        "environment_model_probability": environment_probability,
+        "environment_model_sample": environment_challenger["sample"] if environment_challenger else 0,
+        "environment_model_holdout": environment_challenger["holdout"] if environment_challenger else 0,
+        "environment_model_promoted": bool(environment_challenger and environment_challenger["promoted"] and not rollback["model_rollback"]),
+        "active_component_model": active_component_model,
         "calibration_sample": calibration_sample,
         "calibration_segment": calibration["segment"],
         "calibration_applied": calibration["applied"],
@@ -2899,6 +2966,9 @@ def build_prompt(
                     f"{baseline['elo_probability']:.1%}, opponent-adjusted form {form_text}, serve/return {serve_text}, H2H {h2h_text}, clutch {clutch_text}, BO5 {bo5_text}, physical status {physical_text}, workload {workload_text}, "
                     f"format model {baseline.get('format_model', 'unknown')} "
                     f"(n={baseline.get('format_model_sample', 0)}, promoted={baseline.get('format_model_promoted', False)}), "
+                    f"environment model {baseline.get('environment_model', 'Unknown')} "
+                    f"(n={baseline.get('environment_model_sample', 0)}, promoted={baseline.get('environment_model_promoted', False)}), "
+                    f"active component model={baseline.get('active_component_model', 'static')}, "
                     f"tour calibration {baseline.get('calibration_segment', 'Unknown')} "
                     f"(n={baseline.get('calibration_sample', 0)}, applied={baseline.get('calibration_applied', False)}), blended assessed "
                     f"{baseline['assessed_probability']:.1%}, EV "
@@ -3448,7 +3518,10 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "BO5_FIVE_SET_WIN_RATE", "BO5_FIVE_SET_SAMPLE", "BO5_COMEBACK_0_2_RATE", "BO5_COMEBACK_0_2_SAMPLE", "BO5_SOURCE",
         "COMPONENT_WEIGHTS", "RAW_PROBABILITY", "CHALLENGER_PROBABILITY",
         "CHALLENGER_SAMPLE", "CHALLENGER_PROMOTED", "FORMAT_MODEL", "FORMAT_MODEL_SAMPLE",
-        "FORMAT_MODEL_HOLDOUT", "FORMAT_MODEL_PROMOTED", "CALIBRATION_SAMPLE", "CALIBRATION_SEGMENT", "CALIBRATION_APPLIED",
+        "FORMAT_MODEL_HOLDOUT", "FORMAT_MODEL_PROBABILITY", "FORMAT_MODEL_PROMOTED",
+        "ENVIRONMENT_MODEL", "ENVIRONMENT_MODEL_SAMPLE", "ENVIRONMENT_MODEL_HOLDOUT",
+        "ENVIRONMENT_MODEL_PROBABILITY", "ENVIRONMENT_MODEL_PROMOTED", "ACTIVE_COMPONENT_MODEL",
+        "CALIBRATION_SAMPLE", "CALIBRATION_SEGMENT", "CALIBRATION_APPLIED",
         "CONTEXT_PENALTY", "CONTEXT_REASON", "WORKLOAD_PENALTY", "STATIC_WORKLOAD_PENALTY",
         "WORKLOAD_POLICY_ID", "WORKLOAD_POLICY_SAMPLE", "WORKLOAD_POLICY_HOLDOUT",
         "WORKLOAD_POLICY_ACTIVE_BRIER", "WORKLOAD_POLICY_CHALLENGER_BRIER", "WORKLOAD_POLICY_PROMOTED", "REST_DAYS",
@@ -3569,7 +3642,12 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 f"{baseline['challenger_probability']:.6f}" if baseline.get("challenger_probability") is not None else "",
                 baseline.get("challenger_sample", 0), baseline.get("challenger_promoted", False),
                 baseline.get("format_model", ""), baseline.get("format_model_sample", 0),
-                baseline.get("format_model_holdout", 0), baseline.get("format_model_promoted", False),
+                baseline.get("format_model_holdout", 0),
+                f"{baseline['format_model_probability']:.6f}" if baseline.get("format_model_probability") is not None else "",
+                baseline.get("format_model_promoted", False), baseline.get("environment_model", "Unknown"),
+                baseline.get("environment_model_sample", 0), baseline.get("environment_model_holdout", 0),
+                f"{baseline['environment_model_probability']:.6f}" if baseline.get("environment_model_probability") is not None else "",
+                baseline.get("environment_model_promoted", False), baseline.get("active_component_model", "static"),
                 baseline.get("calibration_sample", 0), baseline.get("calibration_segment", "Unknown"),
                 baseline.get("calibration_applied", False), f"{baseline.get('context_penalty', 0):.6f}", baseline.get("context_reason", "main_draw"),
                 f"{baseline.get('workload_penalty', 0):.6f}", f"{baseline.get('static_workload_penalty', 0):.6f}",
@@ -3952,7 +4030,7 @@ def generate_backtest_summary(resolved: list[dict]):
         ("Negative" if high == 0 else f"{low:.0%}–{high:.0%}" if high < 99 else "10%+", [r for r in resolved if low <= float(r.get("EV") or 0) < high])
         for low, high in ev_bands
     ])
-    for field, title in (("TOUR", "Tour and level"), ("SURFACE", "Surface"), ("BEST_OF", "Match format"),
+    for field, title in (("TOUR", "Tour and level"), ("SURFACE", "Surface"), ("BEST_OF", "Match format"), ("INDOOR", "Environment"),
                          ("QUALITY_GRADE", "Evidence quality")):
         values = sorted({row.get(field) or "Unknown" for row in resolved})
         _append_segment_table(lines, title, [(value, [r for r in resolved if (r.get(field) or "Unknown") == value]) for value in values])
@@ -3974,6 +4052,16 @@ def generate_backtest_summary(resolved: list[dict]):
         learned = learned_format_component_weights(resolved, best_of)
         lines.append(
             f"| BO{best_of} | {len(format_rows)} | {learned['holdout'] if learned else 0} | "
+            f"{'approved' if learned and learned['promoted'] else 'shadow/collecting'} |"
+        )
+    lines.extend(["", "## Indoor/outdoor model maturity", "",
+                  "Indoor and outdoor component-weight challengers train and pass holdout gates independently.", "",
+                  "| Environment | Settled predictions | Holdout | Promotion |", "|---|---:|---:|---|"])
+    for environment, value in (("Indoor", True), ("Outdoor", False)):
+        environment_rows = [row for row in resolved if canonical_environment(row.get("INDOOR")) == environment]
+        learned = learned_environment_component_weights(resolved, value)
+        lines.append(
+            f"| {environment} | {len(environment_rows)} | {learned['holdout'] if learned else 0} | "
             f"{'approved' if learned and learned['promoted'] else 'shadow/collecting'} |"
         )
     months = sorted({(row.get("DATE") or "")[:7] for row in resolved if row.get("DATE")})

@@ -545,6 +545,29 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(learned_bo3["format"], "BO3")
         self.assertIsNone(bot.learned_format_component_weights(bo3 + bo5, 5))
 
+    def test_indoor_and_outdoor_models_have_independent_maturity(self):
+        indoor = [{"DATE": f"2026-01-{index:03d}", "RESULT": "W" if index % 2 else "L",
+                   "ELO_PROBABILITY": ".60", "MARKET_PROBABILITY": ".55",
+                   "MODEL_PROBABILITY": ".58", "INDOOR": "True"} for index in range(200)]
+        outdoor = [{"DATE": f"2026-02-{index:03d}", "RESULT": "W" if index % 2 else "L",
+                    "ELO_PROBABILITY": ".60", "MARKET_PROBABILITY": ".55",
+                    "MODEL_PROBABILITY": ".58", "INDOOR": "False"} for index in range(199)]
+        learned_indoor = bot.learned_environment_component_weights(indoor + outdoor, True)
+        self.assertIsNotNone(learned_indoor)
+        self.assertEqual(learned_indoor["sample"], 200)
+        self.assertEqual(learned_indoor["environment"], "Indoor")
+        self.assertIsNone(bot.learned_environment_component_weights(indoor + outdoor, False))
+
+    def test_best_promoted_component_model_uses_relative_holdout_gain_and_rollback(self):
+        candidates = [
+            {"name": "format:BO3", "probability": .61,
+             "learned": {"promoted": True, "active_brier": .20, "challenger_brier": .19}},
+            {"name": "environment:Outdoor", "probability": .62,
+             "learned": {"promoted": True, "active_brier": .30, "challenger_brier": .27}},
+        ]
+        self.assertEqual(bot.choose_promoted_component_model(candidates, False)["name"], "environment:Outdoor")
+        self.assertIsNone(bot.choose_promoted_component_model(candidates, True))
+
     def test_workload_learner_requires_mature_sample(self):
         rows = [{"DATE": f"2026-{index:03d}", "EVENT_ID": str(index), "PICK": "Player",
                  "RESULT": "W", "MODEL_PROBABILITY": ".70", "WORKLOAD_PENALTY": "0",
@@ -966,7 +989,7 @@ class TennisBotTests(unittest.TestCase):
     def test_every_prediction_audit_row_contains_both_identity_confidences(self):
         match = {
             "event_id": "7", "player1": "Player One", "player2": "Player Two",
-            "home_odds": 1.6, "away_odds": 2.5, "bookmaker_count": 3, "surface": "hard", "best_of": 5, "level": "ATP",
+            "home_odds": 1.6, "away_odds": 2.5, "bookmaker_count": 3, "surface": "hard", "best_of": 5, "indoor": False, "level": "ATP",
             "player1_profile": {"elo": 1800, "identity_confidence": 1.0, "identity_method": "exact"},
             "player2_profile": {"elo": 1600, "identity_confidence": 0.94, "identity_method": "auto_unique"},
             "player1_ranking_history": {"latest_rank": 12, "latest_date": "2026-07-28", "rank_90d": 20, "improvement_90d": 8, "samples_365d": 9},
@@ -1058,6 +1081,10 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["FORMAT_MODEL"], "BO5")
         self.assertEqual(second["FORMAT_MODEL_SAMPLE"], "0")
         self.assertEqual(second["FORMAT_MODEL_PROMOTED"], "False")
+        self.assertEqual(second["ENVIRONMENT_MODEL"], "Outdoor")
+        self.assertEqual(second["ENVIRONMENT_MODEL_SAMPLE"], "0")
+        self.assertEqual(second["ENVIRONMENT_MODEL_PROMOTED"], "False")
+        self.assertEqual(second["ACTIVE_COMPONENT_MODEL"], "static")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1553,8 +1580,8 @@ class TennisBotTests(unittest.TestCase):
 
     def test_backtest_summary_segments_settled_predictions(self):
         rows = [
-            {"DATE": "2026-07-01", "OPENING_ODDS": "1.60", "MODEL_PROBABILITY": "0.65", "EV": "0.04", "RESULT": "W", "CLV": "0.02", "TOUR": "ATP", "SURFACE": "clay", "BEST_OF": "3", "QUALITY_GRADE": "A", "DECISION": "Top Pick"},
-            {"DATE": "2026-07-02", "OPENING_ODDS": "1.70", "MODEL_PROBABILITY": "0.62", "EV": "0.03", "RESULT": "L", "CLV": "-0.01", "TOUR": "ATP", "SURFACE": "clay", "BEST_OF": "3", "QUALITY_GRADE": "B", "DECISION": "Value Pick"},
+            {"DATE": "2026-07-01", "OPENING_ODDS": "1.60", "MODEL_PROBABILITY": "0.65", "EV": "0.04", "RESULT": "W", "CLV": "0.02", "TOUR": "ATP", "SURFACE": "clay", "BEST_OF": "3", "INDOOR": "False", "QUALITY_GRADE": "A", "DECISION": "Top Pick"},
+            {"DATE": "2026-07-02", "OPENING_ODDS": "1.70", "MODEL_PROBABILITY": "0.62", "EV": "0.03", "RESULT": "L", "CLV": "-0.01", "TOUR": "ATP", "SURFACE": "clay", "BEST_OF": "3", "INDOOR": "False", "QUALITY_GRADE": "B", "DECISION": "Value Pick"},
         ]
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "backtest-summary.md"
@@ -1575,6 +1602,9 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("## Match format", report)
         self.assertIn("## Format model maturity", report)
         self.assertIn("| BO3 | 2 | 0 | shadow/collecting |", report)
+        self.assertIn("## Environment", report)
+        self.assertIn("## Indoor/outdoor model maturity", report)
+        self.assertIn("| Outdoor | 2 | 0 | shadow/collecting |", report)
 
     def test_walk_forward_staking_compares_fixed_and_capped_kelly(self):
         rows = [
