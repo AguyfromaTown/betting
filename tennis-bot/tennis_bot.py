@@ -1324,6 +1324,31 @@ def load_player_aliases() -> dict[str, str]:
     return aliases
 
 
+def load_player_alias_confidence() -> dict[str, tuple[float, str]]:
+    """Load confidence and provenance without changing the alias lookup contract."""
+    metadata = {}
+    if PLAYER_ALIASES_FILE.exists() and PLAYER_ALIASES_FILE.stat().st_size:
+        with PLAYER_ALIASES_FILE.open(newline="", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                key = normalize_player_name(row.get("PROVIDER_NAME", ""))
+                if not key:
+                    continue
+                try:
+                    confidence = min(1.0, max(0.0, float(row.get("CONFIDENCE") or 0)))
+                except ValueError:
+                    confidence = 0.0
+                metadata[key] = (confidence, str(row.get("SOURCE") or "alias"))
+    if ALIAS_REVIEW_FILE.exists() and ALIAS_REVIEW_FILE.stat().st_size:
+        with ALIAS_REVIEW_FILE.open(newline="", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                if str(row.get("STATUS") or "").strip().casefold() not in {"approved", "applied"}:
+                    continue
+                key = normalize_player_name(row.get("PROVIDER_NAME", ""))
+                if key:
+                    metadata[key] = (1.0, "manual_review")
+    return metadata
+
+
 def queue_alias_review(player: str, candidates: list[tuple[float, str, str]], reason: str):
     """Persist an unresolved identity once for manual approval or rejection."""
     if DIAGNOSTIC_MODE:
@@ -1367,14 +1392,16 @@ def save_player_alias(provider_name: str, canonical_name: str, confidence: float
     atomic_write_csv(PLAYER_ALIASES_FILE, headers, rows)
 
 
-def resolve_profile_key(player: str, profiles: dict[str, dict], aliases: dict[str, str]) -> str | None:
-    """Resolve exact/approved aliases first; allow only unique high-confidence fuzzy matches."""
+def resolve_profile_identity(player: str, profiles: dict[str, dict], aliases: dict[str, str],
+                             alias_metadata: dict[str, tuple[float, str]] | None = None) -> dict | None:
+    """Resolve a profile while retaining explicit confidence and resolution provenance."""
     key = normalize_player_name(player)
     if key in profiles:
-        return key
+        return {"key": key, "confidence": 1.0, "method": "exact"}
     alias_key = aliases.get(key)
     if alias_key in profiles:
-        return alias_key
+        confidence, source = (alias_metadata or {}).get(key, (1.0, "approved_alias"))
+        return {"key": alias_key, "confidence": confidence, "method": source}
     candidates = []
     for candidate, profile in profiles.items():
         score = difflib.SequenceMatcher(None, key, candidate).ratio()
@@ -1385,10 +1412,16 @@ def resolve_profile_key(player: str, profiles: dict[str, dict], aliases: dict[st
     if len(high_confidence) == 1 or (len(high_confidence) > 1 and high_confidence[0][0] - high_confidence[1][0] >= 0.05):
         score, candidate, canonical = high_confidence[0]
         save_player_alias(player, canonical, score)
-        return candidate
+        return {"key": candidate, "confidence": score, "method": "auto_unique"}
     reason = "ambiguous_high_confidence" if high_confidence else "low_confidence" if candidates else "no_candidate"
     queue_alias_review(player, candidates, reason)
     return None
+
+
+def resolve_profile_key(player: str, profiles: dict[str, dict], aliases: dict[str, str]) -> str | None:
+    """Compatibility wrapper returning only the resolved canonical profile key."""
+    identity = resolve_profile_identity(player, profiles, aliases)
+    return identity["key"] if identity else None
 
 
 def fetch_tennis_abstract_profiles(matches: list[dict]) -> dict[str, dict]:
@@ -1421,14 +1454,19 @@ def fetch_tennis_abstract_profiles(matches: list[dict]) -> dict[str, dict]:
             log(f"  Tennis Abstract {tour} leaderboard unavailable from all sources")
 
     aliases = load_player_aliases()
+    alias_metadata = load_player_alias_confidence()
     selected = {}
     for match in matches:
         for player in (match["player1"], match["player2"]):
             if "/" in player:
                 continue
-            resolved = resolve_profile_key(player, profiles, aliases)
-            if resolved:
-                selected[normalize_player_name(player)] = profiles[resolved]
+            identity = resolve_profile_identity(player, profiles, aliases, alias_metadata)
+            if identity:
+                profile = dict(profiles[identity["key"]])
+                profile["identity_confidence"] = identity["confidence"]
+                profile["identity_method"] = identity["method"]
+                profile["canonical_name"] = profiles[identity["key"]].get("name", "")
+                selected[normalize_player_name(player)] = profile
     log(f"  Tennis Abstract profiles matched: {len(selected)}/{len(wanted)}")
     return selected
 
@@ -1464,6 +1502,10 @@ def enrich_matches_with_profiles(matches: list[dict]) -> dict[str, dict]:
         match["player2_profile"] = profiles.get(
             normalize_player_name(match["player2"])
         )
+        for side in ("player1", "player2"):
+            profile = match.get(f"{side}_profile") or {}
+            match[f"{side}_identity_confidence"] = float(profile.get("identity_confidence", 0.0))
+            match[f"{side}_identity_method"] = profile.get("identity_method", "unresolved")
     return profiles
 
 
@@ -2512,10 +2554,32 @@ def tennis_data_quality(match: dict, baseline: dict, player: str) -> dict:
             "reasons": reasons, "dispersion": dispersion}
 
 
+def identity_audit_values(match: dict, player: str) -> tuple[float, str, float, str]:
+    """Return explicit pick/opponent identity confidence for an audit row."""
+    pick_side, opponent_side = ("player1", "player2") if normalize_player_name(player) == normalize_player_name(match.get("player1", "")) else ("player2", "player1")
+    pick_profile = match.get(f"{pick_side}_profile") or {}
+    opponent_profile = match.get(f"{opponent_side}_profile") or {}
+
+    def values(side: str, profile: dict) -> tuple[float, str]:
+        raw_confidence = match.get(f"{side}_identity_confidence", profile.get("identity_confidence", 0.0))
+        try:
+            confidence = min(1.0, max(0.0, float(raw_confidence)))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        method = str(match.get(f"{side}_identity_method") or profile.get("identity_method") or "unresolved")
+        return confidence, method
+
+    pick_confidence, pick_method = values(pick_side, pick_profile)
+    opponent_confidence, opponent_method = values(opponent_side, opponent_profile)
+    return pick_confidence, pick_method, opponent_confidence, opponent_method
+
+
 def append_prediction_audit(date_str, matches, recommendations, authorized, authorization_block_reason: str = ""):
     """Persist all Elo-modelled singles candidates and final decisions."""
     headers = [
-        "DATE", "MODEL_VERSION", "EVENT_ID", "MATCH", "PICK", "OPENING_ODDS",
+        "DATE", "MODEL_VERSION", "EVENT_ID", "MATCH", "PICK",
+        "PICK_IDENTITY_CONFIDENCE", "PICK_IDENTITY_METHOD",
+        "OPPONENT_IDENTITY_CONFIDENCE", "OPPONENT_IDENTITY_METHOD", "OPENING_ODDS",
         "MARKET_PROBABILITY", "ELO_PROBABILITY", "MODEL_PROBABILITY",
         "FORM_PROBABILITY", "FORM_SAMPLE", "SERVE_RETURN_PROBABILITY",
         "SERVE_RETURN_SAMPLE", "EXPECTED_HOLD", "OPPONENT_EXPECTED_HOLD",
@@ -2540,6 +2604,10 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
             for row in old_rows:
                 row.setdefault("REASON", "legacy")
                 row.setdefault("QUALITY_GRADE", "legacy")
+                row.setdefault("PICK_IDENTITY_CONFIDENCE", "0.000")
+                row.setdefault("PICK_IDENTITY_METHOD", "legacy_unknown")
+                row.setdefault("OPPONENT_IDENTITY_CONFIDENCE", "0.000")
+                row.setdefault("OPPONENT_IDENTITY_METHOD", "legacy_unknown")
             atomic_write_csv(AUDIT_FILE, headers, old_rows)
     validated = {normalize_player_name(item["player"]): item for item in recommendations}
     selected = {normalize_player_name(item["player"]) for item in authorized}
@@ -2575,9 +2643,12 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
             quality_score, quality_grade = evidence_quality(match, baseline)
             data_quality = tennis_data_quality(match, baseline, player)
             workload = baseline.get("workload") or {}
+            pick_identity, pick_identity_method, opponent_identity, opponent_identity_method = identity_audit_values(match, player)
             rows.append([
                 date_str, MODEL_VERSION, match.get("event_id", ""),
                 f"{match['player1']} vs {match['player2']}", player,
+                f"{pick_identity:.3f}", pick_identity_method,
+                f"{opponent_identity:.3f}", opponent_identity_method,
                 f"{baseline['player_odds']:.3f}",
                 f"{baseline['market_probability']:.6f}",
                 f"{baseline['elo_probability']:.6f}",

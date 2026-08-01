@@ -782,6 +782,67 @@ class TennisBotTests(unittest.TestCase):
                 resolved = bot.resolve_profile_key("A. Zverev", profiles, aliases)
         self.assertEqual(resolved, bot.normalize_player_name("Alexander Zverev"))
 
+    def test_manual_alias_confidence_and_provenance_are_loaded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            review_file = Path(directory) / "player-alias-review.csv"
+            aliases_file = Path(directory) / "player-aliases.csv"
+            aliases_file.write_text(
+                "PROVIDER_NAME,CANONICAL_NAME,SOURCE,CONFIDENCE\nProvider One,Canonical One,auto_unique,0.934\n",
+                encoding="utf-8",
+            )
+            review_file.write_text(
+                "PROVIDER_NAME,NORMALIZED_NAME,SUGGESTED_CANONICAL,SUGGESTED_CONFIDENCE,ALTERNATIVES,REASON,STATUS,REVIEWED_CANONICAL,CREATED_AT,UPDATED_AT\n"
+                "Provider Two,providertwo,Canonical Two,0.800,,low_confidence,approved,Canonical Two,2026-08-01,2026-08-01\n",
+                encoding="utf-8",
+            )
+            with (
+                patch.object(bot, "ALIAS_REVIEW_FILE", review_file),
+                patch.object(bot, "PLAYER_ALIASES_FILE", aliases_file),
+            ):
+                metadata = bot.load_player_alias_confidence()
+        self.assertEqual(metadata[bot.normalize_player_name("Provider One")], (0.934, "auto_unique"))
+        self.assertEqual(metadata[bot.normalize_player_name("Provider Two")], (1.0, "manual_review"))
+
+    def test_profile_resolution_returns_explicit_exact_and_fuzzy_confidence(self):
+        profiles = {bot.normalize_player_name("Alexander Zverev"): {"name": "Alexander Zverev"}}
+        exact = bot.resolve_profile_identity("Alexander Zverev", profiles, {})
+        with patch.object(bot, "save_player_alias"):
+            fuzzy = bot.resolve_profile_identity("Alexandr Zverev", profiles, {})
+        self.assertEqual(exact, {"key": bot.normalize_player_name("Alexander Zverev"), "confidence": 1.0, "method": "exact"})
+        self.assertEqual(fuzzy["method"], "auto_unique")
+        self.assertGreaterEqual(fuzzy["confidence"], 0.92)
+
+    def test_identity_audit_values_follow_pick_and_opponent_order(self):
+        match = {
+            "player1": "Player One", "player2": "Player Two",
+            "player1_profile": {"identity_confidence": 1.0, "identity_method": "exact"},
+            "player2_profile": {"identity_confidence": 0.95, "identity_method": "auto_unique"},
+        }
+        values = bot.identity_audit_values(match, "Player Two")
+        self.assertEqual(values, (0.95, "auto_unique", 1.0, "exact"))
+
+    def test_every_prediction_audit_row_contains_both_identity_confidences(self):
+        match = {
+            "event_id": "7", "player1": "Player One", "player2": "Player Two",
+            "home_odds": 1.6, "away_odds": 2.5, "bookmaker_count": 3, "surface": "hard",
+            "player1_profile": {"elo": 1800, "identity_confidence": 1.0, "identity_method": "exact"},
+            "player2_profile": {"elo": 1600, "identity_confidence": 0.94, "identity_method": "auto_unique"},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            audit_file = Path(directory) / "prediction-audit.csv"
+            with (
+                patch.object(bot, "AUDIT_FILE", audit_file),
+                patch.object(bot, "BACKUPS_DIR", Path(directory) / "backups"),
+            ):
+                bot.append_prediction_audit("2026-08-01", [match], [], [])
+            _, rows = bot.read_csv_rows(audit_file)
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(row["PICK_IDENTITY_CONFIDENCE"] for row in rows))
+        self.assertTrue(all(row["OPPONENT_IDENTITY_CONFIDENCE"] for row in rows))
+        second = next(row for row in rows if row["PICK"] == "Player Two")
+        self.assertEqual(second["PICK_IDENTITY_METHOD"], "auto_unique")
+        self.assertEqual(second["OPPONENT_IDENTITY_METHOD"], "exact")
+
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
             review_file = Path(directory) / "player-alias-review.csv"

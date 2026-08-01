@@ -33,7 +33,7 @@ Status conventions:
 - [x] Require unique, high-confidence fuzzy matches before saving aliases.
 - [x] Reject unresolved identities through the model/data-quality gates.
 - [x] Add a manual alias-review queue.
-- [ ] Store explicit identity confidence in every audit row.
+- [x] Store explicit identity confidence in every audit row.
 
 ## Player information
 
