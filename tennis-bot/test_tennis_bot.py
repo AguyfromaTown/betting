@@ -829,6 +829,8 @@ class TennisBotTests(unittest.TestCase):
             "player2_profile": {"elo": 1600, "identity_confidence": 0.94, "identity_method": "auto_unique"},
             "player1_ranking_history": {"latest_rank": 12, "latest_date": "2026-07-28", "rank_90d": 20, "improvement_90d": 8, "samples_365d": 9},
             "player2_ranking_history": {"latest_rank": 24, "latest_date": "2026-07-27", "rank_90d": 18, "improvement_90d": -6, "samples_365d": 8},
+            "player1_bio": {"handedness": "Right", "nationality": "ESP", "handedness_date": "2026-07-28", "source": "historical_match_records"},
+            "player2_bio": {"handedness": "Left", "nationality": "USA", "handedness_date": "2026-07-27", "source": "historical_match_records"},
         }
         with tempfile.TemporaryDirectory() as directory:
             audit_file = Path(directory) / "prediction-audit.csv"
@@ -847,6 +849,9 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["PICK_RANK_AS_OF"], "24")
         self.assertEqual(second["PICK_RANK_IMPROVEMENT_90D"], "-6")
         self.assertEqual(second["OPPONENT_RANK_AS_OF"], "12")
+        self.assertEqual(second["PICK_HANDEDNESS"], "Left")
+        self.assertEqual(second["PICK_NATIONALITY"], "USA")
+        self.assertEqual(second["OPPONENT_HANDEDNESS"], "Right")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -895,6 +900,27 @@ class TennisBotTests(unittest.TestCase):
         pick, opponent = bot.ranking_audit_values(match, "Two")
         self.assertEqual(pick["latest_rank"], 20)
         self.assertEqual(opponent["latest_rank"], 10)
+
+    def test_player_bio_uses_latest_pre_match_verified_observations(self):
+        history = [
+            {"tourney_date": "20260720", "winner_name": "Test Player", "loser_name": "A", "winner_hand": "L", "winner_ioc": "ESP", "_source_url": "https://example.test/verified.csv"},
+            {"tourney_date": "20260620", "winner_name": "B", "loser_name": "Test Player", "loser_hand": "L", "loser_ioc": "ESP"},
+            {"tourney_date": "20260802", "winner_name": "Test Player", "loser_name": "C", "winner_hand": "R", "winner_ioc": "USA"},
+        ]
+        bio = bot.calculate_player_bio(history, "Test Player", "2026-08-01")
+        self.assertEqual(bio["handedness"], "Left")
+        self.assertEqual(bio["nationality"], "ESP")
+        self.assertEqual(bio["handedness_date"], "2026-07-20")
+        self.assertEqual(bio["handedness_consistency"], 1.0)
+        self.assertIn("https://example.test/verified.csv", bio["source"])
+        self.assertEqual(bio["handedness_source"], "https://example.test/verified.csv")
+
+    def test_player_bio_rejects_unknown_hand_and_invalid_country_code(self):
+        history = [{
+            "tourney_date": "20260720", "winner_name": "Test Player", "loser_name": "A",
+            "winner_hand": "U", "winner_ioc": "Unknown",
+        }]
+        self.assertIsNone(bot.calculate_player_bio(history, "Test Player", "2026-08-01"))
 
     def test_serve_return_profile_requires_points_and_calculates_rates(self):
         history = []

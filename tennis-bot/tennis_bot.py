@@ -1481,6 +1481,12 @@ def compact_profile_line(player: str, profiles: dict[str, dict]) -> str:
         return "N/A" if value is None else f"{value:g}"
 
     ranking_history = profile.get("ranking_history") or {}
+    bio_parts = []
+    if profile.get("handedness"):
+        bio_parts.append(f"handedness={profile['handedness']}")
+    if profile.get("nationality"):
+        bio_parts.append(f"nationality={profile['nationality']}")
+    bio_text = f"; {'; '.join(bio_parts)}" if bio_parts else ""
     ranking_trend = ""
     if ranking_history:
         change = ranking_history.get("improvement_90d")
@@ -1500,6 +1506,7 @@ def compact_profile_line(player: str, profiles: dict[str, dict]) -> str:
         f"peak Elo={shown(profile['peak_elo'])}"
         f"{' (' + profile['peak_month'] + ')' if profile['peak_month'] else ''}"
         f"{ranking_trend}"
+        f"{bio_text}"
     )
 
 
@@ -1569,6 +1576,55 @@ def calculate_ranking_history(history: list[dict], player: str, as_of: str) -> d
         "samples_365d": len(recent_year),
         "recent_snapshots": [{"date": date.strftime("%Y-%m-%d"), "rank": rank} for date, rank in ordered[-12:]],
         "source": "historical_match_rankings",
+    }
+
+
+def calculate_player_bio(history: list[dict], player: str, as_of: str) -> dict | None:
+    """Collect leakage-safe handedness and nationality from dated match records."""
+    player_key = normalize_player_name(player)
+    cutoff = datetime.strptime(as_of, "%Y-%m-%d")
+    observations = []
+    for row in history:
+        winner_key = normalize_player_name(row.get("winner_name", ""))
+        loser_key = normalize_player_name(row.get("loser_name", ""))
+        if player_key not in {winner_key, loser_key}:
+            continue
+        prefix = "winner_" if player_key == winner_key else "loser_"
+        try:
+            played = datetime.strptime(str(row.get("tourney_date", "")), "%Y%m%d")
+        except ValueError:
+            continue
+        if played >= cutoff:
+            continue
+        raw_hand = str(row.get(prefix + "hand") or "").strip().upper()
+        hand = {"R": "Right", "L": "Left"}.get(raw_hand)
+        nationality = str(row.get(prefix + "ioc") or "").strip().upper()
+        if not re.fullmatch(r"[A-Z]{3}", nationality):
+            nationality = None
+        if hand or nationality:
+            observations.append((played, hand, nationality, str(row.get("_source_url") or "historical_match_records")))
+    if not observations:
+        return None
+    observations.sort(reverse=True)
+
+    hand_observation = next((item for item in observations if item[1]), None)
+    nationality_observation = next((item for item in observations if item[2]), None)
+    hand, hand_date, hand_source = ((hand_observation[1], hand_observation[0], hand_observation[3]) if hand_observation else (None, None, None))
+    nationality, nationality_date, nationality_source = ((nationality_observation[2], nationality_observation[0], nationality_observation[3]) if nationality_observation else (None, None, None))
+    recent = [item for item in observations if (cutoff - item[0]).days <= 365]
+    hand_values = [item[1] for item in recent if item[1]]
+    nationality_values = [item[2] for item in recent if item[2]]
+
+    def consistency(values: list[str], selected: str | None) -> float | None:
+        return sum(value == selected for value in values) / len(values) if values and selected else None
+
+    return {
+        "handedness": hand, "handedness_date": hand_date.strftime("%Y-%m-%d") if hand_date else None,
+        "handedness_consistency": consistency(hand_values, hand), "handedness_source": hand_source,
+        "nationality": nationality, "nationality_date": nationality_date.strftime("%Y-%m-%d") if nationality_date else None,
+        "nationality_consistency": consistency(nationality_values, nationality), "nationality_source": nationality_source,
+        "samples_365d": len(recent),
+        "source": ";".join(dict.fromkeys(source for source in (hand_source, nationality_source) if source)),
     }
 
 
@@ -1715,9 +1771,11 @@ def fetch_recent_match_history(matches: list[dict], date_str: str) -> list[dict]
     ]
     history = []
     with ThreadPoolExecutor(max_workers=4) as executor:
-        for text in executor.map(fetch, urls):
+        for url, text in zip(urls, executor.map(fetch, urls)):
             if text:
-                history.extend(csv.DictReader(io.StringIO(text)))
+                for row in csv.DictReader(io.StringIO(text)):
+                    row["_source_url"] = url
+                    history.append(row)
     wanted = {normalize_player_name(player) for match in matches for player in (match["player1"], match["player2"])}
     filtered = [row for row in history if normalize_player_name(row.get("winner_name", "")) in wanted or normalize_player_name(row.get("loser_name", "")) in wanted]
     log(f"  Loaded {len(filtered)} relevant historical matches for opponent-adjusted form")
@@ -1735,9 +1793,14 @@ def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
         match["player2_workload"] = calculate_workload(history, match["player2"], date_str, match.get("tournament", ""))
         for side in ("player1", "player2"):
             ranking_history = calculate_ranking_history(history, match[side], date_str)
+            bio = calculate_player_bio(history, match[side], date_str)
             match[f"{side}_ranking_history"] = ranking_history
+            match[f"{side}_bio"] = bio
             if match.get(f"{side}_profile") is not None:
                 match[f"{side}_profile"]["ranking_history"] = ranking_history
+                match[f"{side}_profile"]["handedness"] = (bio or {}).get("handedness")
+                match[f"{side}_profile"]["nationality"] = (bio or {}).get("nationality")
+                match[f"{side}_profile"]["bio_source"] = (bio or {}).get("source")
 
 
 def tennis_context_uncertainty(match: dict) -> tuple[float, str]:
@@ -2648,6 +2711,12 @@ def ranking_audit_values(match: dict, player: str) -> tuple[dict, dict]:
     return match.get(f"{pick_side}_ranking_history") or {}, match.get(f"{opponent_side}_ranking_history") or {}
 
 
+def bio_audit_values(match: dict, player: str) -> tuple[dict, dict]:
+    """Return the pick and opponent verified bio records in row order."""
+    pick_side, opponent_side = ("player1", "player2") if normalize_player_name(player) == normalize_player_name(match.get("player1", "")) else ("player2", "player1")
+    return match.get(f"{pick_side}_bio") or {}, match.get(f"{opponent_side}_bio") or {}
+
+
 def append_prediction_audit(date_str, matches, recommendations, authorized, authorization_block_reason: str = ""):
     """Persist all Elo-modelled singles candidates and final decisions."""
     headers = [
@@ -2656,6 +2725,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "OPPONENT_IDENTITY_CONFIDENCE", "OPPONENT_IDENTITY_METHOD",
         "PICK_RANK_AS_OF", "PICK_RANK_DATE", "PICK_RANK_90D", "PICK_RANK_IMPROVEMENT_90D", "PICK_RANK_SAMPLES_365",
         "OPPONENT_RANK_AS_OF", "OPPONENT_RANK_DATE", "OPPONENT_RANK_90D", "OPPONENT_RANK_IMPROVEMENT_90D", "OPPONENT_RANK_SAMPLES_365",
+        "PICK_HANDEDNESS", "PICK_NATIONALITY", "PICK_BIO_DATE", "PICK_BIO_SOURCE",
+        "OPPONENT_HANDEDNESS", "OPPONENT_NATIONALITY", "OPPONENT_BIO_DATE", "OPPONENT_BIO_SOURCE",
         "OPENING_ODDS",
         "MARKET_PROBABILITY", "ELO_PROBABILITY", "MODEL_PROBABILITY",
         "FORM_PROBABILITY", "FORM_SAMPLE", "SERVE_RETURN_PROBABILITY",
@@ -2722,6 +2793,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
             workload = baseline.get("workload") or {}
             pick_identity, pick_identity_method, opponent_identity, opponent_identity_method = identity_audit_values(match, player)
             pick_ranking, opponent_ranking = ranking_audit_values(match, player)
+            pick_bio, opponent_bio = bio_audit_values(match, player)
             rows.append([
                 date_str, MODEL_VERSION, match.get("event_id", ""),
                 f"{match['player1']} vs {match['player2']}", player,
@@ -2731,6 +2803,10 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 pick_ranking.get("rank_90d", ""), pick_ranking.get("improvement_90d", ""), pick_ranking.get("samples_365d", 0),
                 opponent_ranking.get("latest_rank", ""), opponent_ranking.get("latest_date", ""),
                 opponent_ranking.get("rank_90d", ""), opponent_ranking.get("improvement_90d", ""), opponent_ranking.get("samples_365d", 0),
+                pick_bio.get("handedness", ""), pick_bio.get("nationality", ""),
+                pick_bio.get("handedness_date") or pick_bio.get("nationality_date") or "", pick_bio.get("source", ""),
+                opponent_bio.get("handedness", ""), opponent_bio.get("nationality", ""),
+                opponent_bio.get("handedness_date") or opponent_bio.get("nationality_date") or "", opponent_bio.get("source", ""),
                 f"{baseline['player_odds']:.3f}",
                 f"{baseline['market_probability']:.6f}",
                 f"{baseline['elo_probability']:.6f}",
