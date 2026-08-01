@@ -1,0 +1,57 @@
+{
+  "date": "2026-07-16",
+  "revalidation_time": "2026-07-16T14:30:00+00:00",
+  "odds_min": 1.5,
+  "odds_max": 1.7,
+  "starting_bankroll": 100.0,
+  "match": {
+    "event_id": "fixture-1002",
+    "start_time": "2026-07-16T15:00:00+00:00",
+    "status": "scheduled",
+    "surface": "hard",
+    "player1": "Fixture Gamma",
+    "player2": "Fixture Delta",
+    "tournament": "WTA Historical Fixture",
+    "level": "WTA",
+    "home_odds": 1.6,
+    "away_odds": 2.5,
+    "consensus_home_odds": 1.6,
+    "consensus_away_odds": 2.5,
+    "home_odds_source": "FixtureBook",
+    "away_odds_source": "OtherBook",
+    "odds_source": "FixtureBook/OtherBook",
+    "bookmaker_count": 3,
+    "home_dispersion": 0.03,
+    "away_dispersion": 0.04,
+    "odds_timestamp": "2026-07-16T14:29:00+00:00",
+    "best_of": 3,
+    "indoor": false,
+    "player1_profile": {"elo": 1700, "hard_elo": 1700},
+    "player2_profile": {"elo": 1500, "hard_elo": 1500},
+    "player1_physical_status": {"status": "available", "source": "fixture"},
+    "player2_physical_status": {"status": "available", "source": "fixture"}
+  },
+  "recommendation": {"player": "Fixture Gamma", "score": 9.0, "assessed_probability": 0.7},
+  "settled_event": {
+    "id": "fixture-1002",
+    "date": "2026-07-16T15:00:00+00:00",
+    "status": "settled",
+    "home": "Fixture Gamma",
+    "away": "Fixture Delta",
+    "scores": {"home": 0, "away": 2}
+  },
+  "closing_market": {
+    "id": "fixture-1002",
+    "bookmakers": {"Bet365": [{"name": "ML", "odds": [{"home": "1.70", "away": "2.30"}]}]}
+  },
+  "expected": {
+    "validated": 1,
+    "staged": 1,
+    "authorized": 1,
+    "cancelled": 0,
+    "result": "L",
+    "bookmaker": "FixtureBook",
+    "starting_stake": 3.0,
+    "ending_bankroll": 97.0
+  }
+}

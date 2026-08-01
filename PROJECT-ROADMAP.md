@@ -187,7 +187,7 @@ Status conventions:
 - [x] Test walk-forward maturity gates.
 - [x] Test workload, dispersion, outlier and correlation controls.
 - [x] Test counterfactual recording and emergency-stop logic.
-- [ ] Add fixed end-to-end historical integration fixtures.
+- [x] Add fixed end-to-end historical integration fixtures.
 - [x] Add interrupted-write and recovery tests.
 - [ ] Add automated test coverage reporting and a required minimum.
 - [x] Run tests before every GitHub workflow mutation.

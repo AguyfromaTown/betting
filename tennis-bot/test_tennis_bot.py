@@ -2,6 +2,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,6 +14,43 @@ SPEC.loader.exec_module(bot)
 
 
 class TennisBotTests(unittest.TestCase):
+    def test_fixed_historical_fixture_runs_validation_through_settlement(self):
+        from datetime import datetime
+        fixture_paths = sorted((Path(__file__).with_name("fixtures")).glob("historical_lifecycle_*.json"))
+        self.assertGreaterEqual(len(fixture_paths), 2)
+        for fixture_path in fixture_paths:
+            with self.subTest(fixture=fixture_path.name), tempfile.TemporaryDirectory() as directory:
+                fixture = json.loads(fixture_path.read_text(encoding="utf-8")); match = fixture["match"]
+                root = Path(directory); bankroll = root / "bankroll.txt"
+                bankroll.write_text(f"{fixture['starting_bankroll']:.2f}", encoding="utf-8")
+                with ExitStack() as stack:
+                    for name, value in {
+                        "BANKROLL_FILE": bankroll, "LOG_FILE": root / "bets-log.csv",
+                        "PAPER_LOG_FILE": root / "paper-bets-log.csv", "PENDING_FILE": root / "pending-bets.csv",
+                        "POLICY_FILE": root / "counterfactual-log.csv", "AUDIT_FILE": root / "predictions-log.csv",
+                        "TRANSACTION_FILE": root / "bankroll-transactions.csv",
+                        "SETTLEMENT_ALERT_FILE": root / "settlement-alerts.md", "RISK_CONFIG_FILE": root / "risk-config.json",
+                    }.items():
+                        stack.enter_context(patch.object(bot, name, value))
+                    stack.enter_context(patch.object(bot, "load_resolved_predictions", return_value=[]))
+                    stack.enter_context(patch.object(bot, "manual_kill_switch", return_value={"active": False, "reason": "fixture"}))
+                    validated = bot.validate_recommendations([fixture["recommendation"]], [match], fixture["odds_min"], fixture["odds_max"])
+                    staged = bot.stage_pending_bets(fixture["date"], validated, fixture["odds_min"], fixture["odds_max"])
+                    with (patch.object(bot, "fetch_verified_matches", return_value=[match]),
+                          patch.object(bot, "enrich_matches_with_profiles"), patch.object(bot, "enrich_matches_with_recent_form")):
+                        authorized, cancelled = bot.revalidate_pending_bets(["fixture-key"], datetime.fromisoformat(fixture["revalidation_time"]))
+                    with patch.object(bot, "fetch_odds_json", side_effect=[([fixture["settled_event"]], 0), ([fixture["closing_market"]], 0)]):
+                        bot.settle_pending_bets(["fixture-key"])
+                    _, bet_rows = bot.read_csv_rows(root / "bets-log.csv"); _, pending_rows = bot.read_csv_rows(root / "pending-bets.csv")
+
+                expected = fixture["expected"]
+                self.assertEqual(len(validated), expected["validated"]); self.assertEqual(staged, expected["staged"])
+                self.assertEqual((authorized, cancelled), (expected["authorized"], expected["cancelled"]))
+                self.assertEqual(pending_rows[0]["STATUS"], "authorized"); self.assertEqual(bet_rows[0]["RESULT"], expected["result"])
+                self.assertEqual(bet_rows[0]["BOOKMAKER"], expected["bookmaker"])
+                self.assertEqual(float(bet_rows[0]["STAKE"]), expected["starting_stake"])
+                self.assertAlmostEqual(float(bankroll.read_text(encoding="utf-8")), expected["ending_bankroll"])
+
     def test_atomic_text_write_replaces_complete_file(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "state.txt"; target.write_text("old", encoding="utf-8")
