@@ -92,7 +92,7 @@ Status conventions:
 - [x] Reject isolated quotes more than 12% above consensus.
 - [x] Measure bookmaker dispersion.
 - [x] Measure discovery-to-authorization price movement.
-- [ ] Measure price velocity and acceleration across snapshots.
+- [x] Measure price velocity and acceleration across snapshots.
 - [ ] Add stale-price detection based on snapshot timestamps.
 - [x] Distinguish broad market movement from isolated price errors.
 - [x] Require at least two bookmakers at authorization.

@@ -3686,7 +3686,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "PREVIOUS_TOURNAMENT_DAYS_AGO", "CURRENT_SURFACE", "SURFACE_CHANGE", "SURFACE_TRANSITION_SOURCE",
         "TRAVEL_DISTANCE_KM", "TIMEZONE_CHANGE_HOURS", "TRAVEL_SOURCE",
         "BEST_OF", "INDOOR",
-        "MARKET_DISPERSION", "DATA_QUALITY_SCORE", "DATA_QUALITY_GRADE",
+        "MARKET_DISPERSION", "PRICE_SNAPSHOT_COUNT", "PRICE_VELOCITY_PER_HOUR",
+        "PRICE_ACCELERATION_PER_HOUR2", "DATA_QUALITY_SCORE", "DATA_QUALITY_GRADE",
         "UNCERTAINTY_MARGIN", "RISK_ADJUSTED_EV", "KILL_SWITCH", "KILL_SWITCH_REASON",
         "SEGMENT_SAMPLE", "SEGMENT_ROI", "SEGMENT_CLV", "SEGMENT_SUSPENDED",
         "EV", "SCORE", "EVIDENCE", "QUALITY_SCORE", "QUALITY_GRADE",
@@ -3828,6 +3829,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 workload.get("travel_source", ""),
                 baseline.get("best_of", 3), baseline.get("indoor", ""),
                 f"{data_quality['dispersion']:.6f}" if data_quality.get("dispersion") is not None else "",
+                "", "", "",
                 data_quality["score"], data_quality["grade"], f"{baseline['uncertainty_margin']:.6f}",
                 f"{baseline['risk_adjusted_ev']:.6f}", baseline.get("kill_switch", False), baseline.get("kill_switch_reason", ""),
                 baseline.get("segment_sample", 0),
@@ -4263,6 +4265,7 @@ PENDING_HEADERS = [
     "DISCOVERY_ODDS", "DISCOVERY_PROBABILITY", "DISCOVERY_EV", "DISCOVERED_AT",
     "MODE", "STATUS", "REASON", "FINAL_ODDS", "FINAL_PROBABILITY", "FINAL_EV",
     "FINAL_BOOKMAKERS", "FINAL_SOURCE", "REVALIDATED_AT", "PRICE_MOVEMENT",
+    "PRICE_VELOCITY_PER_HOUR", "PRICE_ACCELERATION_PER_HOUR2", "PRICE_SNAPSHOT_COUNT",
 ]
 
 
@@ -4273,14 +4276,15 @@ def stage_pending_bets(date_str: str, recommendations: list[dict], odds_min: flo
         with PENDING_FILE.open(newline="", encoding="utf-8") as handle:
             rows = list(csv.DictReader(handle))
         existing = {(row.get("DATE"), normalize_player_name(row.get("PICK", ""))) for row in rows}
-    now = datetime.now(timezone.utc).isoformat()
+    captured_at = datetime.now(timezone.utc)
+    now = captured_at.isoformat()
     staged = 0
     for rec in recommendations:
         match = rec.get("match") or {}
         key = (date_str, normalize_player_name(rec.get("player", "")))
         if key in existing:
             continue
-        rows.append({
+        pending_row = {
             "DATE": date_str, "MATCH": f"{match.get('player1', '')} vs {match.get('player2', '')}",
             "PLAYER1": match.get("player1", ""), "PLAYER2": match.get("player2", ""),
             "PICK": rec["player"], "TOURNAMENT": match.get("tournament", ""),
@@ -4292,7 +4296,9 @@ def stage_pending_bets(date_str: str, recommendations: list[dict], odds_min: flo
             "DISCOVERY_EV": f"{rec['ev']:.6f}", "DISCOVERED_AT": now,
             "MODE": "paper" if PAPER_TRADING_MODE else "live",
             "STATUS": "pending_revalidation", "REASON": "awaiting_pre_match_check",
-        })
+        }
+        rows.append(pending_row)
+        append_price_snapshot(captured_at, pending_row, match, {"player_odds": rec["odds"]})
         existing.add(key); staged += 1
     if staged:
         atomic_write_csv(PENDING_FILE, PENDING_HEADERS, rows)
@@ -4300,7 +4306,8 @@ def stage_pending_bets(date_str: str, recommendations: list[dict], odds_min: flo
     return staged
 
 
-def update_audit_lifecycle(date_str: str, pick: str, decision: str, reason: str):
+def update_audit_lifecycle(date_str: str, pick: str, decision: str, reason: str,
+                           price_dynamics: dict | None = None):
     if not AUDIT_FILE.exists() or not AUDIT_FILE.stat().st_size:
         return
     with AUDIT_FILE.open(newline="", encoding="utf-8") as handle:
@@ -4308,7 +4315,14 @@ def update_audit_lifecycle(date_str: str, pick: str, decision: str, reason: str)
     changed = False
     for row in rows:
         if row.get("DATE") == date_str and normalize_player_name(row.get("PICK", "")) == normalize_player_name(pick):
-            row["DECISION"], row["REASON"] = decision, reason; changed = True
+            row["DECISION"], row["REASON"] = decision, reason
+            if price_dynamics:
+                row["PRICE_SNAPSHOT_COUNT"] = price_dynamics.get("snapshot_count", 0)
+                row["PRICE_VELOCITY_PER_HOUR"] = (f"{price_dynamics['velocity_per_hour']:.6f}"
+                                                   if price_dynamics.get("velocity_per_hour") is not None else "")
+                row["PRICE_ACCELERATION_PER_HOUR2"] = (f"{price_dynamics['acceleration_per_hour2']:.6f}"
+                                                        if price_dynamics.get("acceleration_per_hour2") is not None else "")
+            changed = True
     if changed:
         atomic_write_csv(AUDIT_FILE, list(headers or []), rows)
 
@@ -4330,15 +4344,83 @@ def match_time_state(value: str, now: datetime, window_minutes: int = 90) -> str
     return "ready"
 
 
-def append_price_snapshot(now: datetime, row: dict, match: dict | None, baseline: dict | None):
+def calculate_price_dynamics(rows: list[dict], date_str: str, match_label: str, pick: str,
+                             event_id: str = "") -> dict:
+    """Calculate relative price velocity/hour and acceleration/hour² from ordered snapshots."""
+    wanted_pick = normalize_player_name(pick)
+    wanted_match = normalize_player_name(match_label)
+    observations = []
+    for item in rows:
+        if item.get("DATE") != date_str or normalize_player_name(item.get("PICK", "")) != wanted_pick:
+            continue
+        if event_id:
+            if item.get("EVENT_ID") and item.get("EVENT_ID") != event_id:
+                continue
+            if not item.get("EVENT_ID") and normalize_player_name(item.get("MATCH", "")) != wanted_match:
+                continue
+        elif normalize_player_name(item.get("MATCH", "")) != wanted_match:
+            continue
+        try:
+            timestamp = datetime.fromisoformat(str(item.get("TIMESTAMP") or "").replace("Z", "+00:00"))
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            odds = float(item.get("ODDS") or "")
+            if odds <= 1:
+                continue
+        except (TypeError, ValueError):
+            continue
+        observations.append((timestamp.astimezone(timezone.utc), odds))
+    observations.sort(key=lambda item: item[0])
+    deduplicated = []
+    for observation in observations:
+        if deduplicated and observation[0] == deduplicated[-1][0]:
+            deduplicated[-1] = observation
+        else:
+            deduplicated.append(observation)
+    result = {"snapshot_count": len(deduplicated), "price_movement": None,
+              "velocity_per_hour": None, "acceleration_per_hour2": None}
+    if len(deduplicated) >= 2:
+        first_odds = deduplicated[0][1]
+        previous_time, previous_odds = deduplicated[-2]
+        latest_time, latest_odds = deduplicated[-1]
+        elapsed = (latest_time - previous_time).total_seconds() / 3600
+        result["price_movement"] = latest_odds / first_odds - 1
+        if elapsed > 0:
+            result["velocity_per_hour"] = (latest_odds / previous_odds - 1) / elapsed
+    if len(deduplicated) >= 3:
+        first_time, first_odds = deduplicated[-3]
+        middle_time, middle_odds = deduplicated[-2]
+        latest_time, latest_odds = deduplicated[-1]
+        first_interval = (middle_time - first_time).total_seconds() / 3600
+        second_interval = (latest_time - middle_time).total_seconds() / 3600
+        midpoint_interval = (latest_time - first_time).total_seconds() / 7200
+        if first_interval > 0 and second_interval > 0 and midpoint_interval > 0:
+            first_velocity = (middle_odds / first_odds - 1) / first_interval
+            second_velocity = (latest_odds / middle_odds - 1) / second_interval
+            result["acceleration_per_hour2"] = (second_velocity - first_velocity) / midpoint_interval
+    return result
+
+
+def append_price_snapshot(now: datetime, row: dict, match: dict | None, baseline: dict | None) -> dict:
     path = PENDING_FILE.with_name("price-history.csv")
-    headers = ["TIMESTAMP", "DATE", "MATCH", "PICK", "ODDS", "BOOKMAKERS", "DISPERSION", "SOURCE", "EVENT_STATUS"]
+    headers = ["TIMESTAMP", "DATE", "EVENT_ID", "MATCH", "PICK", "ODDS", "BOOKMAKERS", "DISPERSION", "SOURCE", "EVENT_STATUS",
+               "PRICE_MOVEMENT", "VELOCITY_PER_HOUR", "ACCELERATION_PER_HOUR2", "SNAPSHOT_COUNT"]
     _, rows = read_csv_rows(path)
     dispersion = player_market_dispersion(match, row.get("PICK", "")) if match else None
-    rows.append(dict(zip(headers, [now.isoformat(), row.get("DATE", ""), row.get("MATCH", ""), row.get("PICK", ""),
+    snapshot = dict(zip(headers, [now.isoformat(), row.get("DATE", ""), row.get("EVENT_ID", ""), row.get("MATCH", ""), row.get("PICK", ""),
                          f"{baseline['player_odds']:.3f}" if baseline else "", (match or {}).get("bookmaker_count", 0),
-                         f"{dispersion:.6f}" if dispersion is not None else "", (match or {}).get("odds_source", ""), (match or {}).get("status", "")])))
+                         f"{dispersion:.6f}" if dispersion is not None else "", (match or {}).get("odds_source", ""), (match or {}).get("status", ""),
+                         "", "", "", ""]))
+    rows.append(snapshot)
+    dynamics = calculate_price_dynamics(rows, row.get("DATE", ""), row.get("MATCH", ""), row.get("PICK", ""), row.get("EVENT_ID", ""))
+    snapshot.update({
+        "PRICE_MOVEMENT": f"{dynamics['price_movement']:.6f}" if dynamics["price_movement"] is not None else "",
+        "VELOCITY_PER_HOUR": f"{dynamics['velocity_per_hour']:.6f}" if dynamics["velocity_per_hour"] is not None else "",
+        "ACCELERATION_PER_HOUR2": f"{dynamics['acceleration_per_hour2']:.6f}" if dynamics["acceleration_per_hour2"] is not None else "",
+        "SNAPSHOT_COUNT": dynamics["snapshot_count"],
+    })
     atomic_write_csv(path, headers, rows)
+    return dynamics
 
 
 POLICY_HEADERS = ["DATE", "MODEL_VERSION", "EVENT_ID", "MATCH", "PLAYER1", "PLAYER2", "PICK", "DECISION", "RULE",
@@ -4407,7 +4489,14 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
             pair = {normalize_player_name(row["PLAYER1"]), normalize_player_name(row["PLAYER2"])}
             match = next((m for m in matches if m.get("event_id") == row.get("EVENT_ID") or {normalize_player_name(m["player1"]), normalize_player_name(m["player2"])} == pair), None)
             baseline = calculate_tennis_baseline(match, row["PICK"]) if match else None
-            append_price_snapshot(now, row, match, baseline)
+            price_dynamics = append_price_snapshot(now, row, match, baseline)
+            row.update({
+                "PRICE_VELOCITY_PER_HOUR": (f"{price_dynamics['velocity_per_hour']:.6f}"
+                                             if price_dynamics["velocity_per_hour"] is not None else ""),
+                "PRICE_ACCELERATION_PER_HOUR2": (f"{price_dynamics['acceleration_per_hour2']:.6f}"
+                                                  if price_dynamics["acceleration_per_hour2"] is not None else ""),
+                "PRICE_SNAPSHOT_COUNT": price_dynamics["snapshot_count"],
+            })
             reason = None
             status = str((match or {}).get("status") or "").casefold()
             quality = tennis_data_quality(match, baseline, row["PICK"]) if match and baseline else None
@@ -4438,7 +4527,7 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
             if reason:
                 row.update({"STATUS": "cancelled", "REASON": reason}); cancelled += 1
                 record_policy_decision(now, row, match, baseline, "cancelled", reason)
-                update_audit_lifecycle(row["DATE"], row["PICK"], "Cancelled", reason)
+                update_audit_lifecycle(row["DATE"], row["PICK"], "Cancelled", reason, price_dynamics)
                 continue
             row.update({
                 "STATUS": "authorized", "REASON": "pre_match_validated",
@@ -4452,7 +4541,7 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
             authorized_recs.append({"_date": row["DATE"], "_paper": row.get("MODE") == "paper", "player": row["PICK"], "grade": row["GRADE"], "odds": baseline["player_odds"], "assessed_probability": baseline["assessed_probability"], "ev": baseline["ev"], "match": match})
             record_policy_decision(now, row, match, baseline, "authorized", "pre_match_validated")
             authorized_matches.append(match)
-            update_audit_lifecycle(row["DATE"], row["PICK"], "Authorized", "pre_match_validated")
+            update_audit_lifecycle(row["DATE"], row["PICK"], "Authorized", "pre_match_validated", price_dynamics)
     total_stake = 0.0
     for date_str, paper in sorted({(rec["_date"], rec["_paper"]) for rec in authorized_recs}):
         recs = [rec for rec in authorized_recs if rec["_date"] == date_str and rec["_paper"] == paper]

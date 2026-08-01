@@ -412,8 +412,45 @@ class TennisBotTests(unittest.TestCase):
                 bot.append_price_snapshot(datetime(2026, 8, 1, tzinfo=timezone.utc), {"DATE": "2026-08-01", "MATCH": "A vs B", "PICK": "A"},
                                           {"player1": "A", "player2": "B", "bookmaker_count": 3, "home_dispersion": .04}, {"player_odds": 1.55})
             text = (Path(directory) / "price-history.csv").read_text(encoding="utf-8")
-        self.assertIn("TIMESTAMP,DATE,MATCH,PICK,ODDS", text)
+        self.assertIn("TIMESTAMP,DATE,EVENT_ID,MATCH,PICK,ODDS", text)
         self.assertIn("1.550", text)
+
+    def test_price_velocity_and_acceleration_use_ordered_snapshots(self):
+        from datetime import datetime, timedelta, timezone
+        with tempfile.TemporaryDirectory() as directory:
+            pending = Path(directory) / "pending.csv"
+            row = {"DATE": "2026-08-01", "EVENT_ID": "7", "MATCH": "A vs B", "PICK": "A"}
+            match = {"player1": "A", "player2": "B", "bookmaker_count": 3, "home_dispersion": .04}
+            start = datetime(2026, 8, 1, 9, tzinfo=timezone.utc)
+            with patch.object(bot, "PENDING_FILE", pending):
+                first = bot.append_price_snapshot(start, row, match, {"player_odds": 2.0})
+                second = bot.append_price_snapshot(start + timedelta(hours=1), row, match, {"player_odds": 1.8})
+                third = bot.append_price_snapshot(start + timedelta(hours=2), row, match, {"player_odds": 1.53})
+                _, snapshots = bot.read_csv_rows(Path(directory) / "price-history.csv")
+        self.assertEqual(first["snapshot_count"], 1)
+        self.assertIsNone(first["velocity_per_hour"])
+        self.assertAlmostEqual(second["velocity_per_hour"], -.10)
+        self.assertIsNone(second["acceleration_per_hour2"])
+        self.assertAlmostEqual(third["price_movement"], -.235)
+        self.assertAlmostEqual(third["velocity_per_hour"], -.15)
+        self.assertAlmostEqual(third["acceleration_per_hour2"], -.05)
+        self.assertEqual(snapshots[-1]["SNAPSHOT_COUNT"], "3")
+        self.assertEqual(snapshots[-1]["VELOCITY_PER_HOUR"], "-0.150000")
+        self.assertEqual(snapshots[-1]["ACCELERATION_PER_HOUR2"], "-0.050000")
+
+    def test_authorization_lifecycle_persists_price_dynamics_to_audit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            audit = Path(directory) / "audit.csv"
+            headers = ["DATE", "PICK", "DECISION", "REASON", "PRICE_SNAPSHOT_COUNT",
+                       "PRICE_VELOCITY_PER_HOUR", "PRICE_ACCELERATION_PER_HOUR2"]
+            bot.atomic_write_csv(audit, headers, [{"DATE": "2026-08-01", "PICK": "A"}])
+            dynamics = {"snapshot_count": 3, "velocity_per_hour": -.15, "acceleration_per_hour2": -.05}
+            with patch.object(bot, "AUDIT_FILE", audit):
+                bot.update_audit_lifecycle("2026-08-01", "A", "Authorized", "pre_match_validated", dynamics)
+            _, rows = bot.read_csv_rows(audit)
+        self.assertEqual(rows[0]["PRICE_SNAPSHOT_COUNT"], "3")
+        self.assertEqual(rows[0]["PRICE_VELOCITY_PER_HOUR"], "-0.150000")
+        self.assertEqual(rows[0]["PRICE_ACCELERATION_PER_HOUR2"], "-0.050000")
 
     def test_tournament_correlation_cap(self):
         recs = [{"player": f"P{i}", "grade": "Value Pick", "ev": .10 - i * .01, "score": 8,
