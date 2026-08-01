@@ -216,7 +216,7 @@ Status conventions:
 - [x] Display counterfactual results by rejection rule.
 - [x] Show performance by odds range.
 - [x] Add complete performance segmentation by tour, surface and level.
-- [ ] Display model/policy version and emergency-stop state prominently.
+- [x] Display model/policy version and emergency-stop state prominently.
 - [ ] Display API and source health.
 - [x] Label small historical samples.
 - [x] Keep staged candidates visually separate from logged bets.

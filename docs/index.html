@@ -75,6 +75,19 @@
     .hero p { max-width: 590px; margin: 0; color: var(--muted); font-size: 15px; }
     .updated { flex: 0 0 auto; color: var(--muted-2); font-size: 12px; text-align: right; }
     .updated strong { display: block; margin-top: 3px; color: var(--muted); font-weight: 500; }
+    .runtime-control {
+      display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 1px; margin: 0 0 12px;
+      overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--line);
+      box-shadow: var(--shadow);
+    }
+    .runtime-cell { min-width: 0; padding: 16px 20px; background: var(--surface); }
+    .runtime-label { color: var(--muted-2); font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+    .runtime-value { margin-top: 5px; overflow: hidden; color: var(--text); font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .runtime-reason { margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .runtime-control.stop { border-color: rgba(255,113,108,.38); background: rgba(255,113,108,.38); }
+    .runtime-control.stop .runtime-cell:first-child { background: linear-gradient(135deg, var(--red-soft), var(--surface)); }
+    .runtime-control.stop .runtime-cell:first-child .runtime-value { color: var(--red); }
+    .runtime-control.ready .runtime-cell:first-child .runtime-value { color: var(--lime); }
 
     /* ─── Stats ─── */
     .stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 12px; }
@@ -169,6 +182,7 @@
     @media (max-width: 900px) {
       .stats { grid-template-columns: repeat(2,1fr); }
       .dashboard { grid-template-columns: 1fr; }
+      .runtime-control { grid-template-columns: 1fr; }
       h1 { letter-spacing: -1.5px; }
     }
     @media (max-width: 620px) {
@@ -215,6 +229,22 @@
         <p>Automated results, bankroll, surface-aware Elo, calibration and closing-line value in one view.</p>
       </div>
       <div class="updated">Latest activity<strong id="last-updated">Loading your log…</strong></div>
+    </section>
+
+    <section class="runtime-control stop" id="runtime-control" aria-label="Live model and emergency-stop state">
+      <div class="runtime-cell">
+        <div class="runtime-label">Live betting safety</div>
+        <div class="runtime-value" id="safety-state">Checking emergency stop…</div>
+        <div class="runtime-reason" id="safety-reason">Safety state is treated as blocked until verified.</div>
+      </div>
+      <div class="runtime-cell">
+        <div class="runtime-label">Model version</div>
+        <div class="runtime-value mono" id="model-version">—</div>
+      </div>
+      <div class="runtime-cell">
+        <div class="runtime-label">Active policy</div>
+        <div class="runtime-value mono" id="policy-version">—</div>
+      </div>
     </section>
 
     <section class="card table-card" style="margin-top:12px">
@@ -377,10 +407,12 @@
     const PERFORMANCE_URL = RAW_ROOT + "performance-summary.md";
     const PENDING_URL = RAW_ROOT + "pending-bets.csv";
     const POLICY_URL = RAW_ROOT + "counterfactual-log.csv";
+    const KILL_SWITCH_URL = RAW_ROOT + "kill-switch.json";
     let allRows = [];
     let pendingRows = [];
     let auditRows = [];
     let policyRows = [];
+    let killSwitchState = { active: true, valid: false, reason: "safety_state_unavailable" };
     let currentBankroll = null;
     let performanceText = "";
 
@@ -654,6 +686,28 @@
       el("segment-row-count").textContent = `${settled.length} settled ${settled.length === 1 ? "prediction" : "predictions"}`;
     }
 
+    function latestNonEmpty(rows, field) {
+      return [...rows].reverse().find(row => String(row[field] || "").trim())?.[field] || "—";
+    }
+
+    function renderRuntimeSafety(audit, policies) {
+      const latestAudit = [...audit].reverse().find(row => String(row.model_version || "").trim()) || {};
+      const latestPolicy = [...policies].reverse().find(row =>
+        String(row.policy_role || "active").trim().toLowerCase() === "active" && String(row.policy_id || "").trim());
+      const automaticStop = String(latestAudit.kill_switch || "").trim().toLowerCase() === "true";
+      const stopped = !killSwitchState.valid || killSwitchState.active || automaticStop;
+      const reason = !killSwitchState.valid ? killSwitchState.reason
+        : killSwitchState.active ? (killSwitchState.reason || "manual_kill_switch")
+          : automaticStop ? (latestAudit.kill_switch_reason || "automatic_model_health_stop") : "All recorded safety controls are clear";
+      const control = el("runtime-control");
+      control.classList.toggle("stop", stopped);
+      control.classList.toggle("ready", !stopped);
+      el("safety-state").textContent = stopped ? "EMERGENCY STOP ACTIVE" : "LIVE BETTING ENABLED";
+      el("safety-reason").textContent = String(reason).replaceAll("_", " ");
+      el("model-version").textContent = latestNonEmpty(audit, "model_version");
+      el("policy-version").textContent = latestPolicy?.policy_id || "—";
+    }
+
     function refreshAll() {
       const rows = allRows.map(row => ({ ...row }));
       renderStats(rows);
@@ -663,6 +717,7 @@
       renderModelComparison(auditRows);
       renderCounterfactualByRule(policyRows);
       renderPerformanceSegments(auditRows);
+      renderRuntimeSafety(auditRows, policyRows);
       renderPending(pendingRows);
       drawChart(allRows);
       updateStatus(allRows);
@@ -732,11 +787,21 @@
         if (!required[1].ok) throw new Error(`bankroll.txt returned ${required[1].status}`);
         allRows = normalizeRows(await required[0].text());
         currentBankroll = Number.parseFloat((await required[1].text()).trim());
-        const optional = await Promise.all([fetch(AUDIT_URL), fetch(PERFORMANCE_URL), fetch(PENDING_URL), fetch(POLICY_URL)]);
+        const optional = await Promise.all([fetch(AUDIT_URL), fetch(PERFORMANCE_URL), fetch(PENDING_URL), fetch(POLICY_URL), fetch(KILL_SWITCH_URL)]);
         auditRows = optional[0].ok ? parseCSV(await optional[0].text()) : [];
         performanceText = optional[1].ok ? await optional[1].text() : "";
         pendingRows = optional[2].ok ? parseCSV(await optional[2].text()) : [];
         policyRows = optional[3].ok ? parseCSV(await optional[3].text()) : [];
+        if (optional[4].ok) {
+          try {
+            const state = JSON.parse(await optional[4].text());
+            killSwitchState = typeof state.active === "boolean"
+              ? { active: state.active, valid: true, reason: String(state.reason || "") }
+              : { active: true, valid: false, reason: "invalid_kill_switch_configuration" };
+          } catch (_) {
+            killSwitchState = { active: true, valid: false, reason: "invalid_kill_switch_configuration" };
+          }
+        }
         refreshAll();
         el("status-text").textContent = "Automated data synced";
       } catch (error) {
