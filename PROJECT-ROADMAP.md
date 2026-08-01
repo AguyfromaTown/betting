@@ -60,7 +60,7 @@ Status conventions:
 - [x] Count matches over the previous 30 days.
 - [x] Use verified match duration when available.
 - [x] Detect consecutive-day and dense schedules through workload rules.
-- [ ] Explicitly identify unusually long previous matches.
+- [x] Explicitly identify unusually long previous matches.
 - [x] Detect recent tournament changes.
 - [ ] Detect surface changes between consecutive tournaments.
 - [ ] Calculate verified travel distance and timezone changes.

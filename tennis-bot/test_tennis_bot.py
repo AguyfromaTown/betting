@@ -313,6 +313,11 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual((workload["minutes_7"], workload["minutes_14"], workload["minutes_30"]), (300, 300, 390))
         self.assertEqual(workload["duration_sample_30"], 3)
         self.assertEqual(workload["duration_source"], "verified-a.csv;verified-b.csv")
+        self.assertFalse(workload["last_match_long"])
+        self.assertEqual(workload["long_matches_7"], 1)
+        self.assertEqual(workload["long_matches_30"], 1)
+        self.assertEqual(workload["latest_long_match_minutes"], 180)
+        self.assertEqual(workload["latest_long_match_days_ago"], 3)
         self.assertGreater(workload["penalty"], 0)
 
     def test_workload_never_estimates_missing_match_duration(self):
@@ -322,6 +327,18 @@ class TennisBotTests(unittest.TestCase):
         self.assertIsNone(workload["latest_verified_minutes"])
         self.assertEqual(workload["minutes_30"], 0)
         self.assertEqual(workload["duration_sample_30"], 0)
+        self.assertIsNone(workload["last_match_long"])
+
+    def test_unusually_long_match_threshold_distinguishes_bo3_and_bo5(self):
+        bo3 = [{"tourney_date": "20260731", "winner_name": "Player", "loser_name": "Other", "score": "6-4 4-6 6-4", "minutes": "200", "best_of": "3"}]
+        bo5 = [{"tourney_date": "20260731", "winner_name": "Player", "loser_name": "Other", "score": "6-4 6-4 6-4", "minutes": "220", "best_of": "5"}]
+        workload_bo3 = bot.calculate_workload(bo3, "Player", "2026-08-01")
+        workload_bo5 = bot.calculate_workload(bo5, "Player", "2026-08-01")
+        self.assertTrue(workload_bo3["last_match_long"])
+        self.assertEqual(workload_bo3["last_match_long_threshold"], 180)
+        self.assertFalse(workload_bo5["last_match_long"])
+        self.assertEqual(workload_bo5["last_match_long_threshold"], 240)
+        self.assertEqual(workload_bo3["penalty"], workload_bo5["penalty"])
 
     def test_tennis_context_and_match_format(self):
         self.assertEqual(bot.tennis_context_uncertainty({"tournament": "ITF Madrid", "level": "ITF"})[0], .02)
@@ -867,7 +884,11 @@ class TennisBotTests(unittest.TestCase):
             "player1_workload": {"rest_days": 2, "matches_7": 2, "matches_14": 3, "matches_30": 5, "sets_7": 5, "penalty": 0},
             "player2_workload": {"rest_days": 1, "matches_7": 3, "matches_14": 4, "matches_30": 7, "sets_7": 8,
                                  "last_match_minutes": 185, "minutes_7": 410, "minutes_14": 610, "minutes_30": 920,
-                                 "duration_sample_30": 6, "duration_source": "verified-history.csv", "penalty": 0.015},
+                                 "duration_sample_30": 6, "duration_source": "verified-history.csv",
+                                 "last_match_long": True, "last_match_long_threshold": 180, "long_matches_7": 1,
+                                 "long_matches_30": 2, "latest_long_match_minutes": 185,
+                                 "latest_long_match_date": "2026-07-31", "latest_long_match_days_ago": 1,
+                                 "latest_long_match_source": "verified-history.csv", "penalty": 0.015},
         }
         with tempfile.TemporaryDirectory() as directory:
             audit_file = Path(directory) / "prediction-audit.csv"
@@ -905,6 +926,9 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["LAST_MATCH_MINUTES"], "185")
         self.assertEqual(second["MINUTES_30"], "920")
         self.assertEqual(second["DURATION_SOURCE"], "verified-history.csv")
+        self.assertEqual(second["LAST_MATCH_LONG"], "True")
+        self.assertEqual(second["LONG_MATCHES_30"], "2")
+        self.assertEqual(second["LATEST_LONG_MATCH_MINUTES"], "185")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:

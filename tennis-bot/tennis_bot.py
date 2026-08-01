@@ -2042,8 +2042,14 @@ def calculate_workload(history: list[dict], player: str, as_of: str, current_tou
                 raise ValueError
         except (TypeError, ValueError):
             minutes = None
+        try:
+            best_of = int(row.get("best_of") or 3)
+        except (TypeError, ValueError):
+            best_of = 3
+        long_threshold = 240 if best_of == 5 else 180
         played.append((date, max(1, sets), row.get("tourney_name") or row.get("tournament") or "",
-                       minutes, str(row.get("_source_url") or "historical_match_records")))
+                       minutes, str(row.get("_source_url") or "historical_match_records"),
+                       best_of, bool(minutes is not None and minutes >= long_threshold), long_threshold))
     played.sort(reverse=True)
     last = played[0] if played else None
     matches_7 = sum((cutoff - item[0]).days <= 7 for item in played)
@@ -2055,6 +2061,9 @@ def calculate_workload(history: list[dict], player: str, as_of: str, current_tou
     minutes_30 = sum(item[3] for item in played if item[3] is not None and (cutoff - item[0]).days <= 30)
     duration_30 = [item for item in played if item[3] is not None and (cutoff - item[0]).days <= 30]
     latest_duration = next((item for item in played if item[3] is not None), None)
+    long_matches_7 = [item for item in played if item[6] and (cutoff - item[0]).days <= 7]
+    long_matches_30 = [item for item in played if item[6] and (cutoff - item[0]).days <= 30]
+    latest_long = next((item for item in played if item[6]), None)
     rest_days = (cutoff - last[0]).days if last else None
     tournament_change = bool(last and last[2] and current_tournament and normalize_player_name(last[2]) != normalize_player_name(current_tournament) and rest_days <= 5)
     penalty = .025 if matches_7 >= 4 or sets_7 >= 10 else .015 if matches_7 >= 3 or sets_7 >= 8 else .01 if rest_days is not None and rest_days <= 1 else 0.0
@@ -2067,6 +2076,13 @@ def calculate_workload(history: list[dict], player: str, as_of: str, current_tou
             "minutes_7": minutes_7, "minutes_14": minutes_14, "minutes_30": minutes_30,
             "duration_sample_30": len(duration_30),
             "duration_source": ";".join(dict.fromkeys(item[4] for item in duration_30)),
+            "last_match_long": last[6] if last and last[3] is not None else None,
+            "last_match_long_threshold": last[7] if last else None,
+            "long_matches_7": len(long_matches_7), "long_matches_30": len(long_matches_30),
+            "latest_long_match_minutes": latest_long[3] if latest_long else None,
+            "latest_long_match_date": latest_long[0].strftime("%Y-%m-%d") if latest_long else None,
+            "latest_long_match_days_ago": (cutoff - latest_long[0]).days if latest_long else None,
+            "latest_long_match_source": latest_long[4] if latest_long else "",
             "tournament_change": tournament_change, "penalty": min(.03, penalty)}
 
 
@@ -2584,7 +2600,9 @@ def build_prompt(
                     f"{workload.get('matches_7', 0)}/{workload.get('matches_14', 0)}/{workload.get('matches_30', 0)}, "
                     f"sets 7d={workload.get('sets_7', 0)}, verified minutes 7/14/30d="
                     f"{workload.get('minutes_7', 0):g}/{workload.get('minutes_14', 0):g}/{workload.get('minutes_30', 0):g} "
-                    f"(30d duration n={workload.get('duration_sample_30', 0)})"
+                    f"(30d duration n={workload.get('duration_sample_30', 0)}), long matches 7/30d="
+                    f"{workload.get('long_matches_7', 0)}/{workload.get('long_matches_30', 0)}, "
+                    f"last match long={'unknown' if workload.get('last_match_long') is None else workload.get('last_match_long')}"
                 )
                 baseline_lines.append(
                     f"  Python baseline for {player}: market fair "
@@ -3141,6 +3159,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "CONTEXT_PENALTY", "CONTEXT_REASON", "WORKLOAD_PENALTY", "REST_DAYS",
         "MATCHES_7", "MATCHES_14", "MATCHES_30", "SETS_7", "LAST_MATCH_MINUTES",
         "MINUTES_7", "MINUTES_14", "MINUTES_30", "DURATION_SAMPLE_30", "DURATION_SOURCE",
+        "LAST_MATCH_LONG", "LAST_MATCH_LONG_THRESHOLD", "LONG_MATCHES_7", "LONG_MATCHES_30",
+        "LATEST_LONG_MATCH_MINUTES", "LATEST_LONG_MATCH_DATE", "LATEST_LONG_MATCH_DAYS_AGO", "LATEST_LONG_MATCH_SOURCE",
         "TOURNAMENT_CHANGE", "BEST_OF", "INDOOR",
         "MARKET_DISPERSION", "DATA_QUALITY_SCORE", "DATA_QUALITY_GRADE",
         "UNCERTAINTY_MARGIN", "RISK_ADJUSTED_EV", "KILL_SWITCH", "KILL_SWITCH_REASON",
@@ -3255,6 +3275,10 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 workload.get("matches_14", 0), workload.get("matches_30", 0), workload.get("sets_7", 0),
                 workload.get("last_match_minutes", ""), workload.get("minutes_7", 0), workload.get("minutes_14", 0),
                 workload.get("minutes_30", 0), workload.get("duration_sample_30", 0), workload.get("duration_source", ""),
+                workload.get("last_match_long", ""), workload.get("last_match_long_threshold", ""),
+                workload.get("long_matches_7", 0), workload.get("long_matches_30", 0),
+                workload.get("latest_long_match_minutes", ""), workload.get("latest_long_match_date", ""),
+                workload.get("latest_long_match_days_ago", ""), workload.get("latest_long_match_source", ""),
                 workload.get("tournament_change", False),
                 baseline.get("best_of", 3), baseline.get("indoor", ""),
                 f"{data_quality['dispersion']:.6f}" if data_quality.get("dispersion") is not None else "",
