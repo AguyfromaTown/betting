@@ -1,6 +1,6 @@
 # Weekly Tennis Policy Health
 
-Model version: `tennis-2026.08-monthly-policy-report-v1`
+Model version: `tennis-2026.08-bookmaker-retirement-rules-v1`
 
 Counterfactual metrics show what happened to candidates rejected by each rule; they never affect bankroll.
 
