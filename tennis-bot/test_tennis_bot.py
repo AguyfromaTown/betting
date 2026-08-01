@@ -12,6 +12,23 @@ SPEC.loader.exec_module(bot)
 
 
 class TennisBotTests(unittest.TestCase):
+    def test_counterfactual_policy_decision_is_versioned_and_deduplicated(self):
+        from datetime import datetime, timezone
+        with tempfile.TemporaryDirectory() as directory:
+            policy = Path(directory) / "policy.csv"
+            row = {"DATE": "2026-08-01", "EVENT_ID": "7", "MATCH": "A vs B", "PLAYER1": "A", "PLAYER2": "B", "PICK": "A"}
+            with patch.object(bot, "POLICY_FILE", policy):
+                bot.record_policy_decision(datetime.now(timezone.utc), row, None, {"player_odds": 1.6, "assessed_probability": .7, "ev": .12}, "cancelled", "bookmaker_conflict")
+                bot.record_policy_decision(datetime.now(timezone.utc), row, None, None, "cancelled", "duplicate")
+            with policy.open(encoding="utf-8") as handle: rows = list(__import__("csv").DictReader(handle))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["MODEL_VERSION"], bot.MODEL_VERSION)
+
+    def test_emergency_kill_switch_detects_calibration_drift(self):
+        stable = [{"DATE": "2026-01-01", "RESULT": "W", "MODEL_PROBABILITY": ".9", "CLV": ".02"}] * 30
+        degraded = [{"DATE": "2026-02-01", "RESULT": "L", "MODEL_PROBABILITY": ".9", "CLV": "-.05"}] * 30
+        self.assertTrue(bot.tennis_kill_switch(stable + degraded)["active"])
+
     def test_workload_measures_rest_matches_and_sets(self):
         history = [
             {"tourney_date": "20260731", "winner_name": "Player One", "loser_name": "Other", "score": "6-4 6-4", "tourney_name": "Event A"},

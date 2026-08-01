@@ -45,6 +45,16 @@ No more than two bets from the same tournament can be authorized in one run.
 Player identities continue to resolve through player-aliases.csv. Each GitHub
 revalidation run publishes a table explaining every authorization or cancellation.
 
+POLICY EVALUATION
+
+Every authorized and cancelled candidate is saved to counterfactual-log.csv with
+an immutable model version. Cancelled picks are settled hypothetically at a flat
+one-unit stake, without affecting bankroll. weekly-health.md reports ROI by rule,
+showing whether movement, dispersion, workload and quality filters help or hurt.
+Extreme isolated bookmaker quotes more than 12% above consensus are excluded.
+The final authorization uses uncertainty-adjusted EV, and a mature 60-result
+calibration or CLV deterioration can activate the emergency kill switch.
+
 EXAMPLES
 
 Bankroll €100.00:

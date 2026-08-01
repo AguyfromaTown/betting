@@ -26,6 +26,7 @@ BANKROLL_FILE = REPO_ROOT / "bankroll.txt"
 LOG_FILE = REPO_ROOT / "bets-log.csv"
 AUDIT_FILE = REPO_ROOT / "predictions-log.csv"
 PENDING_FILE = REPO_ROOT / "pending-bets.csv"
+POLICY_FILE = REPO_ROOT / "counterfactual-log.csv"
 PERFORMANCE_FILE = REPO_ROOT / "performance-summary.md"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
@@ -46,6 +47,7 @@ MIN_STAKE_RATE = 0.005
 MAX_PRICE_MOVEMENT = 0.10
 MAX_BOOKMAKER_DISPERSION = 0.12
 MAX_BETS_PER_TOURNAMENT = 2
+MODEL_VERSION = "tennis-2026.08-quality-v2"
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -325,8 +327,10 @@ def extract_moneyline_market(payload: dict) -> dict:
     midpoint = len(homes) // 2
     median_home = homes[midpoint] if len(homes) % 2 else (homes[midpoint - 1] + homes[midpoint]) / 2
     median_away = aways[midpoint] if len(aways) % 2 else (aways[midpoint - 1] + aways[midpoint]) / 2
-    best_home = max(prices_found, key=lambda p: p[0])
-    best_away = max(prices_found, key=lambda p: p[1])
+    eligible_home = [p for p in prices_found if p[0] <= median_home * 1.12] or prices_found
+    eligible_away = [p for p in prices_found if p[1] <= median_away * 1.12] or prices_found
+    best_home = max(eligible_home, key=lambda p: p[0])
+    best_away = max(eligible_away, key=lambda p: p[1])
     source = best_home[2] if best_home[2] == best_away[2] else f"{best_home[2]}/{best_away[2]}"
     return {"best_home": best_home[0], "best_away": best_away[1], "consensus_home": median_home, "consensus_away": median_away, "source": source, "bookmaker_count": len(prices_found),
             "home_dispersion": (max(homes) - min(homes)) / median_home,
@@ -956,6 +960,17 @@ def segment_health(match: dict, rows: list[dict]) -> dict:
     return {"sample": len(segment), "roi": roi, "clv": average_clv, "suspended": suspended}
 
 
+def tennis_kill_switch(rows: list[dict], window: int = 30) -> dict:
+    ordered = sorted(rows, key=lambda row: row.get("DATE", ""))
+    if len(ordered) < window * 2: return {"active": False, "reason": "insufficient_data", "sample": len(ordered)}
+    previous, recent = ordered[-2 * window:-window], ordered[-window:]
+    old_brier, new_brier = brier_score(previous, "MODEL_PROBABILITY"), brier_score(recent, "MODEL_PROBABILITY")
+    old_clv = [float(row["CLV"]) for row in previous if row.get("CLV")]; new_clv = [float(row["CLV"]) for row in recent if row.get("CLV")]
+    clv_drop = bool(old_clv and new_clv and sum(new_clv) / len(new_clv) < sum(old_clv) / len(old_clv) - .04)
+    calibration_drop = bool(old_brier and new_brier and new_brier > old_brier * 1.20)
+    return {"active": calibration_drop or clv_drop, "reason": "calibration_or_clv_drift" if calibration_drop or clv_drop else "stable", "sample": len(ordered)}
+
+
 def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
     """Blend de-vigged two-way market probability with independent overall Elo."""
     if "/" in match.get("player1", "") or "/" in match.get("player2", ""):
@@ -1030,7 +1045,10 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
     workload_penalty = float(workload.get("penalty") or 0)
     assessed_probability = max(.02, assessed_probability - context_penalty - workload_penalty)
     health = segment_health(match, history)
+    kill_switch = tennis_kill_switch(history)
     ev = assessed_probability * player_odds - 1
+    uncertainty_margin = .015 if recent_form and serve_return else .025
+    risk_adjusted_ev = max(.02, assessed_probability - uncertainty_margin) * player_odds - 1
     score = max(0.0, min(10.0, 6.0 + max(0.0, ev) * 30))
     return {
         "player_odds": player_odds,
@@ -1058,6 +1076,10 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "segment_roi": health["roi"],
         "segment_clv": health["clv"],
         "segment_suspended": health["suspended"],
+        "kill_switch": kill_switch["active"],
+        "kill_switch_reason": kill_switch["reason"],
+        "uncertainty_margin": uncertainty_margin,
+        "risk_adjusted_ev": risk_adjusted_ev,
         "assessed_probability": assessed_probability,
         "ev": ev,
         "score": score,
@@ -1073,6 +1095,7 @@ def tennis_baseline_is_reliable(baseline: dict | None) -> bool:
         and 0.98 <= baseline["market_overround"] <= MAX_MARKET_OVERROUND
         and baseline["elo_market_gap"] <= MAX_ELO_MARKET_GAP
         and not baseline.get("segment_suspended")
+        and not baseline.get("kill_switch")
     )
 
 
@@ -1630,7 +1653,7 @@ def tennis_data_quality(match: dict, baseline: dict, player: str) -> dict:
 def append_prediction_audit(date_str, matches, recommendations, authorized):
     """Persist all Elo-modelled singles candidates and final decisions."""
     headers = [
-        "DATE", "EVENT_ID", "MATCH", "PICK", "OPENING_ODDS",
+        "DATE", "MODEL_VERSION", "EVENT_ID", "MATCH", "PICK", "OPENING_ODDS",
         "MARKET_PROBABILITY", "ELO_PROBABILITY", "MODEL_PROBABILITY",
         "FORM_PROBABILITY", "FORM_SAMPLE", "SERVE_RETURN_PROBABILITY",
         "SERVE_RETURN_SAMPLE", "EXPECTED_HOLD", "OPPONENT_EXPECTED_HOLD",
@@ -1639,6 +1662,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
         "CONTEXT_PENALTY", "CONTEXT_REASON", "WORKLOAD_PENALTY", "REST_DAYS",
         "MATCHES_7", "MATCHES_14", "SETS_7", "TOURNAMENT_CHANGE", "BEST_OF", "INDOOR",
         "MARKET_DISPERSION", "DATA_QUALITY_SCORE", "DATA_QUALITY_GRADE",
+        "UNCERTAINTY_MARGIN", "RISK_ADJUSTED_EV", "KILL_SWITCH", "KILL_SWITCH_REASON",
         "SEGMENT_SAMPLE", "SEGMENT_ROI", "SEGMENT_CLV", "SEGMENT_SUSPENDED",
         "EV", "SCORE", "EVIDENCE", "QUALITY_SCORE", "QUALITY_GRADE",
         "TOUR", "SURFACE", "BOOKMAKERS", "DECISION", "REASON", "RESULT",
@@ -1688,7 +1712,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
             data_quality = tennis_data_quality(match, baseline, player)
             workload = baseline.get("workload") or {}
             rows.append([
-                date_str, match.get("event_id", ""),
+                date_str, MODEL_VERSION, match.get("event_id", ""),
                 f"{match['player1']} vs {match['player2']}", player,
                 f"{baseline['player_odds']:.3f}",
                 f"{baseline['market_probability']:.6f}",
@@ -1709,7 +1733,9 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
                 workload.get("matches_14", 0), workload.get("sets_7", 0), workload.get("tournament_change", False),
                 baseline.get("best_of", 3), baseline.get("indoor", ""),
                 f"{data_quality['dispersion']:.6f}" if data_quality.get("dispersion") is not None else "",
-                data_quality["score"], data_quality["grade"], baseline.get("segment_sample", 0),
+                data_quality["score"], data_quality["grade"], f"{baseline['uncertainty_margin']:.6f}",
+                f"{baseline['risk_adjusted_ev']:.6f}", baseline.get("kill_switch", False), baseline.get("kill_switch_reason", ""),
+                baseline.get("segment_sample", 0),
                 f"{baseline['segment_roi']:.6f}" if baseline.get("segment_roi") is not None else "",
                 f"{baseline['segment_clv']:.6f}" if baseline.get("segment_clv") is not None else "",
                 baseline.get("segment_suspended", False),
@@ -1767,11 +1793,19 @@ def tennis_void_reason(event: dict) -> str | None:
 
 def settle_pending_bets(api_keys: list[str]) -> int:
     """Settle finished tennis bets and add bookmaker returns to bankroll."""
-    if not LOG_FILE.exists() or not LOG_FILE.stat().st_size or not api_keys:
+    if not api_keys:
         return 0
-    with open(LOG_FILE, newline="", encoding="utf-8") as handle:
-        rows = list(csv.DictReader(handle))
-    dates = sorted({r.get("DATE", "") for r in rows if not r.get("RESULT", "").strip()})
+    rows = []
+    if LOG_FILE.exists() and LOG_FILE.stat().st_size:
+        with open(LOG_FILE, newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+    policy_rows = []
+    if POLICY_FILE.exists() and POLICY_FILE.stat().st_size:
+        with POLICY_FILE.open(newline="", encoding="utf-8") as handle:
+            policy_rows = list(csv.DictReader(handle))
+    dates = sorted({r.get("DATE", "") for r in rows + policy_rows if not r.get("RESULT", "").strip() and r.get("DATE")})
+    if not dates:
+        return 0
     events = []
     key_index = 0
     for date in dates:
@@ -1837,6 +1871,24 @@ def settle_pending_bets(api_keys: list[str]) -> int:
         balance = float(BANKROLL_FILE.read_text().strip() or 0) + credited
         BANKROLL_FILE.write_text(f"{balance:.2f}", encoding="utf-8")
         log(f"Settled {settled} bet(s); credited €{credited:.2f}")
+    policy_settled = 0
+    for row in policy_rows:
+        if row.get("RESULT"): continue
+        event = next((event for event in events if (row.get("EVENT_ID") and str(event.get("id")) == row["EVENT_ID"]) or
+                      (str(event.get("date", "")).startswith(row.get("DATE", "")) and
+                       {normalize_player_name(str(event.get("home", ""))), normalize_player_name(str(event.get("away", "")))} ==
+                       {normalize_player_name(row.get("PLAYER1", "")), normalize_player_name(row.get("PLAYER2", ""))})), None)
+        if not event: continue
+        if tennis_void_reason(event): row["RESULT"], row["FLAT_RETURN"] = "V", "0.000"; policy_settled += 1; continue
+        try: home_score, away_score = float(event["scores"]["home"]), float(event["scores"]["away"])
+        except (KeyError, TypeError, ValueError): continue
+        pick = normalize_player_name(row.get("PICK", "")); home_pick = pick == normalize_player_name(str(event.get("home", "")))
+        won = (home_pick and home_score > away_score) or (not home_pick and away_score > home_score)
+        odds = float(row.get("ODDS") or 0); row["RESULT"] = "W" if won else "L"; row["FLAT_RETURN"] = f"{odds - 1 if won else -1:.3f}"; policy_settled += 1
+    if policy_settled:
+        with POLICY_FILE.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=POLICY_HEADERS); writer.writeheader(); writer.writerows(policy_rows)
+        log(f"Settled {policy_settled} counterfactual policy decision(s)")
     return settled
 
 
@@ -1858,6 +1910,10 @@ def generate_performance_summary():
     challenger_rows = [row for row in resolved if row.get("CHALLENGER_PROBABILITY")]
     challenger_brier = brier_score(challenger_rows, "CHALLENGER_PROBABILITY")
     clv = [float(row["CLV"]) for row in resolved if row.get("CLV")]
+    policy = []
+    if POLICY_FILE.exists() and POLICY_FILE.stat().st_size:
+        with POLICY_FILE.open(newline="", encoding="utf-8") as handle: policy = list(csv.DictReader(handle))
+    policy_resolved = [row for row in policy if row.get("RESULT") in {"W", "L"}]
     lines = [
         "# Tennis Bot Performance", "",
         f"- Settled bets: {len(settled)}",
@@ -1867,6 +1923,7 @@ def generate_performance_summary():
         f"- Brier score: {brier:.4f}" if brier is not None else "- Brier score: N/A",
         f"- Shadow challenger Brier: {challenger_brier:.4f}" if challenger_brier is not None else "- Shadow challenger Brier: N/A",
         f"- Average CLV: {sum(clv) / len(clv):.2%}" if clv else "- Average CLV: N/A",
+        f"- Settled counterfactual decisions: {len(policy_resolved)}",
         "", "## Calibration", "",
         "| Predicted probability | Predictions | Actual win rate |", "|---|---:|---:|",
     ]
@@ -1876,6 +1933,13 @@ def generate_performance_summary():
         label = f"{low:.0%}–{high:.0%}" if high <= 1 else "70%+"
         lines.append(f"| {label} | {len(bucket)} | {actual:.1%} |" if actual is not None else f"| {label} | 0 | N/A |")
     PERFORMANCE_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    health = ["# Weekly Tennis Policy Health", "", f"Model version: `{MODEL_VERSION}`", "", "| Rule | Decisions | Flat-unit ROI |", "|---|---:|---:|"]
+    for rule in sorted({row.get("RULE", "unknown") for row in policy_resolved}):
+        group = [row for row in policy_resolved if row.get("RULE", "unknown") == rule]
+        roi = sum(float(row.get("FLAT_RETURN") or 0) for row in group) / len(group)
+        health.append(f"| {rule} | {len(group)} | {roi:.2%} |")
+    if not policy_resolved: health.append("| No settled policy decisions | 0 | N/A |")
+    (REPO_ROOT / "weekly-health.md").write_text("\n".join(health) + "\n", encoding="utf-8")
     generate_backtest_summary(resolved)
     log(f"Performance summary saved: {PERFORMANCE_FILE.name}")
 
@@ -2019,6 +2083,25 @@ def append_price_snapshot(now: datetime, row: dict, match: dict | None, baseline
                          f"{dispersion:.6f}" if dispersion is not None else "", (match or {}).get("odds_source", ""), (match or {}).get("status", "")])
 
 
+POLICY_HEADERS = ["DATE", "MODEL_VERSION", "EVENT_ID", "MATCH", "PLAYER1", "PLAYER2", "PICK", "DECISION", "RULE",
+                  "ODDS", "PROBABILITY", "EV", "TIMESTAMP", "RESULT", "FLAT_RETURN"]
+
+
+def record_policy_decision(now: datetime, row: dict, match: dict | None, baseline: dict | None, decision: str, rule: str):
+    rows = []
+    if POLICY_FILE.exists() and POLICY_FILE.stat().st_size:
+        with POLICY_FILE.open(newline="", encoding="utf-8") as handle: rows = list(csv.DictReader(handle))
+    key = (row.get("DATE"), row.get("EVENT_ID"), normalize_player_name(row.get("PICK", "")))
+    if any((item.get("DATE"), item.get("EVENT_ID"), normalize_player_name(item.get("PICK", ""))) == key for item in rows): return
+    rows.append({"DATE": row.get("DATE", ""), "MODEL_VERSION": MODEL_VERSION, "EVENT_ID": row.get("EVENT_ID", ""),
+                 "MATCH": row.get("MATCH", ""), "PLAYER1": row.get("PLAYER1", ""), "PLAYER2": row.get("PLAYER2", ""),
+                 "PICK": row.get("PICK", ""), "DECISION": decision, "RULE": rule,
+                 "ODDS": f"{baseline['player_odds']:.3f}" if baseline else "", "PROBABILITY": f"{baseline['assessed_probability']:.6f}" if baseline else "",
+                 "EV": f"{baseline['ev']:.6f}" if baseline else "", "TIMESTAMP": now.isoformat(), "RESULT": "", "FLAT_RETURN": ""})
+    with POLICY_FILE.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=POLICY_HEADERS); writer.writeheader(); writer.writerows(rows)
+
+
 def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) -> tuple[int, int]:
     """Authorize only candidates whose price and model edge survive near match time."""
     if not PENDING_FILE.exists() or not PENDING_FILE.stat().st_size:
@@ -2037,6 +2120,7 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
         if state in {"missing", "passed"}:
             reason = "start_time_unknown" if state == "missing" else "match_started"
             row.update({"STATUS": "cancelled", "REASON": reason, "REVALIDATED_AT": now.isoformat()})
+            record_policy_decision(now, row, None, None, "cancelled", reason)
             update_audit_lifecycle(row["DATE"], row["PICK"], "Cancelled", reason)
             cancelled += 1
         else:
@@ -2078,11 +2162,12 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
                 reason = "price_outside_range"
             elif not tennis_baseline_is_reliable(baseline):
                 reason = "model_disagreement"
-            elif baseline["ev"] <= 0.05:
-                reason = "edge_disappeared"
+            elif baseline.get("risk_adjusted_ev", baseline["ev"]) <= 0.05:
+                reason = "uncertainty_adjusted_edge_too_low"
             row["REVALIDATED_AT"] = now.isoformat()
             if reason:
                 row.update({"STATUS": "cancelled", "REASON": reason}); cancelled += 1
+                record_policy_decision(now, row, match, baseline, "cancelled", reason)
                 update_audit_lifecycle(row["DATE"], row["PICK"], "Cancelled", reason)
                 continue
             row.update({
@@ -2095,6 +2180,7 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
                 "PRICE_MOVEMENT": f"{movement:.6f}",
             })
             authorized_recs.append({"_date": row["DATE"], "player": row["PICK"], "grade": row["GRADE"], "odds": baseline["player_odds"], "assessed_probability": baseline["assessed_probability"], "ev": baseline["ev"], "match": match})
+            record_policy_decision(now, row, match, baseline, "authorized", "pre_match_validated")
             authorized_matches.append(match)
             update_audit_lifecycle(row["DATE"], row["PICK"], "Authorized", "pre_match_validated")
     total_stake = 0.0
