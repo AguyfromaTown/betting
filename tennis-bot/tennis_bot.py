@@ -2514,7 +2514,7 @@ def calculate_player_bio(history: list[dict], player: str, as_of: str) -> dict |
             observations.append((played, hand, nationality, str(row.get("_source_url") or "historical_match_records")))
     if not observations:
         return None
-    observations.sort(reverse=True)
+    observations.sort(key=lambda item: item[0], reverse=True)
 
     hand_observation = next((item for item in observations if item[1]), None)
     nationality_observation = next((item for item in observations if item[2]), None)
@@ -2649,7 +2649,7 @@ def calculate_head_to_head(history: list[dict], player1: str, player2: str,
                              str(row.get("_source_url") or "historical_match_records")))
     if not observations:
         return None
-    observations.sort(reverse=True)
+    observations.sort(key=lambda item: item[0], reverse=True)
     weighted_total = sum(item[3] for item in observations)
     weighted_wins = sum(item[3] for item in observations if item[1])
     # Four neutral prior matches prevent a tiny or stale H2H from dominating.
@@ -2828,7 +2828,7 @@ def calculate_clutch_profile(history: list[dict], player: str, surface: str | No
                         str(row.get("_source_url") or "historical_match_records")))
     if not matches:
         return None
-    matches.sort(reverse=True); matches = matches[:limit]
+    matches.sort(key=lambda item: item[0], reverse=True); matches = matches[:limit]
     tiebreak_sample = sum(len(item[2]) for item in matches)
     tiebreak_weight = sum(item[1] for item in matches for _ in item[2])
     tiebreak_wins = sum(item[1] for item in matches for won in item[2] if won)
@@ -3024,7 +3024,7 @@ def calculate_workload(history: list[dict], player: str, as_of: str, current_tou
                        minutes, str(row.get("_source_url") or "historical_match_records"),
                        best_of, bool(minutes is not None and minutes >= long_threshold), long_threshold,
                        historical_surface, historical_location))
-    played.sort(reverse=True)
+    played.sort(key=lambda item: item[0], reverse=True)
     last = played[0] if played else None
     matches_7 = sum((cutoff - item[0]).days <= 7 for item in played)
     matches_14 = sum((cutoff - item[0]).days <= 14 for item in played)

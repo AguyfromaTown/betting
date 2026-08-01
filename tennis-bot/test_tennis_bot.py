@@ -1890,6 +1890,20 @@ class TennisBotTests(unittest.TestCase):
         self.assertLess(profile["tiebreak_win_rate"], 0.5)
         self.assertAlmostEqual(profile["tiebreak_win_rate"], profile["deciding_set_win_rate"])
 
+    def test_clutch_profile_same_date_optional_results_sort_without_type_error(self):
+        history = [
+            {"tourney_date": "20260501", "surface": "Clay", "best_of": "3",
+             "winner_name": "Player", "loser_name": "Opponent A", "score": "7-6(5) 6-4"},
+            {"tourney_date": "20260501", "surface": "Clay", "best_of": "3",
+             "winner_name": "Opponent B", "loser_name": "Player", "score": "7-6(4) 4-6 6-4"},
+        ]
+
+        profile = bot.calculate_clutch_profile(history, "Player", "clay", "2026-08-01")
+
+        self.assertEqual(profile["match_sample"], 2)
+        self.assertEqual(profile["tiebreak_sample"], 2)
+        self.assertEqual(profile["deciding_set_sample"], 1)
+
     def test_best_of_five_profile_tracks_sets_deciders_and_comebacks_without_leakage(self):
         history = []
         for day in range(1, 5):

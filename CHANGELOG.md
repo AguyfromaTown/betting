@@ -24,6 +24,7 @@ The format follows Keep a Changelog categories: Added, Changed, Deprecated, Remo
 
 ### Fixed
 
+- Fixed same-date historical profile sorting that could compare optional booleans, locations, or missing values and crash recent-form enrichment.
 - Fixed Odds-API.io HTTP 400 failures caused by sending a shared hard-coded bookmaker list across accounts with different selections; selections are now discovered and applied per rotated key.
 - Request-validation failures no longer open the transient provider circuit or masquerade as exhausted API credit.
 - Reconstructed the missing historical transaction ledger from the verified €60.00 opening balance and five stake records; the exact hash-linked closing balance is €53.10 with no legacy placeholders.
