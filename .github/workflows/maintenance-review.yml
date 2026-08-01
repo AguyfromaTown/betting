@@ -37,6 +37,11 @@ jobs:
       - name: Rebuild analytics from committed ledgers
         run: python tennis-bot/tennis_bot.py --backtest-only
 
+      - name: Audit financial state without mutation
+        id: financial-audit
+        continue-on-error: true
+        run: python tennis-bot/tennis_bot.py --state-audit > financial-state-audit.json
+
       - name: Publish weekly maintenance summary
         if: always()
         run: |
@@ -45,6 +50,14 @@ jobs:
           echo "- Workflow is read-only: generated review files remain artifacts and are not committed." >> "$GITHUB_STEP_SUMMARY"
           echo "- Review the test and coverage result, performance summary, policy health, settlement alerts, source health, and unresolved identities." >> "$GITHUB_STEP_SUMMARY"
           echo "- Follow MAINTENANCE-SCHEDULE.md for escalation and sign-off." >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.financial-audit.outcome }}" != "success" ]; then
+            echo "::warning::Financial state is not exactly reconciled; inspect financial-state-audit.json"
+          fi
+          if [ -f financial-state-audit.json ]; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat financial-state-audit.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [ -f maintenance-coverage.txt ]; then
             echo '```text' >> "$GITHUB_STEP_SUMMARY"
             cat maintenance-coverage.txt >> "$GITHUB_STEP_SUMMARY"
@@ -64,6 +77,7 @@ jobs:
           name: tennis-maintenance-weekly-${{ github.run_id }}
           path: |
             maintenance-coverage.txt
+            financial-state-audit.json
             performance-summary.md
             weekly-policy-health.md
             monthly-policy-report.md

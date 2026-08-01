@@ -12,6 +12,7 @@ The format follows Keep a Changelog categories: Added, Changed, Deprecated, Remo
 - Added local paper-run usage and safety documentation.
 - Added a read-only scheduled weekly health and monthly provider-review workflow with retained evidence artifacts.
 - Added recurring operational, model, provider, recovery, and security review procedures and sign-off requirements.
+- Added a read-only financial state auditor for hash integrity, running balances, exact bet transaction coverage, orphan detection, and bankroll projection agreement.
 
 ### Changed
 

@@ -1309,6 +1309,40 @@ class TennisBotTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             bot.validate_transaction_ledger([changed])
 
+    def test_financial_state_audit_requires_exact_bet_transactions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log_path = root / "bets-log.csv"
+            bankroll_path = root / "bankroll.txt"
+            transaction_path = root / "bankroll-transactions.csv"
+            bankroll_path.write_text("100.00", encoding="utf-8")
+            with (
+                patch.object(bot, "LOG_FILE", log_path),
+                patch.object(bot, "BANKROLL_FILE", bankroll_path),
+                patch.object(bot, "TRANSACTION_FILE", transaction_path),
+            ):
+                bot.ensure_bankroll_ledger(100.0)
+                stake = bot.log_bets(
+                    "2026-08-01",
+                    [{"player": "A", "grade": "Value Pick", "odds": 1.6, "assessed_probability": .7}],
+                    [{"player1": "A", "player2": "B", "tournament": "ATP"}],
+                    100.0,
+                )
+                after_stake = bot.reconcile_bankroll(100.0)
+                headers, bets = bot.read_csv_rows(log_path)
+                bets[0].update({"RESULT": "W", "RETURN": f"{stake * 1.6:.2f}"})
+                bot.atomic_write_csv(log_path, headers, bets)
+                bot.reconcile_bankroll(after_stake)
+                healthy = bot.audit_financial_state()
+                bankroll_path.write_text("999.00", encoding="utf-8")
+                broken = bot.audit_financial_state()
+
+            self.assertTrue(healthy["exactly_reconciled"])
+            self.assertEqual(healthy["exact_stakes"], 1)
+            self.assertEqual(healthy["exact_returns"], 1)
+            self.assertFalse(broken["exactly_reconciled"])
+            self.assertIn("bankroll_projection_mismatch", {item["code"] for item in broken["issues"]})
+
     def test_log_bets_deduplicates_same_player_and_date(self):
         recommendation = {
             "player": "Darderi, Luciano",

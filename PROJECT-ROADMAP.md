@@ -251,6 +251,7 @@ Status conventions:
 - [ ] Demonstrate positive closing-line value over a meaningful sample.
 - [ ] Confirm calibration across supported tours and surfaces.
 - [ ] Reconcile every bankroll transaction.
+  - [x] Add a strict read-only audit that identifies missing, legacy, duplicate, orphaned, amount-mismatched and balance-mismatched transactions.
 - [ ] Review counterfactual performance for every active rejection rule.
 - [ ] Disable persistently unreliable tours, segments or sources.
 - [ ] Freeze a documented production policy release.

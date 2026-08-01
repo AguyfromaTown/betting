@@ -1044,6 +1044,7 @@ def parse_args():
     parser.add_argument("--backtest-only", action="store_true", help="Rebuild analytics without API calls")
     parser.add_argument("--diagnostic", action="store_true", help="Collect and validate data without writing files, calling AI, staking, or settling")
     parser.add_argument("--paper-trading", action="store_true", help="Simulate authorized bets without changing the real bankroll")
+    parser.add_argument("--state-audit", action="store_true", help="Read-only financial ledger and bankroll integrity audit")
     return parser.parse_args()
 
 
@@ -1111,6 +1112,138 @@ def validate_transaction_ledger(rows: list[dict]) -> bool:
             raise RuntimeError(f"Bankroll ledger integrity failure at transaction {row.get('ID', 'unknown')}")
         previous_hash = row["HASH"]
     return True
+
+
+def audit_financial_state() -> dict:
+    """Verify ledger integrity and exact bet/transaction reconciliation without writing state."""
+    transaction_headers, transactions = read_csv_rows(TRANSACTION_FILE)
+    _, bets = read_csv_rows(LOG_FILE)
+    issues = []
+
+    def issue(code: str, detail: str):
+        issues.append({"code": code, "detail": detail})
+
+    bankroll_balance = None
+    if not BANKROLL_FILE.exists():
+        issue("missing_bankroll_projection", BANKROLL_FILE.name)
+    else:
+        try:
+            bankroll_balance = round(float(BANKROLL_FILE.read_text(encoding="utf-8").strip()), 2)
+        except (OSError, ValueError):
+            issue("invalid_bankroll_projection", BANKROLL_FILE.name)
+
+    if not transactions:
+        issue("missing_transaction_ledger", f"{TRANSACTION_FILE.name} is absent or empty")
+        return {
+            "status": "failed", "exactly_reconciled": False, "bet_count": len(bets),
+            "transaction_count": 0, "exact_stakes": 0, "exact_returns": 0,
+            "legacy_transactions": 0, "ending_ledger_balance": None,
+            "bankroll_balance": bankroll_balance, "issues": issues,
+        }
+    if transaction_headers != TRANSACTION_HEADERS:
+        issue("transaction_schema_mismatch", "transaction headers do not match the authoritative schema")
+    try:
+        validate_transaction_ledger(transactions)
+    except RuntimeError as exc:
+        issue("hash_chain_invalid", str(exc))
+
+    seen_ids = set()
+    previous_balance = None
+    for index, row in enumerate(transactions):
+        identifier = row.get("ID", "")
+        if not identifier:
+            issue("missing_transaction_id", f"transaction row {index + 1} has no ID")
+        elif identifier in seen_ids:
+            issue("duplicate_transaction_id", identifier)
+        seen_ids.add(identifier)
+        try:
+            amount, balance = round(float(row["AMOUNT"]), 2), round(float(row["BALANCE"]), 2)
+        except (KeyError, TypeError, ValueError):
+            issue("invalid_transaction_amount", identifier or f"row-{index + 1}")
+            continue
+        if index == 0:
+            if row.get("TYPE") != "opening_balance" or row.get("REFERENCE") != "ledger":
+                issue("invalid_opening_transaction", identifier or "row-1")
+            if balance != amount:
+                issue("opening_balance_mismatch", f"amount {amount:.2f} != balance {balance:.2f}")
+        elif previous_balance is not None and round(previous_balance + amount, 2) != balance:
+            issue("running_balance_mismatch", identifier or f"row-{index + 1}")
+        previous_balance = balance
+
+    transactions_by_id = {row.get("ID"): row for row in transactions if row.get("ID")}
+    bet_references = {bankroll_reference(bet) for bet in bets}
+    exact_stakes = exact_returns = legacy_transactions = 0
+    for bet in bets:
+        reference = bankroll_reference(bet)
+        try:
+            stake = round(float(bet.get("STAKE") or 0), 2)
+        except (TypeError, ValueError):
+            stake = None
+            issue("invalid_bet_stake", reference)
+        stake_row = transactions_by_id.get(transaction_id("stake", reference))
+        if not stake_row:
+            issue("missing_stake_transaction", reference)
+        elif stake_row.get("REFERENCE") != reference:
+            issue("stake_reference_mismatch", reference)
+        elif stake_row.get("TYPE") == "legacy_stake":
+            legacy_transactions += 1
+            issue("legacy_stake_not_exact", reference)
+        elif stake_row.get("TYPE") != "stake":
+            issue("invalid_stake_type", reference)
+        elif stake is not None:
+            try:
+                if round(float(stake_row.get("AMOUNT") or 0), 2) != -stake:
+                    issue("stake_amount_mismatch", reference)
+                else:
+                    exact_stakes += 1
+            except (TypeError, ValueError):
+                issue("invalid_stake_transaction_amount", reference)
+
+        settled = bet.get("RESULT") in {"W", "L", "V"}
+        return_row = transactions_by_id.get(transaction_id("return", reference))
+        if settled:
+            try:
+                returned = round(float(bet.get("RETURN") or 0), 2)
+            except (TypeError, ValueError):
+                returned = None
+                issue("invalid_bet_return", reference)
+            if not return_row:
+                issue("missing_return_transaction", reference)
+            elif return_row.get("REFERENCE") != reference:
+                issue("return_reference_mismatch", reference)
+            elif return_row.get("TYPE") == "legacy_return":
+                legacy_transactions += 1
+                issue("legacy_return_not_exact", reference)
+            elif return_row.get("TYPE") != "return":
+                issue("invalid_return_type", reference)
+            elif returned is not None:
+                try:
+                    if round(float(return_row.get("AMOUNT") or 0), 2) != returned:
+                        issue("return_amount_mismatch", reference)
+                    else:
+                        exact_returns += 1
+                except (TypeError, ValueError):
+                    issue("invalid_return_transaction_amount", reference)
+        elif return_row:
+            issue("return_for_unsettled_bet", reference)
+
+    for row in transactions:
+        if row.get("TYPE") in {"stake", "return", "legacy_stake", "legacy_return"} and row.get("REFERENCE") not in bet_references:
+            issue("orphan_bet_transaction", row.get("ID") or row.get("REFERENCE") or "unknown")
+
+    if previous_balance is not None and bankroll_balance is not None and previous_balance != bankroll_balance:
+        issue("bankroll_projection_mismatch", f"ledger {previous_balance:.2f} != bankroll {bankroll_balance:.2f}")
+
+    exactly_reconciled = not issues
+    return {
+        "status": "passed" if exactly_reconciled else "failed",
+        "exactly_reconciled": exactly_reconciled,
+        "bet_count": len(bets), "transaction_count": len(transactions),
+        "exact_stakes": exact_stakes, "exact_returns": exact_returns,
+        "legacy_transactions": legacy_transactions,
+        "ending_ledger_balance": previous_balance, "bankroll_balance": bankroll_balance,
+        "issues": issues,
+    }
 
 
 def ensure_bankroll_ledger(balance: float) -> list[dict]:
@@ -5635,6 +5768,13 @@ def main():
     args = parse_args()
     DIAGNOSTIC_MODE = args.diagnostic
     PAPER_TRADING_MODE = args.paper_trading
+
+    if args.state_audit:
+        result = audit_financial_state()
+        print(json.dumps(result, indent=2))
+        if not result["exactly_reconciled"]:
+            raise SystemExit(2)
+        return
 
     date_str = resolve_date(args.date)
     odds_min = args.odds_min

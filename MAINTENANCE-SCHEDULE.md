@@ -39,6 +39,8 @@ The automated job runs all tests, enforces 70% coverage, and rebuilds analytics 
 9. Compare `bankroll.txt`, `bets-log.csv`, and the last hash-linked transaction balance when any financial mutation occurred.
 10. Assign an owner and deadline for every unresolved warning.
 
+The workflow runs `python tennis-bot/tennis_bot.py --state-audit` and retains `financial-state-audit.json`. Exact reconciliation requires a valid hash chain and running balances, one exact stake transaction per bet, one exact return/refund per settled bet, no return for an unsettled bet, no orphan or duplicate transaction, and equality between the terminal ledger balance and `bankroll.txt`. Legacy zero-value migration markers do not count as exact reconciliation.
+
 Weekly artifacts are evidence, not authorization to change thresholds. Any proposed change remains shadow-only and follows `MODEL-POLICY-RELEASES.md`.
 
 ## Monthly provider review — first day 08:00 UTC
