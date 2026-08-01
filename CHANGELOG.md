@@ -24,6 +24,7 @@ The format follows Keep a Changelog categories: Added, Changed, Deprecated, Remo
 
 ### Fixed
 
+- Missing Tennis Abstract profiles now produce an insufficient-evidence rejection instead of crashing statistical candidate construction.
 - Fixed same-date historical profile sorting that could compare optional booleans, locations, or missing values and crash recent-form enrichment.
 - Fixed Odds-API.io HTTP 400 failures caused by sending a shared hard-coded bookmaker list across accounts with different selections; selections are now discovered and applied per rotated key.
 - Request-validation failures no longer open the transient provider circuit or masquerade as exhausted API credit.

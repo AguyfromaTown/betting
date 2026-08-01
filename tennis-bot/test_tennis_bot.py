@@ -2056,6 +2056,17 @@ class TennisBotTests(unittest.TestCase):
             places=6,
         )
 
+    def test_tennis_baseline_rejects_missing_profile_without_crashing(self):
+        match = {
+            "player1": "Known", "player2": "Unavailable",
+            "home_odds": 1.60, "away_odds": 2.50,
+            "player1_profile": {"elo": 1800}, "player2_profile": None,
+        }
+
+        self.assertIsNone(bot.calculate_tennis_baseline(match, "Known"))
+        self.assertIsNone(bot.calculate_tennis_baseline(match, "Unavailable"))
+        self.assertEqual(bot.build_statistical_candidates([match], 1.5, 2.5), [])
+
     def test_statistical_scan_rejects_large_elo_market_disagreement(self):
         match = {
             "player1": "Market Favourite", "player2": "Elo Favourite",

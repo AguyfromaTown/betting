@@ -3713,6 +3713,8 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         h2h_probability = (match.get("head_to_head") or {}).get("player2_probability")
     else:
         return None
+    if not isinstance(player_profile, dict) or not isinstance(opponent_profile, dict):
+        return None
     active_best_of_five = best_of_five_profile if match_best_of == 5 else {}
     physical_block = str(physical_status.get("status") or "unknown").casefold() in BLOCKING_PHYSICAL_STATUSES
 
