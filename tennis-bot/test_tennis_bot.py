@@ -2688,6 +2688,27 @@ class TennisBotTests(unittest.TestCase):
         ):
             self.assertIn(required, schedule)
 
+    def test_counterfactual_coverage_audit_requires_every_active_rule_to_mature(self):
+        empty = bot.counterfactual_coverage_audit([])
+        self.assertEqual(empty["status"], "collecting_data")
+        self.assertEqual(empty["active_rule_count"], len(bot.ACTIVE_REJECTION_RULES))
+        self.assertFalse(empty["tunable_thresholds_ready"])
+
+        rows = []
+        for rule in bot.ACTIVE_REJECTION_RULES:
+            recorded_rule = "verified_physical_status:injured" if rule == "verified_physical_status" else rule
+            for index in range(bot.MIN_MONTHLY_POLICY_SAMPLE):
+                rows.append({
+                    "POLICY_ROLE": "active", "DECISION": "cancelled", "RULE": recorded_rule,
+                    "RESULT": "W" if index % 2 else "L", "CLV": ".01", "PROBABILITY": ".60",
+                    "BRIER_SCORE": ".16",
+                })
+        complete = bot.counterfactual_coverage_audit(rows)
+        self.assertEqual(complete["status"], "review_ready")
+        self.assertEqual(complete["review_ready_rules"], len(bot.ACTIVE_REJECTION_RULES))
+        self.assertTrue(complete["tunable_thresholds_ready"])
+        self.assertEqual(complete["unknown_recorded_rules"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

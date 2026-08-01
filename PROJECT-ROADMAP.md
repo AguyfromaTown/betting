@@ -253,6 +253,7 @@ Status conventions:
 - [x] Reconcile every bankroll transaction.
   - [x] Add a strict read-only audit that identifies missing, legacy, duplicate, orphaned, amount-mismatched and balance-mismatched transactions.
 - [ ] Review counterfactual performance for every active rejection rule.
+  - [x] Add a strict coverage audit for every active rule and distinguish tunable thresholds from hard safety gates.
 - [ ] Disable persistently unreliable tours, segments or sources.
 - [ ] Freeze a documented production policy release.
 - [x] Require champion-versus-challenger evidence before learned-weight promotion.

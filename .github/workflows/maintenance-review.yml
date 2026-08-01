@@ -42,6 +42,11 @@ jobs:
         continue-on-error: true
         run: python tennis-bot/tennis_bot.py --state-audit > financial-state-audit.json
 
+      - name: Audit counterfactual rule coverage without mutation
+        id: counterfactual-audit
+        continue-on-error: true
+        run: python tennis-bot/tennis_bot.py --counterfactual-audit > counterfactual-coverage-audit.json
+
       - name: Publish weekly maintenance summary
         if: always()
         run: |
@@ -56,6 +61,14 @@ jobs:
           if [ -f financial-state-audit.json ]; then
             echo '```json' >> "$GITHUB_STEP_SUMMARY"
             cat financial-state-audit.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "${{ steps.counterfactual-audit.outcome }}" != "success" ]; then
+            echo "::warning::Active rejection rules do not yet have complete settled/CLV/Brier evidence"
+          fi
+          if [ -f counterfactual-coverage-audit.json ]; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat counterfactual-coverage-audit.json >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ -f maintenance-coverage.txt ]; then
@@ -78,6 +91,7 @@ jobs:
           path: |
             maintenance-coverage.txt
             financial-state-audit.json
+            counterfactual-coverage-audit.json
             performance-summary.md
             weekly-policy-health.md
             monthly-policy-report.md

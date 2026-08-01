@@ -1047,6 +1047,7 @@ def parse_args():
     parser.add_argument("--paper-trading", action="store_true", help="Simulate authorized bets without changing the real bankroll")
     parser.add_argument("--state-audit", action="store_true", help="Read-only financial ledger and bankroll integrity audit")
     parser.add_argument("--migrate-legacy-ledger", action="store_true", help="One-time guarded migration of exact historical bankroll transactions")
+    parser.add_argument("--counterfactual-audit", action="store_true", help="Read-only active rejection-rule evidence coverage audit")
     return parser.parse_args()
 
 
@@ -5410,6 +5411,71 @@ def append_price_snapshot(now: datetime, row: dict, match: dict | None, baseline
 
 POLICY_HEADERS = ["DATE", "MODEL_VERSION", "POLICY_ID", "POLICY_ROLE", "THRESHOLDS", "EVENT_ID", "MATCH", "PLAYER1", "PLAYER2", "PICK", "DECISION", "RULE",
                   "ODDS", "BOOKMAKER", "PROBABILITY", "EV", "TIMESTAMP", "RESULT", "FLAT_RETURN", "CLOSING_ODDS", "CLV", "BRIER_SCORE", "SETTLEMENT_RULE"]
+ACTIVE_REJECTION_RULES = {
+    "manual_kill_switch": "operator_stop",
+    "start_time_unknown": "timing_safety",
+    "match_started": "timing_safety",
+    "event_not_pre_match": "event_safety",
+    "stale_price": "market_safety",
+    "market_or_model_unavailable": "evidence_safety",
+    "insufficient_bookmakers": "market_safety",
+    "bookmaker_conflict": "tunable_threshold",
+    "data_quality_too_low": "tunable_threshold",
+    "extreme_price_movement": "tunable_threshold",
+    "surface_changed": "evidence_safety",
+    "price_outside_range": "policy_scope",
+    "verified_physical_status": "physical_safety",
+    "model_disagreement": "model_safety",
+    "uncertainty_adjusted_edge_too_low": "tunable_threshold",
+}
+
+
+def canonical_rejection_rule(value: str) -> str:
+    rule = str(value or "").strip()
+    return "verified_physical_status" if rule.startswith("verified_physical_status:") else rule
+
+
+def counterfactual_coverage_audit(rows: list[dict] | None = None) -> dict:
+    """Measure whether every active rejection rule has mature settled performance evidence."""
+    if rows is None:
+        _, rows = read_csv_rows(POLICY_FILE)
+    active_cancelled = [
+        row for row in rows
+        if (row.get("POLICY_ROLE") or "active") == "active" and row.get("DECISION") == "cancelled"
+    ]
+    coverage = []
+    for rule, category in ACTIVE_REJECTION_RULES.items():
+        group = [row for row in active_cancelled if canonical_rejection_rule(row.get("RULE", "")) == rule]
+        settled = [row for row in group if row.get("RESULT") in {"W", "L"}]
+        clv_sample = sum(row.get("CLV") not in {None, ""} for row in settled)
+        brier_sample = sum(
+            row.get("BRIER_SCORE") not in {None, ""} or row.get("PROBABILITY") not in {None, ""}
+            for row in settled
+        )
+        mature = (
+            len(settled) >= MIN_MONTHLY_POLICY_SAMPLE
+            and clv_sample >= MIN_MONTHLY_POLICY_SAMPLE
+            and brier_sample >= MIN_MONTHLY_POLICY_SAMPLE
+        )
+        coverage.append({
+            "rule": rule, "category": category, "observed": len(group), "settled": len(settled),
+            "clv_sample": clv_sample, "brier_sample": brier_sample,
+            "status": "review_ready" if mature else "collecting_data",
+        })
+    unknown = sorted({
+        canonical_rejection_rule(row.get("RULE", "")) for row in active_cancelled
+        if canonical_rejection_rule(row.get("RULE", "")) not in ACTIVE_REJECTION_RULES
+    })
+    tunable = [item for item in coverage if item["category"] == "tunable_threshold"]
+    return {
+        "status": "review_ready" if all(item["status"] == "review_ready" for item in coverage) and not unknown else "collecting_data",
+        "minimum_complete_sample": MIN_MONTHLY_POLICY_SAMPLE,
+        "active_rule_count": len(ACTIVE_REJECTION_RULES),
+        "review_ready_rules": sum(item["status"] == "review_ready" for item in coverage),
+        "tunable_thresholds_ready": all(item["status"] == "review_ready" for item in tunable),
+        "unknown_recorded_rules": unknown,
+        "rules": coverage,
+    }
 
 
 def record_policy_decision(now: datetime, row: dict, match: dict | None, baseline: dict | None, decision: str, rule: str,
@@ -5909,6 +5975,12 @@ def main():
         return
     if args.migrate_legacy_ledger:
         print(json.dumps(migrate_legacy_financial_ledger(), indent=2))
+        return
+    if args.counterfactual_audit:
+        result = counterfactual_coverage_audit()
+        print(json.dumps(result, indent=2))
+        if result["status"] != "review_ready":
+            raise SystemExit(2)
         return
 
     date_str = resolve_date(args.date)

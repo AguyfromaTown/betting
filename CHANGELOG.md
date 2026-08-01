@@ -14,6 +14,7 @@ The format follows Keep a Changelog categories: Added, Changed, Deprecated, Remo
 - Added recurring operational, model, provider, recovery, and security review procedures and sign-off requirements.
 - Added a read-only financial state auditor for hash integrity, running balances, exact bet transaction coverage, orphan detection, and bankroll projection agreement.
 - Added a guarded one-time legacy-ledger migration with input/output hashes, atomic output, self-audit, and a recovery manifest.
+- Added a read-only completeness audit covering all active rejection rules and their settled, CLV, and Brier sample maturity.
 
 ### Fixed
 

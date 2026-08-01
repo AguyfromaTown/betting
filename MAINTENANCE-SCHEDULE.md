@@ -43,6 +43,8 @@ The workflow runs `python tennis-bot/tennis_bot.py --state-audit` and retains `f
 
 Weekly artifacts are evidence, not authorization to change thresholds. Any proposed change remains shadow-only and follows `MODEL-POLICY-RELEASES.md`.
 
+The workflow also runs `--counterfactual-audit`. Every active cancellation rule remains `collecting_data` until it has at least 30 settled outcomes, 30 closing-price observations, and 30 Brier observations. The audit separately identifies the tunable bookmaker-dispersion, data-quality, price-movement, and uncertainty-adjusted-EV thresholds. Hard safety rules are never relaxed automatically even after their performance sample matures.
+
 ## Monthly provider review — first day 08:00 UTC
 
 The monthly job packages the committed provider contract and health inputs without making external calls. The reviewer then evaluates each production source:
