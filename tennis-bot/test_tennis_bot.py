@@ -294,6 +294,36 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("CLOSING_ODDS", rows[0])
         self.assertIn("BRIER_SCORE", rows[0])
 
+    def test_multiple_threshold_challengers_evaluate_same_candidate_independently(self):
+        decisions = bot.threshold_challenger_decisions(.08, .09, 6, .06)
+        self.assertEqual(len(decisions), 3)
+        by_id = {item["policy_id"]: item for item in decisions}
+        self.assertEqual(by_id["threshold-conservative-v1"]["decision"], "cancelled")
+        self.assertEqual(by_id["threshold-conservative-v1"]["rule"], "bookmaker_conflict")
+        self.assertEqual(by_id["threshold-standard-v1"]["decision"], "authorized")
+        self.assertEqual(by_id["threshold-permissive-v1"]["decision"], "authorized")
+        blocked = bot.threshold_challenger_decisions(.01, .01, 10, .20, "surface_changed")
+        self.assertTrue(all(item["decision"] == "cancelled" and item["rule"] == "surface_changed"
+                            for item in blocked))
+
+    def test_counterfactual_log_keeps_parallel_policy_rows(self):
+        from datetime import datetime, timezone
+        with tempfile.TemporaryDirectory() as directory:
+            policy = Path(directory) / "policy.csv"
+            row = {"DATE": "2026-08-01", "EVENT_ID": "7", "MATCH": "A vs B",
+                   "PLAYER1": "A", "PLAYER2": "B", "PICK": "A"}
+            baseline = {"player_odds": 1.6, "assessed_probability": .7, "ev": .12}
+            with patch.object(bot, "POLICY_FILE", policy):
+                for item in bot.threshold_challenger_decisions(.08, .09, 6, .06):
+                    bot.record_policy_decision(datetime.now(timezone.utc), row, None, baseline,
+                                               item["decision"], item["rule"], item["policy_id"],
+                                               "shadow", item["thresholds"])
+            _, rows = bot.read_csv_rows(policy)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual({item["POLICY_ID"] for item in rows},
+                         {item["id"] for item in bot.THRESHOLD_CHALLENGER_POLICIES})
+        self.assertTrue(all(item["POLICY_ROLE"] == "shadow" for item in rows))
+
     def test_counterfactual_settlement_records_clv_and_brier(self):
         event = {"id": 7, "date": "2026-08-01T12:00:00Z", "home": "A", "away": "B",
                  "status": "settled", "scores": {"home": 2, "away": 0}}
@@ -655,6 +685,11 @@ class TennisBotTests(unittest.TestCase):
                 "DATE": "2026-08-01", "DECISION": "cancelled", "RULE": "bookmaker_conflict",
                 "RESULT": "W", "FLAT_RETURN": ".600", "CLV": ".040000",
                 "PROBABILITY": ".700000", "BRIER_SCORE": ".090000",
+            }, {
+                "DATE": "2026-08-01", "POLICY_ID": "threshold-standard-v1", "POLICY_ROLE": "shadow",
+                "DECISION": "authorized", "RULE": "thresholds_passed", "RESULT": "W",
+                "FLAT_RETURN": ".600", "CLV": ".040000", "PROBABILITY": ".700000",
+                "BRIER_SCORE": ".090000",
             }])
             with (patch.object(bot, "AUDIT_FILE", root / "predictions.csv"),
                   patch.object(bot, "LOG_FILE", root / "bets.csv"),
@@ -666,6 +701,8 @@ class TennisBotTests(unittest.TestCase):
             report = (root / "weekly-health.md").read_text(encoding="utf-8")
         self.assertIn("| Rejection rule | Decisions | Flat-unit ROI | Avg CLV | Brier |", report)
         self.assertIn("| bookmaker_conflict | 1 | 60.00% | 4.00% | 0.0900 |", report)
+        self.assertIn("## Simultaneous threshold challengers", report)
+        self.assertIn("| threshold-standard-v1 | 1 | 1 | 60.00% | 4.00% | 0.0900 |", report)
 
     def test_tour_calibration_never_borrows_other_tours(self):
         rows = ([{"MODEL_PROBABILITY": ".60", "RESULT": "W", "TOUR": "ATP"} for _ in range(99)] +

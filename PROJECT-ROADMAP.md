@@ -127,7 +127,7 @@ Status conventions:
 - [x] Add counterfactual CLV and Brier score by rejection rule.
 - [x] Preserve rule and model versions.
 - [x] Require mature samples before learned model promotion.
-- [ ] Build multiple challenger threshold policies simultaneously.
+- [x] Build multiple challenger threshold policies simultaneously.
 - [x] Generate `weekly-health.md` policy reports.
 - [ ] Generate monthly policy reports and threshold recommendations.
 

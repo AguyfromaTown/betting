@@ -92,7 +92,12 @@ OFFICIAL_STATUS_DOMAINS = {
 BLOCKING_PHYSICAL_STATUSES = {"questionable", "injured", "withdrawn", "unavailable", "suspended"}
 MAX_CACHE_ENTRY_BYTES = 2_000_000
 MAX_CACHE_ENTRIES = 20
-MODEL_VERSION = "tennis-2026.08-counterfactual-metrics-v1"
+MODEL_VERSION = "tennis-2026.08-threshold-challengers-v1"
+THRESHOLD_CHALLENGER_POLICIES = (
+    {"id": "threshold-conservative-v1", "movement": .06, "dispersion": .08, "quality": 7, "risk_ev": .07},
+    {"id": "threshold-standard-v1", "movement": .10, "dispersion": .12, "quality": 5, "risk_ev": .05},
+    {"id": "threshold-permissive-v1", "movement": .10, "dispersion": .12, "quality": 4, "risk_ev": .03},
+)
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -444,6 +449,7 @@ def save_prediction_snapshot(date_str: str, match: dict, player: str, baseline: 
         "maximum_bookmaker_dispersion": MAX_BOOKMAKER_DISPERSION,
         "maximum_price_movement": MAX_PRICE_MOVEMENT,
         "maximum_price_age_minutes": MAX_PRICE_AGE_MINUTES,
+        "threshold_challenger_policies": list(THRESHOLD_CHALLENGER_POLICIES),
     }
     payload = {
         "schema_version": 1, "kind": "tennis_prediction", "decision_date": date_str,
@@ -4247,7 +4253,8 @@ def generate_performance_summary():
         label = f"{low:.0%}–{high:.0%}" if high <= 1 else "70%+"
         lines.append(f"| {label} | {len(bucket)} | {actual:.1%} |" if actual is not None else f"| {label} | 0 | N/A |")
     atomic_write_text(PERFORMANCE_FILE, "\n".join(lines) + "\n")
-    rejected_policy = [row for row in policy_resolved if row.get("DECISION") == "cancelled"]
+    active_policy = [row for row in policy_resolved if (row.get("POLICY_ROLE") or "active") == "active"]
+    rejected_policy = [row for row in active_policy if row.get("DECISION") == "cancelled"]
     health = ["# Weekly Tennis Policy Health", "", f"Model version: `{MODEL_VERSION}`", "",
               "Counterfactual metrics show what happened to candidates rejected by each rule; they never affect bankroll.", "",
               "| Rejection rule | Decisions | Flat-unit ROI | Avg CLV | Brier |",
@@ -4260,6 +4267,20 @@ def generate_performance_summary():
         health.append(f"| {rule} | {metrics['count']} | {metrics['roi']:.2%} | "
                       f"{average_clv} | {brier_score_text} |")
     if not rejected_policy: health.append("| No settled rejected decisions | 0 | N/A | N/A | N/A |")
+    shadow_policy = [row for row in policy_resolved if row.get("POLICY_ROLE") == "shadow"]
+    health.extend(["", "## Simultaneous threshold challengers", "",
+                   "Each challenger evaluated the same candidates in shadow mode and could not place a bet.", "",
+                   "| Policy | Decisions | Would authorize | Flat-unit ROI | Avg CLV | Brier |",
+                   "|---|---:|---:|---:|---:|---:|"])
+    for policy_id in sorted({row.get("POLICY_ID", "unknown") for row in shadow_policy}):
+        group = [row for row in shadow_policy if row.get("POLICY_ID", "unknown") == policy_id]
+        authorized_group = [row for row in group if row.get("DECISION") == "authorized"]
+        metrics = counterfactual_rule_metrics(authorized_group)
+        average_clv = f"{metrics['clv']:.2%}" if metrics["clv"] is not None else "N/A"
+        brier_score_text = f"{metrics['brier']:.4f}" if metrics["brier"] is not None else "N/A"
+        health.append(f"| {policy_id} | {len(group)} | {len(authorized_group)} | {metrics['roi']:.2%} | "
+                      f"{average_clv} | {brier_score_text} |")
+    if not shadow_policy: health.append("| No settled shadow policies | 0 | 0 | N/A | N/A | N/A |")
     atomic_write_text(REPO_ROOT / "weekly-health.md", "\n".join(health) + "\n")
     generate_backtest_summary(resolved)
     log(f"Performance summary saved: {PERFORMANCE_FILE.name}")
@@ -4634,23 +4655,49 @@ def append_price_snapshot(now: datetime, row: dict, match: dict | None, baseline
     return dynamics
 
 
-POLICY_HEADERS = ["DATE", "MODEL_VERSION", "EVENT_ID", "MATCH", "PLAYER1", "PLAYER2", "PICK", "DECISION", "RULE",
+POLICY_HEADERS = ["DATE", "MODEL_VERSION", "POLICY_ID", "POLICY_ROLE", "THRESHOLDS", "EVENT_ID", "MATCH", "PLAYER1", "PLAYER2", "PICK", "DECISION", "RULE",
                   "ODDS", "PROBABILITY", "EV", "TIMESTAMP", "RESULT", "FLAT_RETURN", "CLOSING_ODDS", "CLV", "BRIER_SCORE"]
 
 
-def record_policy_decision(now: datetime, row: dict, match: dict | None, baseline: dict | None, decision: str, rule: str):
+def record_policy_decision(now: datetime, row: dict, match: dict | None, baseline: dict | None, decision: str, rule: str,
+                           policy_id: str = "active-v1", policy_role: str = "active", thresholds: str = ""):
     rows = []
     if POLICY_FILE.exists() and POLICY_FILE.stat().st_size:
         with POLICY_FILE.open(newline="", encoding="utf-8") as handle: rows = list(csv.DictReader(handle))
-    key = (row.get("DATE"), row.get("EVENT_ID"), normalize_player_name(row.get("PICK", "")))
-    if any((item.get("DATE"), item.get("EVENT_ID"), normalize_player_name(item.get("PICK", ""))) == key for item in rows): return
-    rows.append({"DATE": row.get("DATE", ""), "MODEL_VERSION": MODEL_VERSION, "EVENT_ID": row.get("EVENT_ID", ""),
+    key = (row.get("DATE"), row.get("EVENT_ID"), normalize_player_name(row.get("PICK", "")), policy_id)
+    if any((item.get("DATE"), item.get("EVENT_ID"), normalize_player_name(item.get("PICK", "")),
+            item.get("POLICY_ID") or "active-v1") == key for item in rows): return
+    rows.append({"DATE": row.get("DATE", ""), "MODEL_VERSION": MODEL_VERSION,
+                 "POLICY_ID": policy_id, "POLICY_ROLE": policy_role, "THRESHOLDS": thresholds,
+                 "EVENT_ID": row.get("EVENT_ID", ""),
                  "MATCH": row.get("MATCH", ""), "PLAYER1": row.get("PLAYER1", ""), "PLAYER2": row.get("PLAYER2", ""),
                  "PICK": row.get("PICK", ""), "DECISION": decision, "RULE": rule,
                  "ODDS": f"{baseline['player_odds']:.3f}" if baseline else "", "PROBABILITY": f"{baseline['assessed_probability']:.6f}" if baseline else "",
                  "EV": f"{baseline['ev']:.6f}" if baseline else "", "TIMESTAMP": now.isoformat(), "RESULT": "", "FLAT_RETURN": "",
                  "CLOSING_ODDS": "", "CLV": "", "BRIER_SCORE": ""})
     atomic_write_csv(POLICY_FILE, POLICY_HEADERS, rows)
+
+
+def threshold_challenger_decisions(movement: float | None, dispersion: float | None,
+                                   quality_score: int | None, risk_adjusted_ev: float | None,
+                                   common_block_reason: str | None = None) -> list[dict]:
+    """Evaluate fixed threshold variants together; returned decisions are shadow-only."""
+    decisions = []
+    for policy in THRESHOLD_CHALLENGER_POLICIES:
+        reason = common_block_reason
+        if reason is None and dispersion is not None and dispersion > policy["dispersion"]:
+            reason = "bookmaker_conflict"
+        elif reason is None and quality_score is not None and quality_score < policy["quality"]:
+            reason = "data_quality_too_low"
+        elif reason is None and movement is not None and abs(movement) > policy["movement"]:
+            reason = "extreme_price_movement"
+        elif reason is None and risk_adjusted_ev is not None and risk_adjusted_ev <= policy["risk_ev"]:
+            reason = "uncertainty_adjusted_edge_too_low"
+        thresholds = (f"movement<={policy['movement']:.3f};dispersion<={policy['dispersion']:.3f};"
+                      f"quality>={policy['quality']};risk_ev>{policy['risk_ev']:.3f}")
+        decisions.append({"policy_id": policy["id"], "decision": "cancelled" if reason else "authorized",
+                          "rule": reason or "thresholds_passed", "thresholds": thresholds})
+    return decisions
 
 
 def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) -> tuple[int, int]:
@@ -4769,6 +4816,34 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
                 reason = "model_disagreement"
             elif baseline.get("risk_adjusted_ev", baseline["ev"]) <= 0.05:
                 reason = "uncertainty_adjusted_edge_too_low"
+            # Re-evaluate non-threshold gates independently. The active chain may stop at an earlier
+            # threshold failure, but a permissive shadow policy must not bypass a later hard safety gate.
+            common_block = None
+            if any(token in status for token in ("cancel", "postpon", "settled", "live", "inplay", "in-play", "withdraw", "walkover", "retir", "suspend")):
+                common_block = "event_not_pre_match"
+            elif price_dynamics.get("stale"):
+                common_block = "stale_price"
+            elif not match or not baseline:
+                common_block = "market_or_model_unavailable"
+            elif int(match.get("bookmaker_count") or 0) < 2:
+                common_block = "insufficient_bookmakers"
+            elif row.get("SURFACE") and match.get("surface") and row["SURFACE"] != match["surface"]:
+                common_block = "surface_changed"
+            elif not float(row["ODDS_MIN"]) <= baseline["player_odds"] <= float(row["ODDS_MAX"]):
+                common_block = "price_outside_range"
+            elif baseline.get("physical_block"):
+                common_block = f"verified_physical_status:{baseline.get('physical_status', 'unavailable')}"
+            elif not tennis_baseline_is_reliable(baseline):
+                common_block = "model_disagreement"
+            for shadow in threshold_challenger_decisions(
+                movement,
+                quality.get("dispersion") if quality else None,
+                quality.get("score") if quality else None,
+                baseline.get("risk_adjusted_ev", baseline["ev"]) if baseline else None,
+                common_block,
+            ):
+                record_policy_decision(now, row, match, baseline, shadow["decision"], shadow["rule"],
+                                       shadow["policy_id"], "shadow", shadow["thresholds"])
             row["REVALIDATED_AT"] = now.isoformat()
             if reason:
                 row.update({"STATUS": "cancelled", "REASON": reason}); cancelled += 1
