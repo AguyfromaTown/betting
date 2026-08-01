@@ -92,6 +92,41 @@ class TennisBotTests(unittest.TestCase):
             self.assertIn("MODEL_VERSION", migrated_headers)
             self.assertEqual(migrated_rows[0]["PICK"], "Legacy Player")
 
+    def test_provider_circuit_opens_per_provider_and_recovers_after_cooldown(self):
+        bot.CIRCUIT_BREAKERS.clear()
+        try:
+            for _ in range(bot.CIRCUIT_FAILURE_THRESHOLD):
+                bot.record_provider_failure("broken.example", "HTTP 503", now=100.0)
+
+            self.assertTrue(bot.provider_circuit_open("broken.example", now=101.0))
+            self.assertFalse(bot.provider_circuit_open("healthy.example", now=101.0))
+            self.assertFalse(
+                bot.provider_circuit_open(
+                    "broken.example", now=100.0 + bot.CIRCUIT_COOLDOWN_SECONDS
+                )
+            )
+            self.assertNotIn("broken.example", bot.CIRCUIT_BREAKERS)
+        finally:
+            bot.CIRCUIT_BREAKERS.clear()
+
+    @patch.object(bot.requests, "get")
+    def test_open_provider_circuit_skips_network_request(self, get):
+        bot.CIRCUIT_BREAKERS.clear()
+        try:
+            bot.CIRCUIT_BREAKERS["api.odds-api.io"] = {
+                "failures": 3,
+                "opened_until": bot.time.monotonic() + 60,
+                "last_error": "HTTP 503",
+            }
+            payload, key_index = bot.fetch_odds_json(
+                "https://api.odds-api.io/v3/events", {}, ["unused-key"], 0
+            )
+            self.assertIsNone(payload)
+            self.assertEqual(key_index, 0)
+            get.assert_not_called()
+        finally:
+            bot.CIRCUIT_BREAKERS.clear()
+
     def test_diagnostic_summary_has_no_mutating_actions(self):
         with patch.object(bot, "fetch_matches_from_odds_api", return_value=[]):
             result = bot.run_diagnostic("2026-08-01", 1.5, 1.6, ["key"])

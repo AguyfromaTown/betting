@@ -40,6 +40,8 @@ MAX_TRANSIENT_RETRIES = 2
 RETRY_BASE_SECONDS = 0.5
 MAX_RETRY_DELAY_SECONDS = 8.0
 TRANSIENT_HTTP_STATUSES = {408, 425, 500, 502, 503, 504}
+CIRCUIT_FAILURE_THRESHOLD = 3
+CIRCUIT_COOLDOWN_SECONDS = 300
 MAX_COMPLETION_TOKENS = 2048
 GROQ_MODEL = "llama-3.3-70b-versatile"
 MAX_AI_MATCHES = 20
@@ -67,6 +69,7 @@ SOURCE_HEALTH = []
 LAST_FIXTURE_STATUS = "not_run"
 DIAGNOSTIC_MODE = False
 RUN_STATE_ACTIVE = False
+CIRCUIT_BREAKERS = {}
 
 
 # ─── Helpers ────────────────────────────────────────────────────────
@@ -97,6 +100,39 @@ def wait_before_retry(provider: str, attempt: int, response=None):
     delay = transient_retry_delay(attempt, response)
     log(f"  {provider} transient failure; retrying in {delay:.1f}s ({attempt + 1}/{MAX_TRANSIENT_RETRIES})")
     time.sleep(delay)
+
+
+def provider_circuit_open(provider: str, now: float | None = None) -> bool:
+    """Return whether a provider is temporarily isolated after repeated failures."""
+    current = time.monotonic() if now is None else now
+    state = CIRCUIT_BREAKERS.get(provider, {})
+    opened_until = float(state.get("opened_until", 0))
+    if opened_until and current >= opened_until:
+        CIRCUIT_BREAKERS.pop(provider, None)
+        return False
+    return opened_until > current
+
+
+def record_provider_success(provider: str):
+    CIRCUIT_BREAKERS.pop(provider, None)
+
+
+def record_provider_failure(provider: str, detail: str, now: float | None = None):
+    current = time.monotonic() if now is None else now
+    state = CIRCUIT_BREAKERS.setdefault(provider, {"failures": 0, "opened_until": 0, "last_error": ""})
+    state["failures"] += 1
+    state["last_error"] = detail
+    if state["failures"] >= CIRCUIT_FAILURE_THRESHOLD:
+        state["opened_until"] = current + CIRCUIT_COOLDOWN_SECONDS
+        log(f"  {provider} circuit opened for {CIRCUIT_COOLDOWN_SECONDS}s after {state['failures']} failures")
+
+
+def allow_provider_request(provider: str) -> bool:
+    if not provider_circuit_open(provider):
+        return True
+    state = CIRCUIT_BREAKERS.get(provider, {})
+    log(f"  {provider} circuit is open; skipping request ({state.get('last_error', 'provider failure')})")
+    return False
 
 
 def atomic_write_text(path: Path, content: str, encoding: str = "utf-8"):
@@ -235,20 +271,25 @@ def update_run_state(phase: str, status: str = "running", detail: str = ""):
 
 
 def fetch(url: str) -> str | None:
+    provider = url.split("/")[2]
+    if not allow_provider_request(provider):
+        return None
     for attempt in range(MAX_TRANSIENT_RETRIES + 1):
         started = time.monotonic()
         try:
             resp = requests.get(url, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
             if resp.status_code in TRANSIENT_HTTP_STATUSES and attempt < MAX_TRANSIENT_RETRIES:
-                record_source_health(url.split("/")[2], False, f"HTTP {resp.status_code} retry {attempt + 1}", started)
-                wait_before_retry(url.split("/")[2], attempt, resp); continue
+                record_source_health(provider, False, f"HTTP {resp.status_code} retry {attempt + 1}", started)
+                wait_before_retry(provider, attempt, resp); continue
             resp.raise_for_status()
-            record_source_health(url.split("/")[2], True, f"HTTP {resp.status_code}", started)
+            record_source_health(provider, True, f"HTTP {resp.status_code}", started)
+            record_provider_success(provider)
             return resp.text
         except requests.RequestException as exc:
             if attempt < MAX_TRANSIENT_RETRIES and getattr(exc, "response", None) is None:
-                wait_before_retry(url.split("/")[2], attempt); continue
-            record_source_health(url.split("/")[2], False, type(exc).__name__, started)
+                wait_before_retry(provider, attempt); continue
+            record_source_health(provider, False, type(exc).__name__, started)
+            record_provider_failure(provider, type(exc).__name__)
             log(f"  Failed to fetch {url}: {exc}")
             return None
     return None
@@ -265,6 +306,9 @@ def fetch_reader(target_url: str) -> str | None:
     if target_url.startswith("https://"):
         targets.append("http://" + target_url.removeprefix("https://"))
 
+    provider = "r.jina.ai"
+    if not allow_provider_request(provider):
+        return None
     for target in targets:
         reader_url = f"https://r.jina.ai/{target}"
         for attempt in range(MAX_TRANSIENT_RETRIES + 1):
@@ -274,32 +318,41 @@ def fetch_reader(target_url: str) -> str | None:
                     wait_before_retry("Jina Reader", attempt, response); continue
                 response.raise_for_status()
                 if response.text.strip():
+                    record_provider_success(provider)
                     return response.text
                 break
             except requests.RequestException as exc:
                 if attempt < MAX_TRANSIENT_RETRIES and getattr(exc, "response", None) is None:
                     wait_before_retry("Jina Reader", attempt); continue
                 log(f"  Reader request failed for {target}: {exc}")
+                record_provider_failure(provider, type(exc).__name__)
                 break
     return None
 
 
 def fetch_json(url: str, params: dict | None = None):
     """Fetch JSON while keeping API keys out of log output."""
+    provider = url.split("/")[2]
+    if not allow_provider_request(provider):
+        return None
     for attempt in range(MAX_TRANSIENT_RETRIES + 1):
         try:
             response = requests.get(url, params=params, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
             if response.status_code in TRANSIENT_HTTP_STATUSES and attempt < MAX_TRANSIENT_RETRIES:
                 wait_before_retry(url.split("/")[2], attempt, response); continue
             response.raise_for_status()
-            return response.json()
+            payload = response.json()
+            record_provider_success(provider)
+            return payload
         except requests.RequestException as exc:
             if attempt < MAX_TRANSIENT_RETRIES and getattr(exc, "response", None) is None:
                 wait_before_retry(url.split("/")[2], attempt); continue
             log(f"  API request failed for {url}: {exc}")
+            record_provider_failure(provider, type(exc).__name__)
             return None
         except ValueError as exc:
             log(f"  API request failed for {url}: {exc}")
+            record_provider_failure(provider, "invalid_json")
             return None
     return None
 
@@ -312,6 +365,9 @@ def fetch_odds_json(
 ) -> tuple[object | None, int]:
     """Fetch Odds-API.io JSON, rotating keys on quota or authentication errors."""
     if not api_keys:
+        return None, key_index
+    provider = "api.odds-api.io"
+    if not allow_provider_request(provider):
         return None, key_index
 
     for offset in range(len(api_keys)):
@@ -339,7 +395,9 @@ def fetch_odds_json(
                     continue
                 response.raise_for_status()
                 record_source_health("api.odds-api.io", True, f"HTTP {response.status_code} key {candidate_index + 1}", started)
-                return response.json(), candidate_index
+                payload = response.json()
+                record_provider_success(provider)
+                return payload, candidate_index
             except requests.RequestException as exc:
                 if attempt < MAX_TRANSIENT_RETRIES and getattr(exc, "response", None) is None:
                     record_source_health("api.odds-api.io", False, f"{type(exc).__name__} retry {attempt + 1}", started)
@@ -349,10 +407,12 @@ def fetch_odds_json(
                 status = getattr(getattr(exc, "response", None), "status_code", None)
                 detail = f"HTTP {status}" if status else type(exc).__name__
                 log(f"  Odds API request failed for {url}: {detail}")
+                record_provider_failure(provider, detail)
                 return None, candidate_index
             except ValueError as exc:
                 record_source_health("api.odds-api.io", False, type(exc).__name__, started)
                 log(f"  Odds API request failed for {url}: invalid JSON")
+                record_provider_failure(provider, "invalid_json")
                 return None, candidate_index
 
     log("  All configured Odds API keys are unavailable or out of quota")
@@ -1543,6 +1603,9 @@ def call_ai(prompt: str, api_keys: list[str]) -> str:
     """Call Groq, rotating API keys while keeping the model fixed."""
     if not api_keys:
         raise ValueError("No Groq API keys configured")
+    provider = "api.groq.com"
+    if not allow_provider_request(provider):
+        raise RuntimeError("Groq circuit is open")
 
     last_response = None
     for key_index, api_key in enumerate(api_keys):
@@ -1578,6 +1641,7 @@ def call_ai(prompt: str, api_keys: list[str]) -> str:
                     continue
                 response.raise_for_status()
                 content = response.json()["choices"][0]["message"]["content"]
+                record_provider_success(provider)
                 log(f"Groq response: {len(content)} chars")
                 return content
             except requests.RequestException as exc:
@@ -1587,9 +1651,11 @@ def call_ai(prompt: str, api_keys: list[str]) -> str:
                 log(f"Groq API error: {exc}")
                 if exc.response is not None:
                     log(f"Response body: {exc.response.text[:500]}")
+                record_provider_failure(provider, type(exc).__name__)
                 raise
             except (KeyError, IndexError, ValueError) as exc:
                 log(f"Groq API error: {exc}")
+                record_provider_failure(provider, type(exc).__name__)
                 raise
         if rotate_key:
             continue
