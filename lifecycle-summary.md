@@ -1,6 +1,6 @@
 # Tennis Bet Lifecycle
 
-Updated: 2026-08-01T19:01:40.985436+00:00
+Updated: 2026-08-01T19:03:19.662928+00:00
 
 | Match | Pick | Status | Reason | Final odds | Final EV |
 |---|---|---|---|---:|---:|
