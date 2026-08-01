@@ -43,6 +43,9 @@ MIN_SEGMENT_SAMPLE = 30
 MIN_WEIGHT_TRAINING_SAMPLE = 200
 KELLY_FRACTION = 0.25
 MIN_STAKE_RATE = 0.005
+MAX_PRICE_MOVEMENT = 0.10
+MAX_BOOKMAKER_DISPERSION = 0.12
+MAX_BETS_PER_TOURNAMENT = 2
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -317,7 +320,7 @@ def extract_moneyline_market(payload: dict) -> dict:
                 if home > 1 and away > 1:
                     prices_found.append((home, away, bookmaker))
     if not prices_found:
-        return {"best_home": None, "best_away": None, "consensus_home": None, "consensus_away": None, "source": None, "bookmaker_count": 0}
+        return {"best_home": None, "best_away": None, "consensus_home": None, "consensus_away": None, "source": None, "bookmaker_count": 0, "home_dispersion": None, "away_dispersion": None}
     homes, aways = sorted(p[0] for p in prices_found), sorted(p[1] for p in prices_found)
     midpoint = len(homes) // 2
     median_home = homes[midpoint] if len(homes) % 2 else (homes[midpoint - 1] + homes[midpoint]) / 2
@@ -325,7 +328,9 @@ def extract_moneyline_market(payload: dict) -> dict:
     best_home = max(prices_found, key=lambda p: p[0])
     best_away = max(prices_found, key=lambda p: p[1])
     source = best_home[2] if best_home[2] == best_away[2] else f"{best_home[2]}/{best_away[2]}"
-    return {"best_home": best_home[0], "best_away": best_away[1], "consensus_home": median_home, "consensus_away": median_away, "source": source, "bookmaker_count": len(prices_found)}
+    return {"best_home": best_home[0], "best_away": best_away[1], "consensus_home": median_home, "consensus_away": median_away, "source": source, "bookmaker_count": len(prices_found),
+            "home_dispersion": (max(homes) - min(homes)) / median_home,
+            "away_dispersion": (max(aways) - min(aways)) / median_away}
 
 
 def detect_surface(event: dict, tournament: str) -> str | None:
@@ -416,6 +421,10 @@ def fetch_matches_from_odds_api(date_str: str, api_keys: list[str]) -> list[dict
                 "consensus_away_odds": market["consensus_away"],
                 "odds_source": bookmaker or "Odds-API.io",
                 "bookmaker_count": market["bookmaker_count"],
+                "home_dispersion": market["home_dispersion"],
+                "away_dispersion": market["away_dispersion"],
+                "indoor": event.get("indoor") if event.get("indoor") is not None else odds_event.get("indoor"),
+                "best_of": event.get("bestOf") or odds_event.get("bestOf"),
             })
     log(f"  Found verified moneyline odds for {len(matches)} matches")
     return matches
@@ -793,6 +802,32 @@ def calculate_serve_return_matchup(player_profile: dict | None, opponent_profile
     return {"probability": probability, "player_hold": player_hold, "opponent_hold": opponent_hold, "sample": min(player_profile["sample"], opponent_profile["sample"])}
 
 
+def calculate_workload(history: list[dict], player: str, as_of: str, current_tournament: str = "") -> dict:
+    """Measure recent match density, sets and rest without inventing unavailable durations."""
+    key = normalize_player_name(player); cutoff = datetime.strptime(as_of, "%Y-%m-%d")
+    played = []
+    for row in history:
+        if key not in {normalize_player_name(row.get("winner_name", "")), normalize_player_name(row.get("loser_name", ""))}:
+            continue
+        try: date = datetime.strptime(str(row.get("tourney_date", "")), "%Y%m%d")
+        except ValueError: continue
+        if date >= cutoff or any(flag in (row.get("score") or "").upper() for flag in ("W/O", "DEF")): continue
+        score = row.get("score") or ""
+        sets = sum(1 for token in score.split() if re.search(r"\d", token) and token.upper() not in {"RET"})
+        played.append((date, max(1, sets), row.get("tourney_name") or row.get("tournament") or ""))
+    played.sort(reverse=True)
+    last = played[0] if played else None
+    matches_7 = sum((cutoff - date).days <= 7 for date, _, _ in played)
+    matches_14 = sum((cutoff - date).days <= 14 for date, _, _ in played)
+    sets_7 = sum(sets for date, sets, _ in played if (cutoff - date).days <= 7)
+    rest_days = (cutoff - last[0]).days if last else None
+    tournament_change = bool(last and last[2] and current_tournament and normalize_player_name(last[2]) != normalize_player_name(current_tournament) and rest_days <= 5)
+    penalty = .025 if matches_7 >= 4 or sets_7 >= 10 else .015 if matches_7 >= 3 or sets_7 >= 8 else .01 if rest_days is not None and rest_days <= 1 else 0.0
+    if tournament_change and rest_days is not None and rest_days <= 3: penalty += .005
+    return {"matches_7": matches_7, "matches_14": matches_14, "sets_7": sets_7, "rest_days": rest_days,
+            "tournament_change": tournament_change, "penalty": min(.03, penalty)}
+
+
 def fetch_recent_match_history(matches: list[dict], date_str: str) -> list[dict]:
     """Download compact current/previous season histories without paid API calls."""
     year = int(date_str[:4])
@@ -819,6 +854,27 @@ def enrich_matches_with_recent_form(matches: list[dict], date_str: str):
         match["player2_recent_form"] = calculate_recent_form(history, match["player2"], match.get("surface"), date_str)
         match["player1_serve_return"] = calculate_serve_return_profile(history, match["player1"], match.get("surface"), date_str)
         match["player2_serve_return"] = calculate_serve_return_profile(history, match["player2"], match.get("surface"), date_str)
+        match["player1_workload"] = calculate_workload(history, match["player1"], date_str, match.get("tournament", ""))
+        match["player2_workload"] = calculate_workload(history, match["player2"], date_str, match.get("tournament", ""))
+
+
+def tennis_context_uncertainty(match: dict) -> tuple[float, str]:
+    text = f"{match.get('tournament', '')} {match.get('level', '')}".casefold()
+    if "itf" in text: return .02, "itf"
+    if any(token in text for token in ("qualifying", "qualification")): return .015, "qualifying"
+    if "challenger" in text: return .01, "challenger"
+    return 0.0, "main_draw"
+
+
+def inferred_best_of(match: dict) -> int:
+    try:
+        value = int(match.get("best_of"))
+        if value in {3, 5}: return value
+    except (TypeError, ValueError):
+        pass
+    text = f"{match.get('tournament', '')} {match.get('level', '')}".casefold()
+    slams = ("australian open", "roland garros", "french open", "wimbledon", "us open")
+    return 5 if match.get("level") == "ATP" and any(name in text for name in slams) else 3
 
 
 def load_resolved_predictions(before_date: str | None = None) -> list[dict]:
@@ -916,12 +972,14 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         opponent_profile = match.get("player2_profile")
         recent_form = match.get("player1_recent_form")
         serve_return = calculate_serve_return_matchup(match.get("player1_serve_return"), match.get("player2_serve_return"))
+        workload = match.get("player1_workload") or {}
     elif player_key == normalize_player_name(match["player2"]):
         player_odds = float(away_odds)
         player_profile = match.get("player2_profile")
         opponent_profile = match.get("player1_profile")
         recent_form = match.get("player2_recent_form")
         serve_return = calculate_serve_return_matchup(match.get("player2_serve_return"), match.get("player1_serve_return"))
+        workload = match.get("player2_workload") or {}
     else:
         return None
 
@@ -968,6 +1026,9 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
             assessed_probability = challenger_probability
             component_weights = "learned:" + ";".join(f"{name}={weight:.3f}" for name, weight in sorted(used.items()))
     assessed_probability, calibration_sample = calibrate_probability(assessed_probability, comparable)
+    context_penalty, context_reason = tennis_context_uncertainty(match)
+    workload_penalty = float(workload.get("penalty") or 0)
+    assessed_probability = max(.02, assessed_probability - context_penalty - workload_penalty)
     health = segment_health(match, history)
     ev = assessed_probability * player_odds - 1
     score = max(0.0, min(10.0, 6.0 + max(0.0, ev) * 30))
@@ -987,6 +1048,12 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "challenger_sample": challenger["sample"] if challenger else 0,
         "challenger_promoted": challenger["promoted"] if challenger else False,
         "calibration_sample": calibration_sample,
+        "context_penalty": context_penalty,
+        "context_reason": context_reason,
+        "workload_penalty": workload_penalty,
+        "workload": workload,
+        "best_of": inferred_best_of(match),
+        "indoor": match.get("indoor"),
         "segment_sample": health["sample"],
         "segment_roi": health["roi"],
         "segment_clv": health["clv"],
@@ -1489,6 +1556,7 @@ def select_portfolio(
     )
     selected = []
     seen_matches = set()
+    tournament_counts = {}
     exposure = 0.0
     for recommendation in ranked:
         stake_rate = stake_rates.get(recommendation.get("grade"))
@@ -1502,11 +1570,16 @@ def select_portfolio(
         if match_key in seen_matches:
             log(f"  Portfolio rejected {recommendation['player']}: match already selected")
             continue
+        tournament = normalize_player_name(match.get("tournament", "Unknown"))
+        if tournament_counts.get(tournament, 0) >= MAX_BETS_PER_TOURNAMENT:
+            log(f"  Portfolio rejected {recommendation['player']}: tournament correlation cap reached")
+            continue
         if len(selected) >= max_bets or exposure + stake_rate > max_exposure + 1e-9:
             log(f"  Portfolio rejected {recommendation['player']}: daily risk cap reached")
             continue
         selected.append(recommendation)
         seen_matches.add(match_key)
+        tournament_counts[tournament] = tournament_counts.get(tournament, 0) + 1
         exposure += stake_rate
     log(f"Portfolio selected {len(selected)} bet(s), planned exposure {exposure:.1%}")
     return selected
@@ -1528,6 +1601,32 @@ def evidence_quality(match: dict, baseline: dict) -> tuple[int, str]:
     return points, grade
 
 
+def player_market_dispersion(match: dict, player: str) -> float | None:
+    field = "home_dispersion" if normalize_player_name(player) == normalize_player_name(match.get("player1", "")) else "away_dispersion"
+    value = match.get(field)
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def tennis_data_quality(match: dict, baseline: dict, player: str) -> dict:
+    score, reasons = 0, []
+    books = int(match.get("bookmaker_count") or 0)
+    if books >= 3: score += 3
+    elif books >= 2: score += 2
+    else: reasons.append("insufficient_bookmakers")
+    dispersion = player_market_dispersion(match, player)
+    if dispersion is not None and dispersion <= .08: score += 2
+    elif dispersion is not None and dispersion <= MAX_BOOKMAKER_DISPERSION: score += 1
+    else: reasons.append("bookmaker_conflict")
+    if match.get("player1_profile") and match.get("player2_profile"): score += 2
+    else: reasons.append("identity_or_elo_missing")
+    if match.get("surface") in {"hard", "clay", "grass"}: score += 1
+    else: reasons.append("surface_unverified")
+    if baseline.get("form_sample", 0) >= 8: score += 1
+    if baseline.get("serve_return_sample", 0) >= 8: score += 1
+    return {"score": score, "grade": "A" if score >= 9 else "B" if score >= 7 else "C" if score >= 5 else "D",
+            "reasons": reasons, "dispersion": dispersion}
+
+
 def append_prediction_audit(date_str, matches, recommendations, authorized):
     """Persist all Elo-modelled singles candidates and final decisions."""
     headers = [
@@ -1537,6 +1636,9 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
         "SERVE_RETURN_SAMPLE", "EXPECTED_HOLD", "OPPONENT_EXPECTED_HOLD",
         "COMPONENT_WEIGHTS", "RAW_PROBABILITY", "CHALLENGER_PROBABILITY",
         "CHALLENGER_SAMPLE", "CHALLENGER_PROMOTED", "CALIBRATION_SAMPLE",
+        "CONTEXT_PENALTY", "CONTEXT_REASON", "WORKLOAD_PENALTY", "REST_DAYS",
+        "MATCHES_7", "MATCHES_14", "SETS_7", "TOURNAMENT_CHANGE", "BEST_OF", "INDOOR",
+        "MARKET_DISPERSION", "DATA_QUALITY_SCORE", "DATA_QUALITY_GRADE",
         "SEGMENT_SAMPLE", "SEGMENT_ROI", "SEGMENT_CLV", "SEGMENT_SUSPENDED",
         "EV", "SCORE", "EVIDENCE", "QUALITY_SCORE", "QUALITY_GRADE",
         "TOUR", "SURFACE", "BOOKMAKERS", "DECISION", "REASON", "RESULT",
@@ -1583,6 +1685,8 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
             else:
                 reason = "not_selected"
             quality_score, quality_grade = evidence_quality(match, baseline)
+            data_quality = tennis_data_quality(match, baseline, player)
+            workload = baseline.get("workload") or {}
             rows.append([
                 date_str, match.get("event_id", ""),
                 f"{match['player1']} vs {match['player2']}", player,
@@ -1600,7 +1704,12 @@ def append_prediction_audit(date_str, matches, recommendations, authorized):
                 f"{baseline['raw_probability']:.6f}",
                 f"{baseline['challenger_probability']:.6f}" if baseline.get("challenger_probability") is not None else "",
                 baseline.get("challenger_sample", 0), baseline.get("challenger_promoted", False),
-                baseline.get("calibration_sample", 0), baseline.get("segment_sample", 0),
+                baseline.get("calibration_sample", 0), f"{baseline.get('context_penalty', 0):.6f}", baseline.get("context_reason", "main_draw"),
+                f"{baseline.get('workload_penalty', 0):.6f}", workload.get("rest_days", ""), workload.get("matches_7", 0),
+                workload.get("matches_14", 0), workload.get("sets_7", 0), workload.get("tournament_change", False),
+                baseline.get("best_of", 3), baseline.get("indoor", ""),
+                f"{data_quality['dispersion']:.6f}" if data_quality.get("dispersion") is not None else "",
+                data_quality["score"], data_quality["grade"], baseline.get("segment_sample", 0),
                 f"{baseline['segment_roi']:.6f}" if baseline.get("segment_roi") is not None else "",
                 f"{baseline['segment_clv']:.6f}" if baseline.get("segment_clv") is not None else "",
                 baseline.get("segment_suspended", False),
@@ -1898,6 +2007,18 @@ def match_time_state(value: str, now: datetime, window_minutes: int = 90) -> str
     return "ready"
 
 
+def append_price_snapshot(now: datetime, row: dict, match: dict | None, baseline: dict | None):
+    path = PENDING_FILE.with_name("price-history.csv")
+    write_header = not path.exists() or not path.stat().st_size
+    dispersion = player_market_dispersion(match, row.get("PICK", "")) if match else None
+    with path.open("a", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        if write_header: writer.writerow(["TIMESTAMP", "DATE", "MATCH", "PICK", "ODDS", "BOOKMAKERS", "DISPERSION", "SOURCE", "EVENT_STATUS"])
+        writer.writerow([now.isoformat(), row.get("DATE", ""), row.get("MATCH", ""), row.get("PICK", ""),
+                         f"{baseline['player_odds']:.3f}" if baseline else "", (match or {}).get("bookmaker_count", 0),
+                         f"{dispersion:.6f}" if dispersion is not None else "", (match or {}).get("odds_source", ""), (match or {}).get("status", "")])
+
+
 def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) -> tuple[int, int]:
     """Authorize only candidates whose price and model edge survive near match time."""
     if not PENDING_FILE.exists() or not PENDING_FILE.stat().st_size:
@@ -1934,14 +2055,23 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
             pair = {normalize_player_name(row["PLAYER1"]), normalize_player_name(row["PLAYER2"])}
             match = next((m for m in matches if m.get("event_id") == row.get("EVENT_ID") or {normalize_player_name(m["player1"]), normalize_player_name(m["player2"])} == pair), None)
             baseline = calculate_tennis_baseline(match, row["PICK"]) if match else None
+            append_price_snapshot(now, row, match, baseline)
             reason = None
             status = str((match or {}).get("status") or "").casefold()
-            if status in {"cancelled", "canceled", "postponed", "settled", "live", "inplay", "in-play"}:
+            quality = tennis_data_quality(match, baseline, row["PICK"]) if match and baseline else None
+            movement = baseline["player_odds"] / float(row["DISCOVERY_ODDS"]) - 1 if baseline else None
+            if any(token in status for token in ("cancel", "postpon", "settled", "live", "inplay", "in-play", "withdraw", "walkover", "retir", "suspend")):
                 reason = "event_not_pre_match"
             elif not match or not baseline:
                 reason = "market_or_model_unavailable"
             elif int(match.get("bookmaker_count") or 0) < 2:
                 reason = "insufficient_bookmakers"
+            elif quality and quality["dispersion"] is not None and quality["dispersion"] > MAX_BOOKMAKER_DISPERSION:
+                reason = "bookmaker_conflict"
+            elif quality and quality["score"] < 5:
+                reason = "data_quality_too_low"
+            elif movement is not None and abs(movement) > MAX_PRICE_MOVEMENT:
+                reason = "extreme_price_movement"
             elif row.get("SURFACE") and match.get("surface") and row["SURFACE"] != match["surface"]:
                 reason = "surface_changed"
             elif not float(row["ODDS_MIN"]) <= baseline["player_odds"] <= float(row["ODDS_MAX"]):
@@ -1962,7 +2092,7 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
                 "FINAL_EV": f"{baseline['ev']:.6f}",
                 "FINAL_BOOKMAKERS": match.get("bookmaker_count", 0),
                 "FINAL_SOURCE": match.get("odds_source", ""),
-                "PRICE_MOVEMENT": f"{baseline['player_odds'] / float(row['DISCOVERY_ODDS']) - 1:.6f}",
+                "PRICE_MOVEMENT": f"{movement:.6f}",
             })
             authorized_recs.append({"_date": row["DATE"], "player": row["PICK"], "grade": row["GRADE"], "odds": baseline["player_odds"], "assessed_probability": baseline["assessed_probability"], "ev": baseline["ev"], "match": match})
             authorized_matches.append(match)
@@ -1976,6 +2106,13 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
     with PENDING_FILE.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=PENDING_HEADERS, extrasaction="ignore")
         writer.writeheader(); writer.writerows(rows)
+    recent = [row for row in rows if row.get("REVALIDATED_AT") == now.isoformat()]
+    lines = ["# Tennis Bet Lifecycle", "", f"Updated: {now.isoformat()}", "", "| Match | Pick | Status | Reason | Final odds | Final EV |", "|---|---|---|---|---:|---:|"]
+    for row in recent:
+        final_ev = f"{float(row['FINAL_EV']):.1%}" if row.get("FINAL_EV") else "—"
+        lines.append(f"| {row.get('MATCH', '')} | {row.get('PICK', '')} | {row.get('STATUS', '')} | {row.get('REASON', '')} | {row.get('FINAL_ODDS') or '—'} | {final_ev} |")
+    if not recent: lines.append("| — | — | waiting | No candidates were ready in this run | — | — |")
+    PENDING_FILE.with_name("lifecycle-summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     log(f"Pre-match revalidation authorized {len(authorized_recs)}, cancelled {cancelled}")
     return len(authorized_recs), cancelled
 

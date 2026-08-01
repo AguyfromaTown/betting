@@ -27,6 +27,24 @@ Brier-score improvement on a chronological holdout. Otherwise the challenger
 stays in shadow mode. A tour/surface segment is suspended only after at least 30
 results show both ROI below -5% and average CLV below -2%.
 
+PRE-MATCH DATA QUALITY
+
+Every scheduled check records current odds, bookmaker count, dispersion, source
+and match status in price-history.csv. A candidate is cancelled if bookmaker
+dispersion exceeds 12%, absolute movement from discovery exceeds 10%, fewer than
+two bookmakers remain, the surface changes, the event is no longer pre-match,
+or the combined identity/surface/Elo/form/serve-return quality score is below 5.
+
+Recent workload is calculated from verified match history: rest days, matches
+in 7 and 14 days, sets in 7 days and recent tournament changes. Heavy schedules
+reduce assessed probability by up to 3 points. ITF matches receive a 2-point
+uncertainty penalty, qualifying 1.5 points and Challengers 1 point. Verified
+best-of-three/best-of-five and indoor/outdoor metadata are recorded when present.
+
+No more than two bets from the same tournament can be authorized in one run.
+Player identities continue to resolve through player-aliases.csv. Each GitHub
+revalidation run publishes a table explaining every authorization or cancellation.
+
 EXAMPLES
 
 Bankroll €100.00:

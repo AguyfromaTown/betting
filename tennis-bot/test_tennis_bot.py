@@ -12,6 +12,43 @@ SPEC.loader.exec_module(bot)
 
 
 class TennisBotTests(unittest.TestCase):
+    def test_workload_measures_rest_matches_and_sets(self):
+        history = [
+            {"tourney_date": "20260731", "winner_name": "Player One", "loser_name": "Other", "score": "6-4 6-4", "tourney_name": "Event A"},
+            {"tourney_date": "20260729", "winner_name": "Other", "loser_name": "Player One", "score": "6-4 4-6 6-3", "tourney_name": "Event A"},
+            {"tourney_date": "20260727", "winner_name": "Player One", "loser_name": "Other", "score": "7-6 6-7 6-4", "tourney_name": "Event B"},
+        ]
+        workload = bot.calculate_workload(history, "Player One", "2026-08-01", "Event C")
+        self.assertEqual((workload["rest_days"], workload["matches_7"], workload["sets_7"]), (1, 3, 8))
+        self.assertGreater(workload["penalty"], 0)
+
+    def test_tennis_context_and_match_format(self):
+        self.assertEqual(bot.tennis_context_uncertainty({"tournament": "ITF Madrid", "level": "ITF"})[0], .02)
+        self.assertEqual(bot.inferred_best_of({"tournament": "Wimbledon", "level": "ATP"}), 5)
+        self.assertEqual(bot.inferred_best_of({"tournament": "Wimbledon", "level": "WTA"}), 3)
+
+    def test_tennis_quality_detects_bookmaker_conflict(self):
+        match = {"player1": "A", "player2": "B", "bookmaker_count": 3, "home_dispersion": .20,
+                 "surface": "hard", "player1_profile": {}, "player2_profile": {}}
+        quality = bot.tennis_data_quality(match, {"form_sample": 8, "serve_return_sample": 8}, "A")
+        self.assertIn("bookmaker_conflict", quality["reasons"])
+
+    def test_tennis_price_history_snapshot(self):
+        from datetime import datetime, timezone
+        with tempfile.TemporaryDirectory() as directory:
+            pending = Path(directory) / "pending.csv"
+            with patch.object(bot, "PENDING_FILE", pending):
+                bot.append_price_snapshot(datetime(2026, 8, 1, tzinfo=timezone.utc), {"DATE": "2026-08-01", "MATCH": "A vs B", "PICK": "A"},
+                                          {"player1": "A", "player2": "B", "bookmaker_count": 3, "home_dispersion": .04}, {"player_odds": 1.55})
+            text = (Path(directory) / "price-history.csv").read_text(encoding="utf-8")
+        self.assertIn("TIMESTAMP,DATE,MATCH,PICK,ODDS", text)
+        self.assertIn("1.550", text)
+
+    def test_tournament_correlation_cap(self):
+        recs = [{"player": f"P{i}", "grade": "Value Pick", "ev": .10 - i * .01, "score": 8,
+                 "match": {"player1": f"P{i}", "player2": f"O{i}", "tournament": "ATP Test"}} for i in range(3)]
+        self.assertEqual(len(bot.select_portfolio(recs, max_exposure=.2, max_bets=4)), 2)
+
     def test_calibration_requires_mature_probability_bucket(self):
         rows = [{"MODEL_PROBABILITY": ".60", "RESULT": "W"} for _ in range(99)]
         self.assertEqual(bot.calibrate_probability(.60, rows), (.60, 99))
@@ -613,6 +650,8 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn('["w","win","won"]', dashboard)
         self.assertIn('id="audit-body"', dashboard)
         self.assertIn('id="backtest-body"', dashboard)
+        self.assertIn("workload_penalty", dashboard)
+        self.assertIn("market_dispersion", dashboard)
         self.assertNotIn("localstorage", lowered)
         self.assertNotIn("copy-csv", lowered)
         self.assertNotIn("showresultpicker", lowered)

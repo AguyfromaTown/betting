@@ -312,7 +312,7 @@
       </div>
       <div class="table-scroll">
         <table id="audit-table">
-          <thead><tr><th>Date</th><th>Player</th><th>Tour</th><th>Surface</th><th>Quality</th><th>Books</th><th>Opening odds</th><th>Elo probability</th><th>Form probability</th><th>Form sample</th><th>Serve/return probability</th><th>Expected hold</th><th>Opponent hold</th><th>Raw probability</th><th>Active probability</th><th>Challenger</th><th>Calibration sample</th><th>Segment sample</th><th>EV</th><th>Weights</th><th>Decision</th><th>Reason</th><th>Result</th><th>CLV</th></tr></thead>
+          <thead><tr><th>Date</th><th>Player</th><th>Tour</th><th>Surface</th><th>Quality</th><th>Data quality</th><th>Books</th><th>Dispersion</th><th>Opening odds</th><th>Elo probability</th><th>Form probability</th><th>Form sample</th><th>Serve/return probability</th><th>Expected hold</th><th>Opponent hold</th><th>Rest days</th><th>Matches 7d</th><th>Sets 7d</th><th>Workload penalty</th><th>Context</th><th>Best of</th><th>Indoor</th><th>Raw probability</th><th>Active probability</th><th>Challenger</th><th>Calibration sample</th><th>Segment sample</th><th>EV</th><th>Weights</th><th>Decision</th><th>Reason</th><th>Result</th><th>CLV</th></tr></thead>
           <tbody id="audit-body"></tbody>
         </table>
       </div>
@@ -498,7 +498,9 @@
           <td>${safe(row.tour || "—")}</td>
           <td>${safe(row.surface || "—")}</td>
           <td>${safe(row.quality_grade || "—")}</td>
+          <td>${safe(row.data_quality_grade || "—")} (${safe(row.data_quality_score || "0")})</td>
           <td class="mono">${safe(row.bookmakers || "—")}</td>
+          <td class="mono">${safe(percent(row.market_dispersion))}</td>
           <td class="mono">${safe(row.opening_odds || "—")}</td>
           <td class="mono">${safe(percent(row.elo_probability))}</td>
           <td class="mono">${safe(percent(row.form_probability))}</td>
@@ -506,6 +508,13 @@
           <td class="mono">${safe(percent(row.serve_return_probability))}</td>
           <td class="mono">${safe(percent(row.expected_hold))}</td>
           <td class="mono">${safe(percent(row.opponent_expected_hold))}</td>
+          <td class="mono">${safe(row.rest_days || "—")}</td>
+          <td class="mono">${safe(row.matches_7 || "0")}</td>
+          <td class="mono">${safe(row.sets_7 || "0")}</td>
+          <td class="mono">${safe(percent(row.workload_penalty))}</td>
+          <td>${safe(row.context_reason || "main draw")} ${safe(percent(row.context_penalty))}</td>
+          <td class="mono">${safe(row.best_of || "3")}</td>
+          <td>${safe(row.indoor || "—")}</td>
           <td class="mono">${safe(percent(row.raw_probability))}</td>
           <td class="mono">${safe(percent(row.model_probability))}</td>
           <td class="mono">${safe(percent(row.challenger_probability))}</td>
