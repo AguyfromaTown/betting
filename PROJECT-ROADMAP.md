@@ -65,7 +65,7 @@ Status conventions:
 - [x] Detect surface changes between consecutive tournaments.
 - [x] Calculate verified travel distance and timezone changes.
 - [x] Apply conservative workload penalties of no more than three probability points.
-- [ ] Backtest and learn workload thresholds after adequate samples.
+- [x] Backtest and learn workload thresholds after adequate samples.
 
 ## Statistical model
 

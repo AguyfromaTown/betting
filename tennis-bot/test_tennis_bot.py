@@ -515,6 +515,32 @@ class TennisBotTests(unittest.TestCase):
                  "MODEL_PROBABILITY": ".58"} for index in range(199)]
         self.assertIsNone(bot.learned_component_weights(rows))
 
+    def test_workload_learner_requires_mature_sample(self):
+        rows = [{"DATE": f"2026-{index:03d}", "EVENT_ID": str(index), "PICK": "Player",
+                 "RESULT": "W", "MODEL_PROBABILITY": ".70", "WORKLOAD_PENALTY": "0",
+                 "MATCHES_7": "3", "SETS_7": "8", "REST_DAYS": "1"}
+                for index in range(bot.MIN_WORKLOAD_TRAINING_SAMPLE - 1)]
+        self.assertIsNone(bot.learned_workload_policy(rows))
+
+    def test_workload_learner_promotes_only_after_holdout_improvement(self):
+        rows = []
+        for index in range(240):
+            dense = index % 2 == 0
+            rows.append({
+                "DATE": f"2026-{index:03d}", "EVENT_ID": str(index), "PICK": "Player",
+                "RESULT": "L" if dense else "W", "MODEL_PROBABILITY": ".70",
+                "WORKLOAD_PENALTY": "0", "MATCHES_7": "5" if dense else "1",
+                "SETS_7": "12" if dense else "2", "REST_DAYS": "0" if dense else "5",
+                "TOURNAMENT_CHANGE": "False",
+            })
+        learned = bot.learned_workload_policy(rows)
+        self.assertIsNotNone(learned)
+        self.assertEqual(learned["holdout"], 72)
+        self.assertTrue(learned["promoted"])
+        self.assertGreaterEqual(learned["holdout_triggered"], 20)
+        self.assertLess(learned["challenger_holdout_brier"], learned["active_holdout_brier"])
+        self.assertLessEqual(bot.workload_policy_penalty({"matches_7": 9, "sets_7": 20, "rest_days": 0}, learned["policy"]), .03)
+
     def test_stage_pending_does_not_log_or_deduct(self):
         rec = {"player": "Player One", "grade": "Value Pick", "odds": 1.55,
                "assessed_probability": .70, "ev": .085,
@@ -995,6 +1021,8 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(second["TRAVEL_DISTANCE_KM"], "1263.420")
         self.assertEqual(second["TIMEZONE_CHANGE_HOURS"], "-1.000")
         self.assertEqual(second["TRAVEL_SOURCE"], "verified-history.csv;official-event")
+        self.assertEqual(second["WORKLOAD_POLICY_ID"], "static-v1")
+        self.assertEqual(second["WORKLOAD_POLICY_PROMOTED"], "False")
 
     def test_diagnostic_mode_does_not_write_alias_review_queue(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1505,6 +1533,8 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("## Monthly performance", report)
         self.assertIn("## Walk-forward staking comparison", report)
         self.assertIn("Capped quarter-Kelly", report)
+        self.assertIn("## Workload threshold challenger", report)
+        self.assertIn("requires at least 200", report)
 
     def test_walk_forward_staking_compares_fixed_and_capped_kelly(self):
         rows = [

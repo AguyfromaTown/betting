@@ -72,6 +72,8 @@ MAX_ELO_MARKET_GAP = 0.15
 MIN_CALIBRATION_SAMPLE = 100
 MIN_SEGMENT_SAMPLE = 30
 MIN_WEIGHT_TRAINING_SAMPLE = 200
+MIN_WORKLOAD_TRAINING_SAMPLE = 200
+MIN_WORKLOAD_TRIGGER_SAMPLE = 30
 KELLY_FRACTION = 0.25
 MIN_STAKE_RATE = 0.005
 MAX_PRICE_MOVEMENT = 0.10
@@ -85,7 +87,7 @@ OFFICIAL_STATUS_DOMAINS = {
 BLOCKING_PHYSICAL_STATUSES = {"questionable", "injured", "withdrawn", "unavailable", "suspended"}
 MAX_CACHE_ENTRY_BYTES = 2_000_000
 MAX_CACHE_ENTRIES = 20
-MODEL_VERSION = "tennis-2026.08-quality-v2"
+MODEL_VERSION = "tennis-2026.08-workload-v1"
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -2328,6 +2330,101 @@ def learned_component_weights(rows: list[dict]) -> dict | None:
             "promoted": bool(active_brier and challenger_brier and challenger_brier <= active_brier * .97)}
 
 
+def workload_policy_penalty(values: dict, policy: dict) -> float:
+    """Apply a bounded workload policy to either live lower-case or audit upper-case fields."""
+    def number(lower: str, upper: str, default=0.0):
+        try:
+            return float(values.get(lower, values.get(upper, default)) or default)
+        except (TypeError, ValueError):
+            return float(default)
+
+    matches_7 = number("matches_7", "MATCHES_7")
+    sets_7 = number("sets_7", "SETS_7")
+    rest_days = number("rest_days", "REST_DAYS", 999)
+    if matches_7 >= policy["matches_threshold"] or sets_7 >= policy["sets_threshold"]:
+        penalty = policy["dense_penalty"]
+    elif rest_days <= policy["rest_threshold"]:
+        penalty = policy["rest_penalty"]
+    else:
+        penalty = 0.0
+    tournament_change = str(values.get("tournament_change", values.get("TOURNAMENT_CHANGE", ""))).casefold() == "true"
+    if tournament_change and rest_days <= 3:
+        penalty += .005
+    return min(.03, max(0.0, penalty))
+
+
+def learned_workload_policy(rows: list[dict]) -> dict | None:
+    """Fit workload thresholds chronologically and promote only after holdout improvement."""
+    usable = []
+    for row in sorted(rows, key=lambda item: (item.get("DATE", ""), item.get("EVENT_ID", ""), item.get("PICK", ""))):
+        if any(row.get(field, "") == "" for field in ("MATCHES_7", "SETS_7", "REST_DAYS")):
+            continue
+        try:
+            model_probability = float(row.get("MODEL_PROBABILITY") or "")
+            active_penalty = float(row.get("WORKLOAD_PENALTY") or 0)
+        except (TypeError, ValueError):
+            continue
+        if row.get("RESULT") not in {"W", "L"}:
+            continue
+        enriched = dict(row)
+        enriched["_BASE_PROBABILITY"] = min(.98, max(.02, model_probability + active_penalty))
+        usable.append(enriched)
+    if len(usable) < MIN_WORKLOAD_TRAINING_SAMPLE:
+        return None
+    split = max(140, int(len(usable) * .7))
+    training, holdout = usable[:split], usable[split:]
+    if len(holdout) < 60:
+        return None
+
+    candidates = [
+        {"matches_threshold": matches, "sets_threshold": sets, "dense_penalty": dense,
+         "rest_threshold": rest, "rest_penalty": rest_penalty}
+        for matches in (3, 4, 5)
+        for sets in (8, 10, 12)
+        for dense in (.01, .015, .02, .025)
+        for rest in (0, 1, 2)
+        for rest_penalty in (.005, .01)
+    ]
+
+    def score(sample: list[dict], policy: dict) -> tuple[float, int]:
+        errors, triggered = [], 0
+        for row in sample:
+            penalty = workload_policy_penalty(row, policy)
+            triggered += penalty > 0
+            probability = max(.02, row["_BASE_PROBABILITY"] - penalty)
+            errors.append((probability - (row["RESULT"] == "W")) ** 2)
+        return sum(errors) / len(errors), triggered
+
+    eligible = []
+    for policy in candidates:
+        training_brier, training_triggered = score(training, policy)
+        if training_triggered >= MIN_WORKLOAD_TRIGGER_SAMPLE:
+            eligible.append((training_brier, policy, training_triggered))
+    if not eligible:
+        return None
+    training_brier, policy, training_triggered = min(
+        eligible, key=lambda item: (item[0], item[1]["matches_threshold"], item[1]["sets_threshold"],
+                                    item[1]["dense_penalty"], item[1]["rest_threshold"], item[1]["rest_penalty"])
+    )
+    holdout_brier, holdout_triggered = score(holdout, policy)
+    active_training_brier = brier_score(training, "MODEL_PROBABILITY")
+    active_holdout_brier = brier_score(holdout, "MODEL_PROBABILITY")
+    promoted = bool(
+        active_training_brier is not None and active_holdout_brier is not None
+        and training_triggered >= MIN_WORKLOAD_TRIGGER_SAMPLE
+        and holdout_triggered >= max(20, MIN_WORKLOAD_TRIGGER_SAMPLE // 2)
+        and training_brier <= active_training_brier * .97
+        and holdout_brier <= active_holdout_brier * .97
+    )
+    policy_id = (f"m{policy['matches_threshold']}-s{policy['sets_threshold']}-d{policy['dense_penalty']:.3f}-"
+                 f"r{policy['rest_threshold']}-p{policy['rest_penalty']:.3f}")
+    return {"policy": policy, "policy_id": policy_id, "sample": len(usable), "training": len(training),
+            "holdout": len(holdout), "training_triggered": training_triggered,
+            "holdout_triggered": holdout_triggered, "active_training_brier": active_training_brier,
+            "challenger_training_brier": training_brier, "active_holdout_brier": active_holdout_brier,
+            "challenger_holdout_brier": holdout_brier, "promoted": promoted}
+
+
 def calibrate_probability(probability: float, rows: list[dict]) -> tuple[float, int]:
     """Apply a shrunk empirical correction only when the local probability bin is mature."""
     bucket = []
@@ -2519,7 +2616,11 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
     raw_probability = assessed_probability
     assessed_probability, calibration_sample = calibrate_probability(assessed_probability, comparable)
     context_penalty, context_reason = tennis_context_uncertainty(match)
-    workload_penalty = float(workload.get("penalty") or 0)
+    static_workload_penalty = float(workload.get("penalty") or 0)
+    workload_challenger = learned_workload_policy(history)
+    workload_policy_promoted = bool(workload_challenger and workload_challenger["promoted"] and not rollback["model_rollback"])
+    workload_penalty = (workload_policy_penalty(workload, workload_challenger["policy"])
+                        if workload_policy_promoted else static_workload_penalty)
     assessed_probability = max(.02, assessed_probability - context_penalty - workload_penalty)
     health = segment_health(match, history)
     kill_switch = tennis_kill_switch(history)
@@ -2574,6 +2675,13 @@ def calculate_tennis_baseline(match: dict, player: str) -> dict | None:
         "context_penalty": context_penalty,
         "context_reason": context_reason,
         "workload_penalty": workload_penalty,
+        "static_workload_penalty": static_workload_penalty,
+        "workload_policy_id": workload_challenger["policy_id"] if workload_challenger else "static-v1",
+        "workload_policy_sample": workload_challenger["sample"] if workload_challenger else 0,
+        "workload_policy_holdout": workload_challenger["holdout"] if workload_challenger else 0,
+        "workload_policy_active_brier": workload_challenger["active_holdout_brier"] if workload_challenger else None,
+        "workload_policy_challenger_brier": workload_challenger["challenger_holdout_brier"] if workload_challenger else None,
+        "workload_policy_promoted": workload_policy_promoted,
         "workload": workload,
         "best_of": match_best_of,
         "indoor": match.get("indoor"),
@@ -2731,6 +2839,8 @@ def build_prompt(
                     f"{workload.get('current_surface') or 'unknown'}, surface change="
                     f"{'unknown' if workload.get('surface_change') is None else workload.get('surface_change')}), "
                     f"verified travel={travel_text}, timezone change={timezone_text}"
+                    f", workload policy={baseline.get('workload_policy_id', 'static-v1')} "
+                    f"(n={baseline.get('workload_policy_sample', 0)}, promoted={baseline.get('workload_policy_promoted', False)})"
                 )
                 baseline_lines.append(
                     f"  Python baseline for {player}: market fair "
@@ -3284,7 +3394,9 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "BO5_FIVE_SET_WIN_RATE", "BO5_FIVE_SET_SAMPLE", "BO5_COMEBACK_0_2_RATE", "BO5_COMEBACK_0_2_SAMPLE", "BO5_SOURCE",
         "COMPONENT_WEIGHTS", "RAW_PROBABILITY", "CHALLENGER_PROBABILITY",
         "CHALLENGER_SAMPLE", "CHALLENGER_PROMOTED", "CALIBRATION_SAMPLE",
-        "CONTEXT_PENALTY", "CONTEXT_REASON", "WORKLOAD_PENALTY", "REST_DAYS",
+        "CONTEXT_PENALTY", "CONTEXT_REASON", "WORKLOAD_PENALTY", "STATIC_WORKLOAD_PENALTY",
+        "WORKLOAD_POLICY_ID", "WORKLOAD_POLICY_SAMPLE", "WORKLOAD_POLICY_HOLDOUT",
+        "WORKLOAD_POLICY_ACTIVE_BRIER", "WORKLOAD_POLICY_CHALLENGER_BRIER", "WORKLOAD_POLICY_PROMOTED", "REST_DAYS",
         "MATCHES_7", "MATCHES_14", "MATCHES_30", "SETS_7", "LAST_MATCH_MINUTES",
         "MINUTES_7", "MINUTES_14", "MINUTES_30", "DURATION_SAMPLE_30", "DURATION_SOURCE",
         "LAST_MATCH_LONG", "LAST_MATCH_LONG_THRESHOLD", "LONG_MATCHES_7", "LONG_MATCHES_30",
@@ -3402,7 +3514,12 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 f"{baseline['challenger_probability']:.6f}" if baseline.get("challenger_probability") is not None else "",
                 baseline.get("challenger_sample", 0), baseline.get("challenger_promoted", False),
                 baseline.get("calibration_sample", 0), f"{baseline.get('context_penalty', 0):.6f}", baseline.get("context_reason", "main_draw"),
-                f"{baseline.get('workload_penalty', 0):.6f}", workload.get("rest_days", ""), workload.get("matches_7", 0),
+                f"{baseline.get('workload_penalty', 0):.6f}", f"{baseline.get('static_workload_penalty', 0):.6f}",
+                baseline.get("workload_policy_id", "static-v1"), baseline.get("workload_policy_sample", 0),
+                baseline.get("workload_policy_holdout", 0),
+                f"{baseline['workload_policy_active_brier']:.6f}" if baseline.get("workload_policy_active_brier") is not None else "",
+                f"{baseline['workload_policy_challenger_brier']:.6f}" if baseline.get("workload_policy_challenger_brier") is not None else "",
+                baseline.get("workload_policy_promoted", False), workload.get("rest_days", ""), workload.get("matches_7", 0),
                 workload.get("matches_14", 0), workload.get("matches_30", 0), workload.get("sets_7", 0),
                 workload.get("last_match_minutes", ""), workload.get("minutes_7", 0), workload.get("minutes_14", 0),
                 workload.get("minutes_30", 0), workload.get("duration_sample_30", 0), workload.get("duration_source", ""),
@@ -3791,6 +3908,23 @@ def generate_backtest_summary(resolved: list[dict]):
         result = simulation[key]
         roi = f"{result['roi']:.2%}" if result["roi"] is not None else "N/A"
         lines.append(f"| {label} | {simulation['bets']} | €{result['ending_bankroll']:.2f} | €{result['profit']:.2f} | {roi} | {result['max_drawdown']:.2%} |")
+    workload_policy = learned_workload_policy(resolved)
+    lines.extend(["", "## Workload threshold challenger", ""])
+    if workload_policy is None:
+        lines.append(
+            f"The workload learner remains inactive: it requires at least {MIN_WORKLOAD_TRAINING_SAMPLE} "
+            "chronologically settled prediction rows with usable pre-match workload fields."
+        )
+    else:
+        policy = workload_policy["policy"]
+        lines.extend([
+            f"- Candidate policy: `{workload_policy['policy_id']}`",
+            f"- Sample: {workload_policy['sample']} ({workload_policy['training']} training, {workload_policy['holdout']} holdout)",
+            f"- Dense schedule: matches/7d >= {policy['matches_threshold']} or sets/7d >= {policy['sets_threshold']}; penalty {policy['dense_penalty']:.1%}",
+            f"- Short rest: rest days <= {policy['rest_threshold']}; penalty {policy['rest_penalty']:.1%}",
+            f"- Holdout Brier: active {workload_policy['active_holdout_brier']:.4f}, challenger {workload_policy['challenger_holdout_brier']:.4f}",
+            f"- Promotion: {'approved' if workload_policy['promoted'] else 'shadow only'}",
+        ])
     atomic_write_text(BACKTEST_FILE, "\n".join(lines) + "\n")
     log(f"Backtest summary saved: {BACKTEST_FILE.name}")
 
