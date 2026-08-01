@@ -24,6 +24,7 @@ The format follows Keep a Changelog categories: Added, Changed, Deprecated, Remo
 
 ### Fixed
 
+- Telegram and email updates are now mode-specific: revalidation messages clearly distinguish picks authorized or cancelled now, candidates still waiting, historical performance, and unresolved player identities that are not bets.
 - Groq analysis prompts are now dynamically bounded below the 12,000-token TPM ceiling, with a conservative UTF-8 estimate, completion reserve, lowest-value-match trimming, and a final pre-request guard.
 - Missing Tennis Abstract profiles now produce an insufficient-evidence rejection instead of crashing statistical candidate construction.
 - Fixed same-date historical profile sorting that could compare optional booleans, locations, or missing values and crash recent-form enrichment.

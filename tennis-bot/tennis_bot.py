@@ -147,28 +147,93 @@ def log(msg: str):
 
 
 def build_notification_message(date_str: str, mode: str) -> str:
-    """Build a bounded operational summary from sanitized local reports."""
-    lines = [f"Tennis Bot - {date_str}", f"Mode: {mode}"]
-    sources = [
-        PERFORMANCE_FILE,
-        OPERATIONS_ALERT_FILE,
-        SETTLEMENT_ALERT_FILE,
-        SOURCE_HEALTH_FILE,
-        IDENTITY_QUEUE_REPORT_FILE,
-        REPORTS_DIR / f"picks-{date_str}.md",
-    ]
-    keywords = ("settled bets:", "profit/loss:", "roi:", "average clv:", "active candidates:",
-                "authorized picks:", "rejections:", "rejection rate:", "pending:", "overdue",
-                "final betting decision:", "python accepted", "abnormal_", "stale cached response")
-    for path in sources:
+    """Build a short, mode-specific update using unambiguous terminology."""
+
+    def metric_lines(path: Path, labels: tuple[str, ...]) -> list[str]:
         if not path.exists() or not path.stat().st_size:
-            continue
+            return []
+        found = []
         for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
             clean = re.sub(r"[*_`]", "", raw).strip().lstrip("- ")
-            if clean and any(keyword in clean.casefold() for keyword in keywords):
-                lines.append(clean[:300])
-    deduplicated = list(dict.fromkeys(lines))
-    return "\n".join(deduplicated)[:3500]
+            if any(clean.casefold().startswith(label.casefold()) for label in labels):
+                found.append(clean[:300])
+        return found
+
+    pending_rows = []
+    if PENDING_FILE.exists() and PENDING_FILE.stat().st_size:
+        try:
+            with PENDING_FILE.open(newline="", encoding="utf-8") as handle:
+                pending_rows = [
+                    row for row in csv.DictReader(handle)
+                    if row.get("STATUS") == "pending_revalidation"
+                ]
+        except (OSError, csv.Error):
+            pending_rows = []
+
+    lifecycle_path = PENDING_FILE.with_name("lifecycle-summary.md")
+    lifecycle_text = (
+        lifecycle_path.read_text(encoding="utf-8", errors="replace")
+        if lifecycle_path.exists() and lifecycle_path.stat().st_size else ""
+    )
+    authorized_now = len(re.findall(r"\|\s*authorized\s*\|", lifecycle_text, re.IGNORECASE))
+    cancelled_now = len(re.findall(r"\|\s*cancelled\s*\|", lifecycle_text, re.IGNORECASE))
+
+    title = {
+        "revalidation": "Tennis Bot - Pre-match check",
+        "settlement": "Tennis Bot - Results update",
+        "paper_daily": "Tennis Bot - Paper picks",
+        "daily": "Tennis Bot - Daily picks",
+    }.get(mode, "Tennis Bot update")
+    lines = [title, f"Run date: {date_str}"]
+
+    if mode == "revalidation":
+        if authorized_now:
+            decision = f"AUTHORIZED: {authorized_now} pick(s) passed the final safety check."
+        elif cancelled_now:
+            decision = f"NO NEW BETS: {cancelled_now} candidate(s) were cancelled by the final check."
+        elif pending_rows:
+            decision = (
+                f"WAITING: {len(pending_rows)} candidate(s) are still more than "
+                "90 minutes from match time."
+            )
+        else:
+            decision = "NO ACTION: There are no candidates awaiting a pre-match check."
+        lines.extend(["", decision, f"This check: {authorized_now} authorized, {cancelled_now} cancelled"])
+        if pending_rows:
+            lines.extend(["", "Candidates still waiting:"])
+            for row in pending_rows[:8]:
+                match = row.get("MATCH") or f"{row.get('PLAYER1', '')} vs {row.get('PLAYER2', '')}"
+                start = row.get("START_TIME") or "start time unavailable"
+                lines.append(f"- {row.get('PICK', 'Unknown pick')} ({match}) - starts {start}")
+    elif mode == "settlement":
+        lines.extend(["", "Latest account result:"])
+    else:
+        if pending_rows:
+            lines.extend(["", f"STAGED: {len(pending_rows)} candidate(s) await the final pre-match check."])
+        else:
+            lines.extend(["", "NO STAGED PICKS: Nothing is awaiting authorization."])
+        report_lines = metric_lines(
+            REPORTS_DIR / f"picks-{date_str}.md",
+            ("Final betting decision:", "The analysis produced", "Python accepted"),
+        )
+        lines.extend(report_lines)
+
+    performance = metric_lines(
+        PERFORMANCE_FILE, ("Settled bets:", "Profit/loss:", "ROI:", "Average CLV:")
+    )
+    if performance:
+        lines.extend(["", "Performance snapshot (historical, not this check):", *performance])
+
+    identity = metric_lines(IDENTITY_QUEUE_REPORT_FILE, ("Pending:", "Overdue (at least 72 hours):"))
+    if identity:
+        lines.extend(["", "Data maintenance (player identities, not bets):", *identity])
+
+    if "STALE RESPONSES DETECTED" in (
+        SOURCE_HEALTH_FILE.read_text(encoding="utf-8", errors="replace")
+        if SOURCE_HEALTH_FILE.exists() else ""
+    ):
+        lines.extend(["", "WARNING: A cached data source was stale; affected picks remain safety-gated."])
+    return "\n".join(lines)[:3500]
 
 
 def send_telegram_notification(message: str, token: str, chat_id: str):

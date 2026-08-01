@@ -17,6 +17,57 @@ SPEC.loader.exec_module(bot)
 
 
 class TennisBotTests(unittest.TestCase):
+    def test_revalidation_notification_separates_waiting_bets_from_identities(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pending = root / "pending-bets.csv"
+            pending.write_text(
+                "STATUS,PICK,MATCH,START_TIME\n"
+                "pending_revalidation,Baez,Baez vs Bellucci,2026-08-02T18:00:00+00:00\n",
+                encoding="utf-8",
+            )
+            (root / "lifecycle-summary.md").write_text(
+                "| Match | Pick | Status | Reason |\n"
+                "|---|---|---|---|\n"
+                "| - | - | waiting | No candidates were ready in this run |\n",
+                encoding="utf-8",
+            )
+            identities = root / "identities.md"
+            identities.write_text("Pending: 29\nOverdue (at least 72 hours): 0\n", encoding="utf-8")
+            performance = root / "performance.md"
+            performance.write_text("Settled bets: 2\nProfit/loss: €-2.76\nROI: -100.00%\n", encoding="utf-8")
+            with patch.object(bot, "PENDING_FILE", pending), \
+                    patch.object(bot, "IDENTITY_QUEUE_REPORT_FILE", identities), \
+                    patch.object(bot, "PERFORMANCE_FILE", performance), \
+                    patch.object(bot, "SOURCE_HEALTH_FILE", root / "source-health.md"):
+                message = bot.build_notification_message("2026-08-01", "revalidation")
+
+        self.assertIn("WAITING: 1 candidate", message)
+        self.assertIn("Baez (Baez vs Bellucci)", message)
+        self.assertIn("player identities, not bets", message)
+        self.assertIn("Performance snapshot (historical, not this check)", message)
+        self.assertNotIn("The analysis produced 0", message)
+
+    def test_revalidation_notification_reports_authorization_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pending = root / "pending-bets.csv"
+            pending.write_text("STATUS,PICK,MATCH,START_TIME\n", encoding="utf-8")
+            (root / "lifecycle-summary.md").write_text(
+                "| Match | Pick | Status | Reason |\n"
+                "|---|---|---|---|\n"
+                "| A vs B | A | authorized | pre_match_validated |\n",
+                encoding="utf-8",
+            )
+            with patch.object(bot, "PENDING_FILE", pending), \
+                    patch.object(bot, "PERFORMANCE_FILE", root / "performance.md"), \
+                    patch.object(bot, "IDENTITY_QUEUE_REPORT_FILE", root / "identities.md"), \
+                    patch.object(bot, "SOURCE_HEALTH_FILE", root / "source-health.md"):
+                message = bot.build_notification_message("2026-08-01", "revalidation")
+
+        self.assertIn("AUTHORIZED: 1 pick", message)
+        self.assertIn("This check: 1 authorized, 0 cancelled", message)
+
     def test_optional_notifications_are_disabled_without_configuration(self):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.dict(bot.os.environ, {}, clear=True), \
