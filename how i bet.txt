@@ -33,7 +33,10 @@ results show both ROI below -5% and average CLV below -2%.
 PRE-MATCH DATA QUALITY
 
 Every scheduled check records current odds, bookmaker count, dispersion, source
-and match status in price-history.csv. A candidate is cancelled if bookmaker
+and match status in price-history.csv. An old provider quote timestamp is first
+cross-checked against the already-fetched market snapshot. It remains eligible
+when at least two bookmakers agree within 5%; this adds no normal API request.
+A candidate is cancelled if bookmaker
 dispersion exceeds 12%, absolute movement from discovery exceeds 10%, fewer than
 two bookmakers remain, the surface changes, the event is no longer pre-match,
 or the combined identity/surface/Elo/form/serve-return quality score is below 5.

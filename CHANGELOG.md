@@ -1,5 +1,7 @@
 # Changelog
 
+- Stale tennis quote timestamps are no longer an automatic cancellation when the fresh revalidation response contains at least two bookmakers whose selected-player prices agree within 5%. The existing snapshot is reused, so the check adds no normal API calls; stale single-source or conflicting markets remain blocked.
+
 All notable changes to the tennis betting bot are recorded here. This file tracks user-visible, operational, security, data, and documentation changes. Prediction or betting-policy behavior must also be recorded in `MODEL-POLICY-RELEASES.md` with its immutable `MODEL_VERSION`.
 
 The format follows Keep a Changelog categories: Added, Changed, Deprecated, Removed, Fixed, and Security. Dates use `YYYY-MM-DD`. Git commit history remains the detailed implementation record.

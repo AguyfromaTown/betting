@@ -710,6 +710,27 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(snapshots[-1]["PRICE_AGE_MINUTES"], "30.000")
         self.assertEqual(snapshots[-1]["STALE"], "True")
 
+    def test_stale_price_can_be_cross_confirmed_without_an_extra_request(self):
+        match = {
+            "player1": "A", "player2": "B", "bookmaker_count": 2,
+            "home_dispersion": .03, "away_dispersion": .04,
+            "bookmaker_quotes": [
+                {"bookmaker": "Book One", "home": 1.90, "away": 2.00},
+                {"bookmaker": "Book Two", "home": 1.94, "away": 1.96},
+            ],
+        }
+        self.assertTrue(bot.stale_price_is_cross_confirmed(match, "A"))
+        self.assertTrue(bot.stale_price_is_cross_confirmed(match, "B"))
+
+    def test_stale_price_cross_confirmation_requires_tight_independent_quotes(self):
+        one_book = {"player1": "A", "player2": "B", "bookmaker_count": 1,
+                    "home_dispersion": 0.0, "away_dispersion": 0.0}
+        disagreement = {"player1": "A", "player2": "B", "bookmaker_count": 3,
+                        "home_dispersion": .051, "away_dispersion": .02}
+        self.assertFalse(bot.stale_price_is_cross_confirmed(one_book, "A"))
+        self.assertFalse(bot.stale_price_is_cross_confirmed(disagreement, "A"))
+        self.assertTrue(bot.stale_price_is_cross_confirmed(disagreement, "B"))
+
     def test_provider_quote_timestamp_rejects_future_metadata(self):
         from datetime import datetime, timedelta, timezone
         received = datetime(2026, 8, 1, 12, tzinfo=timezone.utc)
@@ -1261,7 +1282,7 @@ class TennisBotTests(unittest.TestCase):
 
         self.assertEqual(
             names,
-            {"existing pending", "cancelled earlier", "already logged"},
+            {"existingpending", "cancelledearlier", "alreadylogged"},
         )
         self.assertNotIn("new fixture", names)
 

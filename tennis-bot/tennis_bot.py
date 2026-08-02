@@ -107,6 +107,8 @@ MIN_STAKE_RATE = 0.005
 MAX_PRICE_MOVEMENT = 0.10
 MAX_PRICE_AGE_MINUTES = 15
 MAX_BOOKMAKER_DISPERSION = 0.12
+STALE_PRICE_CONFIRMATION_BOOKMAKERS = 2
+STALE_PRICE_CONFIRMATION_DISPERSION = 0.05
 MAX_BETS_PER_TOURNAMENT = 2
 DEFAULT_TOUR_EXPOSURE_CAPS = {"ATP": .08, "WTA": .08, "Challenger": .05, "ITF": .03, "Unknown": .03}
 OFFICIAL_STATUS_DOMAINS = {
@@ -4610,6 +4612,20 @@ def player_market_dispersion(match: dict, player: str) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
+def stale_price_is_cross_confirmed(match: dict | None, player: str) -> bool:
+    """Accept an unchanged old timestamp when a fresh response has a tight multi-book consensus.
+
+    Some providers retain the source quote timestamp until a bookmaker changes its
+    price.  The surrounding revalidation call is still fresh, so two or more
+    bookmakers agreeing within a deliberately tight band provide a low-cost
+    confirmation that the displayed market remains usable.
+    """
+    if not match or int(match.get("bookmaker_count") or 0) < STALE_PRICE_CONFIRMATION_BOOKMAKERS:
+        return False
+    dispersion = player_market_dispersion(match, player)
+    return dispersion is not None and dispersion <= STALE_PRICE_CONFIRMATION_DISPERSION
+
+
 def tennis_data_quality(match: dict, baseline: dict, player: str) -> dict:
     score, reasons = 0, []
     books = int(match.get("bookmaker_count") or 0)
@@ -6124,7 +6140,7 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
             })
             if any(token in status for token in ("cancel", "postpon", "settled", "live", "inplay", "in-play", "withdraw", "walkover", "retir", "suspend")):
                 reason = "event_not_pre_match"
-            elif price_dynamics.get("stale"):
+            elif price_dynamics.get("stale") and not stale_price_is_cross_confirmed(match, row["PICK"]):
                 reason = "stale_price"
             elif not match or not baseline:
                 reason = "market_or_model_unavailable"
@@ -6151,7 +6167,7 @@ def revalidate_pending_bets(api_keys: list[str], now: datetime | None = None) ->
             common_block = None
             if any(token in status for token in ("cancel", "postpon", "settled", "live", "inplay", "in-play", "withdraw", "walkover", "retir", "suspend")):
                 common_block = "event_not_pre_match"
-            elif price_dynamics.get("stale"):
+            elif price_dynamics.get("stale") and not stale_price_is_cross_confirmed(match, row["PICK"]):
                 common_block = "stale_price"
             elif not match or not baseline:
                 common_block = "market_or_model_unavailable"
