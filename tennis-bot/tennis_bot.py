@@ -1265,8 +1265,8 @@ def fetch_selected_bookmakers(api_keys: list[str]) -> dict[int, str]:
 def parse_args():
     parser = argparse.ArgumentParser(description="Tennis betting bot")
     parser.add_argument("--date", default=None, help="Match date (YYYY-MM-DD)")
-    parser.add_argument("--odds-min", type=float, default=1.5, help="Min decimal odds")
-    parser.add_argument("--odds-max", type=float, default=1.6, help="Max decimal odds")
+    parser.add_argument("--odds-min", type=float, default=1.50, help="Min decimal odds")
+    parser.add_argument("--odds-max", type=float, default=3.00, help="Max decimal odds")
     parser.add_argument("--bankroll", type=float, default=None, help="Override bankroll")
     parser.add_argument("--force", action="store_true", help="Run even if bets already logged for this date")
     parser.add_argument("--settle-only", action="store_true", help="Settle pending bets without generating picks")
