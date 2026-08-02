@@ -1,6 +1,6 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-02T20:28:10.866164+00:00
+Updated: 2026-08-02T21:24:07.309133+00:00
 
 - Pending: 63
 - Overdue (at least 72 hours): 0
@@ -42,12 +42,12 @@ Updated: 2026-08-02T20:28:10.866164+00:00
 | Zhang, Shuai | none | N/A | none | no_candidate | 1.1 d | 2026-08-01T17:56:25.347040+00:00 |
 | Fucsovics, Marton | none | N/A | none | no_candidate | 0.3 d | 2026-08-02T14:25:38.114146+00:00 |
 | Moutet, Corentin | none | N/A | none | no_candidate | 0.3 d | 2026-08-02T14:25:38.115284+00:00 |
-| Rolland de Ravel, Cosme | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T19:23:30.106361+00:00 |
-| Andreev, Adrian | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T19:23:30.107828+00:00 |
-| Frech, Magdalena | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T19:23:30.109130+00:00 |
-| Jeanjean, Leolia | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T19:23:30.110450+00:00 |
-| Jones, Emerson | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T19:23:30.111679+00:00 |
-| Tararudee, Lanlana | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T19:23:30.113003+00:00 |
+| Rolland de Ravel, Cosme | none | N/A | none | no_candidate | 0.1 d | 2026-08-02T19:23:30.106361+00:00 |
+| Andreev, Adrian | none | N/A | none | no_candidate | 0.1 d | 2026-08-02T19:23:30.107828+00:00 |
+| Frech, Magdalena | none | N/A | none | no_candidate | 0.1 d | 2026-08-02T19:23:30.109130+00:00 |
+| Jeanjean, Leolia | none | N/A | none | no_candidate | 0.1 d | 2026-08-02T19:23:30.110450+00:00 |
+| Jones, Emerson | none | N/A | none | no_candidate | 0.1 d | 2026-08-02T19:23:30.111679+00:00 |
+| Tararudee, Lanlana | none | N/A | none | no_candidate | 0.1 d | 2026-08-02T19:23:30.113003+00:00 |
 | Zheng, Michael | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.949541+00:00 |
 | Kecmanovic, Miomir | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.951167+00:00 |
 | Barsukov, Nikolai | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.952425+00:00 |
