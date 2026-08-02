@@ -1224,6 +1224,7 @@ class TennisBotTests(unittest.TestCase):
                 patch.object(bot, "PAPER_LOG_FILE", root / "paper-bets-log.csv"),
                 patch.object(bot, "BANKROLL_FILE", bankroll_path),
                 patch.object(bot, "TRANSACTION_FILE", transaction_path),
+                patch.object(bot, "POLICY_FILE", root / "counterfactual-log.csv"),
                 patch.object(bot, "SETTLEMENT_ALERT_FILE", root / "settlement-alerts.md"),
                 patch.object(bot, "fetch_odds_json", side_effect=[([event], 0), ([], 0)]),
                 patch.object(bot, "fetch_selected_bookmakers", return_value={0: "Bet365"}),
