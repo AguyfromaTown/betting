@@ -1,6 +1,6 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-02T17:56:59.763467+00:00
+Updated: 2026-08-02T19:06:19.171157+00:00
 
 - Pending: 31
 - Overdue (at least 72 hours): 0
@@ -40,8 +40,8 @@ Updated: 2026-08-02T17:56:59.763467+00:00
 | Cocciaretto, Elisabetta | none | N/A | none | no_candidate | 1.0 d | 2026-08-01T17:56:25.326178+00:00 |
 | Putintseva, Yulia | none | N/A | none | no_candidate | 1.0 d | 2026-08-01T17:56:25.337792+00:00 |
 | Zhang, Shuai | none | N/A | none | no_candidate | 1.0 d | 2026-08-01T17:56:25.347040+00:00 |
-| Fucsovics, Marton | none | N/A | none | no_candidate | 0.1 d | 2026-08-02T14:25:38.114146+00:00 |
-| Moutet, Corentin | none | N/A | none | no_candidate | 0.1 d | 2026-08-02T14:25:38.115284+00:00 |
+| Fucsovics, Marton | none | N/A | none | no_candidate | 0.2 d | 2026-08-02T14:25:38.114146+00:00 |
+| Moutet, Corentin | none | N/A | none | no_candidate | 0.2 d | 2026-08-02T14:25:38.115284+00:00 |
 
 ## Resolution procedure
 
