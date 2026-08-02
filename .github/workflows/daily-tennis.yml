@@ -2,8 +2,10 @@ name: Daily Tennis Picks
 
 on:
   schedule:
-    # Runs daily at 06:00 UTC (adjust for your timezone)
+    # Three discovery windows catch fixtures and markets added later in the day.
     - cron: '0 6 * * *'
+    - cron: '0 12 * * *'
+    - cron: '0 18 * * *'
   workflow_dispatch:
     inputs:
       date:
@@ -114,6 +116,9 @@ jobs:
           fi
           if [ "${{ github.event.inputs.paper_trading }}" = "true" ]; then
             ARGS="$ARGS --paper-trading"
+          fi
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            ARGS="$ARGS --force"
           fi
           python tennis-bot/tennis_bot.py $ARGS
 

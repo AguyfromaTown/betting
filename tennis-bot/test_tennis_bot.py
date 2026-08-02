@@ -1239,6 +1239,42 @@ class TennisBotTests(unittest.TestCase):
             self.assertEqual(rows[0]["RETURN"], "6.00")
             self.assertEqual(bankroll_path.read_text(), "103.00")
 
+    def test_refresh_discovery_excludes_processed_picks_but_keeps_new_ones(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pending = root / "pending-bets.csv"
+            live_log = root / "bets-log.csv"
+            pending.write_text(
+                "DATE,PICK,MODE,STATUS\n"
+                "2026-08-02,Existing Pending,live,pending_revalidation\n"
+                "2026-08-02,Cancelled Earlier,live,cancelled\n"
+                "2026-08-02,Paper Only,paper,pending_revalidation\n",
+                encoding="utf-8",
+            )
+            live_log.write_text(
+                "DATE,BET,RESULT\n2026-08-02,Already Logged to win,W\n",
+                encoding="utf-8",
+            )
+            with patch.object(bot, "PENDING_FILE", pending), \
+                    patch.object(bot, "LOG_FILE", live_log):
+                names = bot.existing_daily_pick_names("2026-08-02")
+
+        self.assertEqual(
+            names,
+            {"existing pending", "cancelled earlier", "already logged"},
+        )
+        self.assertNotIn("new fixture", names)
+
+    def test_daily_workflow_runs_three_incremental_scheduled_scans(self):
+        workflow = MODULE_PATH.parent.parent.joinpath(
+            ".github", "workflows", "daily-tennis.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("cron: '0 6 * * *'", workflow)
+        self.assertIn("cron: '0 12 * * *'", workflow)
+        self.assertIn("cron: '0 18 * * *'", workflow)
+        self.assertIn("github.event_name", workflow)
+        self.assertIn('ARGS="$ARGS --force"', workflow)
+
     def test_paper_bet_log_is_isolated_from_real_bankroll_and_ledger(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

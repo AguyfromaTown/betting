@@ -6354,6 +6354,31 @@ def already_staged_today(date_str: str, paper_trading: bool = False) -> bool:
                    and (row.get("MODE") or "live") == wanted_mode for row in csv.DictReader(handle))
 
 
+def existing_daily_pick_names(date_str: str, paper_trading: bool = False) -> set[str]:
+    """Return selections already processed today so refresh scans stay incremental."""
+    names: set[str] = set()
+    wanted_mode = "paper" if paper_trading else "live"
+    if PENDING_FILE.exists() and PENDING_FILE.stat().st_size:
+        with PENDING_FILE.open(newline="", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                if row.get("DATE") == date_str and (row.get("MODE") or "live") == wanted_mode:
+                    name = normalize_player_name(row.get("PICK", ""))
+                    if name:
+                        names.add(name)
+    target = PAPER_LOG_FILE if paper_trading else LOG_FILE
+    if target.exists() and target.stat().st_size:
+        with target.open(newline="", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                if row.get("DATE") != date_str:
+                    continue
+                name = normalize_player_name(
+                    re.sub(r"\s+to win\s*$", "", row.get("BET", ""), flags=re.I)
+                )
+                if name:
+                    names.add(name)
+    return names
+
+
 def add_validation_summary(
     report: str,
     candidate_count: int,
@@ -6452,7 +6477,15 @@ def finalize_analysis(
         odds_max,
     )
     log(f"Validated {len(recommendations)} recommendations")
-    authorized = select_portfolio(recommendations)
+    seen_picks = existing_daily_pick_names(date_str, PAPER_TRADING_MODE)
+    incremental = [
+        item for item in recommendations
+        if normalize_player_name(item.get("player", "")) not in seen_picks
+    ]
+    skipped = len(recommendations) - len(incremental)
+    if skipped:
+        log(f"Skipped {skipped} previously processed same-day candidate(s)")
+    authorized = select_portfolio(incremental)
     authorized, block_reason = apply_manual_kill_switch(authorized, PAPER_TRADING_MODE)
     append_prediction_audit(date_str, matches, recommendations, authorized, block_reason)
     save_rollback_state()

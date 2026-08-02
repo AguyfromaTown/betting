@@ -149,7 +149,7 @@ The following are architecture requirements, not optional behavior:
 
 | Workflow | Schedule/trigger | Responsibility |
 |---|---|---|
-| `daily-tennis.yml` | Daily 06:00 UTC/manual | Tests, collection, modelling, staging, reporting and state commit |
+| `daily-tennis.yml` | Daily 06:00, 12:00 and 18:00 UTC/manual | Incremental tests, collection, modelling, staging, reporting and state commit |
 | `revalidate-tennis.yml` | Every 30 minutes/manual | Tests and near-start authorization/cancellation |
 | `settle-tennis.yml` | 02:30, 14:30 and 22:30 UTC/manual | Tests, verified settlement and reconciliation |
 | `tennis-quality.yml` | Relevant pushes/PRs/manual | Unit/integration tests and required coverage |
