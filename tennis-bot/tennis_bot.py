@@ -6780,7 +6780,7 @@ def main():
     # Attach odds
     qualified = attach_odds(all_matches, odds_min, odds_max)
 
-    log("Fetching Tennis Abstract profiles for Python validation...")
+    log("Fetching public ATP/WTA profiles for Python validation...")
     enrich_matches_with_profiles(qualified)
     log("Fetching recent results for opponent-adjusted form...")
     enrich_matches_with_recent_form(qualified, date_str)
