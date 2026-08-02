@@ -1,0 +1,39 @@
+{
+  "source": "bets-log.csv",
+  "backup": "bets-log.csv.20260802T222614728656Z.5c4e413a6798.bak",
+  "created_at": "2026-08-02T22:26:14.729456+00:00",
+  "sha256": "5c4e413a6798122253161f6de7068ecb059a2d2f750cc6823af3477e56e1cdb1",
+  "old_headers": [
+    "DATE",
+    "MATCH",
+    "BET",
+    "ODDS",
+    "STAKE",
+    "RESULT",
+    "RETURN",
+    "STARTING BALANCE"
+  ],
+  "new_headers": [
+    "DATE",
+    "MATCH",
+    "BET",
+    "ODDS",
+    "BOOKMAKER",
+    "STAKE",
+    "RESULT",
+    "RETURN",
+    "STARTING BALANCE",
+    "SETTLEMENT_RULE",
+    "MODEL_VERSION",
+    "MODEL_PROBABILITY",
+    "EV",
+    "GRADE",
+    "EVENT_ID",
+    "TOUR",
+    "SURFACE",
+    "AUTHORIZED_AT",
+    "CLOSING_ODDS",
+    "CLV",
+    "BRIER_SCORE"
+  ]
+}
