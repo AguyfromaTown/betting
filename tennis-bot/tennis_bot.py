@@ -2449,6 +2449,127 @@ def fetch_tennis_abstract_profiles(matches: list[dict]) -> dict[str, dict]:
     return selected
 
 
+def build_public_tennis_profiles(matches: list[dict]) -> dict[str, dict]:
+    """Build leakage-safe player and Elo profiles from Sackmann's public CSV data.
+
+    This is the primary profile source.  It avoids scraping protected pages and
+    calculates overall and surface Elo locally from the three seasons preceding
+    each decision.  Network responses use the normal shared cache.
+    """
+    singles = [
+        player for match in matches for player in (match.get("player1", ""), match.get("player2", ""))
+        if player and "/" not in player
+    ]
+    if not singles:
+        return {}
+    decision_dates = [str(match.get("start_time") or "")[:10] for match in matches]
+    valid_dates = [value for value in decision_dates if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value)]
+    cutoff = max(valid_dates) if valid_dates else datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    year = int(cutoff[:4])
+    archive_root = "https://raw.githubusercontent.com/Aneeshers/tennis-sackmann-archive/main"
+    source_families = {
+        "ATP": ("atp_matches", "atp_matches_qual_chall", "atp_matches_futures"),
+        "WTA": ("wta_matches", "wta_matches_qual_itf"),
+    }
+    sources = [
+        (tour, season, f"{archive_root}/{tour.lower()}/{family}_{season}.csv")
+        for tour, families in source_families.items()
+        for season in range(year - 2, year + 1)
+        for family in families
+    ]
+    downloaded = []
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        texts = list(executor.map(lambda item: fetch(item[2], cache_ttl=43_200, stale_if_error=604_800), sources))
+    for (tour, _season, url), content in zip(sources, texts):
+        if not content:
+            continue
+        for row in csv.DictReader(io.StringIO(content)):
+            raw_date = str(row.get("tourney_date") or "")
+            if len(raw_date) != 8 or f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}" >= cutoff:
+                continue
+            row["_tour"] = tour
+            row["_source_url"] = url
+            downloaded.append(row)
+    if not downloaded:
+        log("  Public ATP/WTA profile datasets unavailable")
+        return {}
+    downloaded.sort(key=lambda row: str(row.get("tourney_date") or ""))
+    ratings, surface_ratings, peaks, metadata = {}, {}, {}, {}
+
+    def rating_key(tour: str, name: str) -> tuple[str, str]:
+        return tour, normalize_player_name(name)
+
+    for row in downloaded:
+        winner, loser = row.get("winner_name", ""), row.get("loser_name", "")
+        if not winner or not loser:
+            continue
+        tour = row["_tour"]
+        winner_key, loser_key = rating_key(tour, winner), rating_key(tour, loser)
+        winner_rating, loser_rating = ratings.get(winner_key, 1500.0), ratings.get(loser_key, 1500.0)
+        expected = 1 / (1 + 10 ** ((loser_rating - winner_rating) / 400))
+        k_factor = 24.0
+        ratings[winner_key] = winner_rating + k_factor * (1 - expected)
+        ratings[loser_key] = loser_rating - k_factor * (1 - expected)
+        surface = canonical_surface(row.get("surface"))
+        if surface in {"Hard", "Clay", "Grass"}:
+            surface_key = surface.casefold()
+            winner_surface = surface_ratings.get((*winner_key, surface_key), 1500.0)
+            loser_surface = surface_ratings.get((*loser_key, surface_key), 1500.0)
+            surface_expected = 1 / (1 + 10 ** ((loser_surface - winner_surface) / 400))
+            surface_ratings[(*winner_key, surface_key)] = winner_surface + k_factor * (1 - surface_expected)
+            surface_ratings[(*loser_key, surface_key)] = loser_surface - k_factor * (1 - surface_expected)
+        played = str(row.get("tourney_date") or "")
+        for side, name, key in (("winner", winner, winner_key), ("loser", loser, loser_key)):
+            current = ratings[key]
+            previous_peak = peaks.get(key, (1500.0, ""))
+            if current > previous_peak[0]:
+                peaks[key] = (current, f"{played[:4]}-{played[4:6]}")
+            try:
+                age = float(row.get(f"{side}_age") or "")
+            except ValueError:
+                age = None
+            try:
+                rank = int(float(row.get(f"{side}_rank") or ""))
+            except ValueError:
+                rank = None
+            metadata[key] = {
+                "name": name, "age": age, "official_rank": rank,
+                "handedness": row.get(f"{side}_hand") or None,
+                "nationality": row.get(f"{side}_ioc") or None,
+                "_source_url": row["_source_url"], "_source_method": "public_csv_local_elo",
+            }
+    elo_ranks = {}
+    for tour in ("ATP", "WTA"):
+        ordered = sorted(((value, key) for key, value in ratings.items() if key[0] == tour), reverse=True)
+        elo_ranks.update({key: position for position, (_value, key) in enumerate(ordered, 1)})
+    profiles = {}
+    for key, details in metadata.items():
+        overall = ratings.get(key, 1500.0)
+        peak, peak_month = peaks.get(key, (overall, ""))
+        profile = dict(details)
+        profile.update({
+            "elo": round(overall, 1), "elo_rank": elo_ranks.get(key),
+            "hard_elo": round(surface_ratings.get((*key, "hard"), overall), 1),
+            "clay_elo": round(surface_ratings.get((*key, "clay"), overall), 1),
+            "grass_elo": round(surface_ratings.get((*key, "grass"), overall), 1),
+            "peak_elo": round(peak, 1), "peak_month": peak_month or None,
+        })
+        profiles[key[1]] = profile
+    aliases = load_player_aliases()
+    alias_metadata = load_player_alias_confidence()
+    selected = {}
+    for player in singles:
+        identity = resolve_profile_identity(player, profiles, aliases, alias_metadata)
+        if not identity:
+            continue
+        profile = dict(profiles[identity["key"]])
+        profile.update({"identity_confidence": identity["confidence"], "identity_method": identity["method"],
+                        "canonical_name": profiles[identity["key"]].get("name", "")})
+        selected[normalize_player_name(player)] = profile
+    log(f"  Public ATP/WTA profiles matched: {len(selected)}/{len(set(normalize_player_name(p) for p in singles))}")
+    return selected
+
+
 def compact_profile_line(player: str, profiles: dict[str, dict]) -> str:
     """Render verified profile data without sending page HTML to the model."""
     profile = profiles.get(normalize_player_name(player))
@@ -2489,8 +2610,11 @@ def compact_profile_line(player: str, profiles: dict[str, dict]) -> str:
 
 
 def enrich_matches_with_profiles(matches: list[dict]) -> dict[str, dict]:
-    """Attach compact Tennis Abstract records for later Python validation."""
-    profiles = fetch_tennis_abstract_profiles(matches)
+    """Attach public-data profiles, using Tennis Abstract only as a fallback."""
+    profiles = build_public_tennis_profiles(matches)
+    if not profiles:
+        log("  Public profile build unavailable; trying Tennis Abstract fallback")
+        profiles = fetch_tennis_abstract_profiles(matches)
     for match in matches:
         match["player1_profile"] = profiles.get(
             normalize_player_name(match["player1"])

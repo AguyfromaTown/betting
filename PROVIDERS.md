@@ -2,6 +2,17 @@
 
 This document is the authoritative inventory of external and operator-maintained data sources used by `tennis-bot/tennis_bot.py`. It records the expected schema, fallback order, trust boundary, and failure behavior. Update it whenever an endpoint, parser, required field, or fallback changes.
 
+## Public ATP/WTA profile and rating data
+
+Player profiles now come primarily from the maintained
+`Aneeshers/tennis-sackmann-archive` mirror of Jeff Sackmann's ATP/WTA datasets.
+The bot covers main tours, qualifying, Challengers, Futures and ITF, downloads
+three seasons at most once per 12-hour cache window, and calculates overall,
+hard, clay and grass Elo locally using only matches before the decision date.
+Tennis Abstract's protected leaderboard pages are an emergency fallback only.
+This avoids HTTP 403 failures and follows the original datasets' CC BY-NC-SA
+4.0 attribution, non-commercial and share-alike terms.
+
 ## Contract rules shared by network providers
 
 - Network timeout: 30 seconds unless a narrower call-specific timeout is defined; Groq completion calls use 120 seconds.

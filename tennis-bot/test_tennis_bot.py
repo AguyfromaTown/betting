@@ -1621,6 +1621,29 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("official rank=23", line)
         self.assertIn("hard Elo=1682.7", line)
 
+    def test_public_match_data_builds_local_overall_and_surface_elo_profiles(self):
+        csv_text = (
+            "tourney_date,surface,winner_name,loser_name,winner_age,loser_age,winner_rank,loser_rank,winner_hand,loser_hand,winner_ioc,loser_ioc\n"
+            "20260110,Hard,Luciano Darderi,Test Opponent,23.9,27.0,40,80,R,L,ITA,USA\n"
+            "20260510,Clay,Luciano Darderi,Another Opponent,24.2,25.0,28,60,R,R,ITA,ESP\n"
+        )
+        matches = [{"player1": "Darderi, Luciano", "player2": "Test Opponent",
+                    "start_time": "2026-08-02T12:00:00+00:00"}]
+
+        def public_fetch(url, **_kwargs):
+            return csv_text if url.endswith("atp_matches_2026.csv") else None
+
+        with patch.object(bot, "fetch", side_effect=public_fetch), patch.object(bot, "DIAGNOSTIC_MODE", True):
+            profiles = bot.build_public_tennis_profiles(matches)
+
+        darderi = profiles[bot.normalize_player_name("Darderi, Luciano")]
+        self.assertEqual(darderi["official_rank"], 28)
+        self.assertEqual(darderi["nationality"], "ITA")
+        self.assertGreater(darderi["elo"], 1500)
+        self.assertGreater(darderi["hard_elo"], 1500)
+        self.assertGreater(darderi["clay_elo"], 1500)
+        self.assertEqual(darderi["_source_method"], "public_csv_local_elo")
+
     def test_player_identity_alias_resolves_to_canonical_profile(self):
         profiles = {bot.normalize_player_name("Alexander Zverev"): {"name": "Alexander Zverev", "elo": 1900}}
         with tempfile.TemporaryDirectory() as directory:
