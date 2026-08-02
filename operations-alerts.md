@@ -1,11 +1,11 @@
 # Tennis Operations Count Health
 
-Date: `N/A`
+Date: `2026-08-02`
 
-- Active candidates: 0
+- Active candidates: 2
 - Authorized picks: 0
-- Rejections: 0
-- Rejection rate: N/A
+- Rejections: 2
+- Rejection rate: 100.0%
 - Historical days: 0 (minimum 7)
 
 ## COLLECTING BASELINE
