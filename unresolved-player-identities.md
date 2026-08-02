@@ -1,8 +1,8 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-02T19:23:33.447436+00:00
+Updated: 2026-08-02T20:18:45.242709+00:00
 
-- Pending: 37
+- Pending: 63
 - Overdue (at least 72 hours): 0
 - Approved/applied: 0
 - Rejected: 0
@@ -48,6 +48,32 @@ Updated: 2026-08-02T19:23:33.447436+00:00
 | Jeanjean, Leolia | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T19:23:30.110450+00:00 |
 | Jones, Emerson | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T19:23:30.111679+00:00 |
 | Tararudee, Lanlana | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T19:23:30.113003+00:00 |
+| Zheng, Michael | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.949541+00:00 |
+| Kecmanovic, Miomir | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.951167+00:00 |
+| Barsukov, Nikolai | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.952425+00:00 |
+| Petkovic, Mika | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.953583+00:00 |
+| Hurrion, Millen | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.954715+00:00 |
+| Hernandez, Alex | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.955795+00:00 |
+| Duckworth, James | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.956930+00:00 |
+| O'Connell, Christopher | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.958091+00:00 |
+| Zink, Tyler | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.959194+00:00 |
+| Kirchheimer, Strong | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.960376+00:00 |
+| Nakashima, Bryce Nakashima | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.961591+00:00 |
+| Rottgering, Mees | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.962725+00:00 |
+| Ito, Aoi | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.963859+00:00 |
+| Sebov, Katherine | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.964997+00:00 |
+| Sramkova, Rebecca | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.967135+00:00 |
+| Blinkova, Anna | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.968260+00:00 |
+| Van Assche, Luca | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.970372+00:00 |
+| Droguet, Titouan | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.971504+00:00 |
+| Shimabukuro, Sho | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.973193+00:00 |
+| Cilic, Marin | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.974292+00:00 |
+| Cham, Elijah | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.975972+00:00 |
+| Dong, Chen | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.977350+00:00 |
+| Diallo, Gabriel | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.978503+00:00 |
+| Jacquet, Kyrian | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.979686+00:00 |
+| Bonzi, Benjamin | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.981486+00:00 |
+| Hanfmann, Yannick | none | N/A | none | no_candidate | 0.0 d | 2026-08-02T20:18:39.982666+00:00 |
 
 ## Resolution procedure
 
