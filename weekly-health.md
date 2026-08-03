@@ -6,7 +6,7 @@ Counterfactual metrics show what happened to candidates rejected by each rule; t
 
 | Rejection rule | Decisions | Flat-unit ROI | Avg CLV | Brier |
 |---|---:|---:|---:|---:|
-| No settled rejected decisions | 0 | N/A | N/A | N/A |
+| match_started | 2 | -100.00% | N/A | N/A |
 
 ## Simultaneous threshold challengers
 
