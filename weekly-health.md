@@ -7,6 +7,7 @@ Counterfactual metrics show what happened to candidates rejected by each rule; t
 | Rejection rule | Decisions | Flat-unit ROI | Avg CLV | Brier |
 |---|---:|---:|---:|---:|
 | match_started | 2 | -100.00% | N/A | N/A |
+| uncertainty_adjusted_edge_too_low | 1 | 120.00% | N/A | 0.2663 |
 
 ## Simultaneous threshold challengers
 
@@ -14,4 +15,6 @@ Each challenger evaluated the same candidates in shadow mode and could not place
 
 | Policy | Decisions | Would authorize | Flat-unit ROI | Avg CLV | Brier |
 |---|---:|---:|---:|---:|---:|
-| No settled shadow policies | 0 | 0 | N/A | N/A | N/A |
+| threshold-conservative-v1 | 1 | 0 | 0.00% | N/A | N/A |
+| threshold-permissive-v1 | 1 | 1 | 120.00% | N/A | 0.2663 |
+| threshold-standard-v1 | 1 | 0 | 0.00% | N/A | N/A |

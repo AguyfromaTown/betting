@@ -1,12 +1,12 @@
 # Tennis Settlement Alerts
 
-Updated: 2026-08-03T17:23:44.201682+00:00
+Updated: 2026-08-03T19:03:37.894937+00:00
 Alert threshold: 48 hours after the match date ends.
 
 ## OVERDUE UNRESOLVED OUTCOMES
 
 | Mode | Date | Match | Bet | Age |
 |---|---|---|---|---:|
-| live | 2026-07-29 | Landaluce vs Zheng | Landaluce | 113h |
-| live | 2026-07-29 | Gea vs Kwon | Gea | 113h |
-| live | 2026-07-30 | Gea, Arthur vs Zheng, Michael (ATP - Los Cabos, Mexico) | Gea, Arthur to win | 89h |
+| live | 2026-07-29 | Landaluce vs Zheng | Landaluce | 115h |
+| live | 2026-07-29 | Gea vs Kwon | Gea | 115h |
+| live | 2026-07-30 | Gea, Arthur vs Zheng, Michael (ATP - Los Cabos, Mexico) | Gea, Arthur to win | 91h |

@@ -12,9 +12,12 @@ Recommendations are advisory and never alter live thresholds automatically.
 | Rule | Rejections | Flat-unit ROI | Avg CLV | Brier |
 |---|---:|---:|---:|---:|
 | match_started | 2 | -100.00% | N/A | N/A |
+| uncertainty_adjusted_edge_too_low | 1 | 120.00% | N/A | 0.2663 |
 
 ### Threshold challengers
 
 | Policy | Thresholds | Evaluated | Would authorize | ROI | Avg CLV | Brier | Recommendation |
 |---|---|---:|---:|---:|---:|---:|---|
-| No settled shadow policies | not recorded | 0 | 0 | N/A | N/A | N/A | collecting data |
+| threshold-conservative-v1 | movement<=0.060;dispersion<=0.080;quality>=7;risk_ev>0.070 | 1 | 0 | 0.00% | N/A | N/A | collecting data |
+| threshold-permissive-v1 | movement<=0.100;dispersion<=0.120;quality>=4;risk_ev>0.030 | 1 | 1 | 120.00% | N/A | 0.2663 | collecting data |
+| threshold-standard-v1 | movement<=0.100;dispersion<=0.120;quality>=5;risk_ev>0.050 | 1 | 0 | 0.00% | N/A | N/A | collecting data |
