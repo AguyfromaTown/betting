@@ -1,12 +1,12 @@
 # Tennis Operations Count Health
 
-Date: `2026-08-02`
+Date: `2026-08-03`
 
-- Active candidates: 5
-- Authorized picks: 1
-- Rejections: 4
-- Rejection rate: 80.0%
-- Historical days: 0 (minimum 7)
+- Active candidates: 3
+- Authorized picks: 0
+- Rejections: 3
+- Rejection rate: 100.0%
+- Historical days: 1 (minimum 7)
 
 ## COLLECTING BASELINE
 
@@ -16,7 +16,7 @@ No anomaly decision is made until enough prior active-policy days are available.
 
 | Metric | Median | MAD |
 |---|---:|---:|
-| Candidates | N/A | N/A |
-| Authorized picks | N/A | N/A |
-| Rejections | N/A | N/A |
-| Rejection rate | N/A | N/A |
+| Candidates | 5.0 | 0.0 |
+| Authorized picks | 1.0 | 0.0 |
+| Rejections | 4.0 | 0.0 |
+| Rejection rate | 80.0% | 0.0% |
