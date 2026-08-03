@@ -1,8 +1,8 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-03T12:15:36.408093+00:00
+Updated: 2026-08-03T14:16:25.256793+00:00
 
-- Pending: 64
+- Pending: 65
 - Overdue (at least 72 hours): 0
 - Approved/applied: 0
 - Rejected: 0
@@ -40,14 +40,14 @@ Updated: 2026-08-03T12:15:36.408093+00:00
 | Cocciaretto, Elisabetta | none | N/A | none | no_candidate | 1.8 d | 2026-08-01T17:56:25.326178+00:00 |
 | Putintseva, Yulia | none | N/A | none | no_candidate | 1.8 d | 2026-08-01T17:56:25.337792+00:00 |
 | Zhang, Shuai | none | N/A | none | no_candidate | 1.8 d | 2026-08-01T17:56:25.347040+00:00 |
-| Fucsovics, Marton | none | N/A | none | no_candidate | 0.9 d | 2026-08-02T14:25:38.114146+00:00 |
-| Moutet, Corentin | none | N/A | none | no_candidate | 0.9 d | 2026-08-02T14:25:38.115284+00:00 |
-| Rolland de Ravel, Cosme | none | N/A | none | no_candidate | 0.7 d | 2026-08-02T19:23:30.106361+00:00 |
-| Andreev, Adrian | none | N/A | none | no_candidate | 0.7 d | 2026-08-02T19:23:30.107828+00:00 |
-| Frech, Magdalena | none | N/A | none | no_candidate | 0.7 d | 2026-08-02T19:23:30.109130+00:00 |
-| Jeanjean, Leolia | none | N/A | none | no_candidate | 0.7 d | 2026-08-02T19:23:30.110450+00:00 |
-| Jones, Emerson | none | N/A | none | no_candidate | 0.7 d | 2026-08-02T19:23:30.111679+00:00 |
-| Tararudee, Lanlana | none | N/A | none | no_candidate | 0.7 d | 2026-08-02T19:23:30.113003+00:00 |
+| Fucsovics, Marton | none | N/A | none | no_candidate | 1.0 d | 2026-08-02T14:25:38.114146+00:00 |
+| Moutet, Corentin | none | N/A | none | no_candidate | 1.0 d | 2026-08-02T14:25:38.115284+00:00 |
+| Rolland de Ravel, Cosme | none | N/A | none | no_candidate | 0.8 d | 2026-08-02T19:23:30.106361+00:00 |
+| Andreev, Adrian | none | N/A | none | no_candidate | 0.8 d | 2026-08-02T19:23:30.107828+00:00 |
+| Frech, Magdalena | none | N/A | none | no_candidate | 0.8 d | 2026-08-02T19:23:30.109130+00:00 |
+| Jeanjean, Leolia | none | N/A | none | no_candidate | 0.8 d | 2026-08-02T19:23:30.110450+00:00 |
+| Jones, Emerson | none | N/A | none | no_candidate | 0.8 d | 2026-08-02T19:23:30.111679+00:00 |
+| Tararudee, Lanlana | none | N/A | none | no_candidate | 0.8 d | 2026-08-02T19:23:30.113003+00:00 |
 | Zheng, Michael | none | N/A | none | no_candidate | 0.7 d | 2026-08-02T20:18:39.949541+00:00 |
 | Kecmanovic, Miomir | none | N/A | none | no_candidate | 0.7 d | 2026-08-02T20:18:39.951167+00:00 |
 | Barsukov, Nikolai | none | N/A | none | no_candidate | 0.7 d | 2026-08-02T20:18:39.952425+00:00 |
@@ -74,7 +74,8 @@ Updated: 2026-08-03T12:15:36.408093+00:00
 | Jacquet, Kyrian | none | N/A | none | no_candidate | 0.7 d | 2026-08-02T20:18:39.979686+00:00 |
 | Bonzi, Benjamin | none | N/A | none | no_candidate | 0.7 d | 2026-08-02T20:18:39.981486+00:00 |
 | Hanfmann, Yannick | none | N/A | none | no_candidate | 0.7 d | 2026-08-02T20:18:39.982666+00:00 |
-| Shelbayh, Abdullah | Abedallah Shelbayh | 0.909 | none | low_confidence | 0.1 d | 2026-08-03T09:39:28.711625+00:00 |
+| Shelbayh, Abdullah | Abedallah Shelbayh | 0.909 | none | low_confidence | 0.2 d | 2026-08-03T09:39:28.711625+00:00 |
+| Schoeman, Marcus | none | N/A | none | no_candidate | 0.0 d | 2026-08-03T14:16:06.021959+00:00 |
 
 ## Resolution procedure
 
