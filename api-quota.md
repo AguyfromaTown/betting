@@ -1,6 +1,6 @@
 # API Quota and Rate-Limit Health
 
-Updated: 2026-08-02T23:30:06.674636+00:00
+Updated: 2026-08-03T01:06:55.635368+00:00
 
 Keys are represented only by their configured position; no credential values are stored.
 
