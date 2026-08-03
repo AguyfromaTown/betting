@@ -20,3 +20,4 @@ TIMESTAMP,QUOTE_TIMESTAMP,DATE,EVENT_ID,MATCH,PICK,ODDS,BOOKMAKERS,DISPERSION,SO
 2026-08-03T19:03:37.912652+00:00,,2026-08-03,73325192,"Valentova, Tereza vs Townsend, Taylor","Townsend, Taylor",2.750,2,0.056075,Unibet/Bet365,pending,0.000000,0.000000,,2,2026-08-03T19:03:37.912652+00:00,0.000,False
 2026-08-03T19:38:12.887690+00:00,,2026-08-03,73349582,"Demanet, Emilien vs Vasilev, Alexander","Vasilev, Alexander",2.375,2,0.151755,Unibet/Bet365,live,,,,1,2026-08-03T19:38:12.887690+00:00,0.000,False
 2026-08-03T19:38:12.887690+00:00,,2026-08-03,73325026,"Cerundolo, Juan Manuel vs Medjedovic, Hamad","Cerundolo, Juan Manuel",2.380,2,0.034188,Unibet/Bet365,pending,,,,1,2026-08-03T19:38:12.887690+00:00,0.000,False
+2026-08-03T20:42:16.562218+00:00,,2026-08-03,73325026,"Cerundolo, Juan Manuel vs Medjedovic, Hamad","Cerundolo, Juan Manuel",,0,,,,,,,1,2026-08-03T19:38:12.887690+00:00,64.061,True
