@@ -1,11 +1,11 @@
 {
-  "date": "2026-08-03",
-  "mode": "settlement",
+  "date": "2026-08-04",
+  "mode": "revalidation",
   "status": "complete",
   "phase": "complete",
-  "started_at": "2026-08-03T23:37:20.155197+00:00",
-  "updated_at": "2026-08-03T23:37:23.995074+00:00",
+  "started_at": "2026-08-04T01:52:30.513914+00:00",
+  "updated_at": "2026-08-04T01:52:35.750951+00:00",
   "attempt": 1,
   "recovered_from_phase": "",
-  "completed_at": "2026-08-03T23:37:23.995074+00:00"
+  "completed_at": "2026-08-04T01:52:35.750951+00:00"
 }
