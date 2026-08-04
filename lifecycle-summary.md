@@ -1,8 +1,7 @@
 # Tennis Bet Lifecycle
 
-Updated: 2026-08-04T15:20:23.938868+00:00
+Updated: 2026-08-04T17:11:16.972447+00:00
 
 | Match | Pick | Status | Reason | Final odds | Final EV |
 |---|---|---|---|---:|---:|
-| Samson, Laura vs Barthel, Mona | Samson, Laura | cancelled | match_started | — | — |
-| Carreno Busta, Pablo vs Royer, Valentin | Royer, Valentin | cancelled | uncertainty_adjusted_edge_too_low | — | — |
+| Cerundolo, Juan Manuel vs Medjedovic, Hamad | Cerundolo, Juan Manuel | authorized | pre_match_validated | 2.380 | 14.7% |
