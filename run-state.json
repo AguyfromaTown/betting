@@ -1,11 +1,11 @@
 {
   "date": "2026-08-04",
-  "mode": "revalidation",
+  "mode": "daily",
   "status": "complete",
-  "phase": "complete",
-  "started_at": "2026-08-04T20:49:18.470544+00:00",
-  "updated_at": "2026-08-04T20:49:26.246179+00:00",
+  "phase": "duplicate_safe_skip",
+  "started_at": "2026-08-04T21:20:44.777802+00:00",
+  "updated_at": "2026-08-04T21:20:52.466250+00:00",
   "attempt": 1,
   "recovered_from_phase": "",
-  "completed_at": "2026-08-04T20:49:26.246179+00:00"
+  "completed_at": "2026-08-04T21:20:52.466250+00:00"
 }
