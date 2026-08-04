@@ -1,11 +1,15 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-04T17:11:34.614682+00:00
+Updated: 2026-08-04T19:05:24.543684+00:00
 
 - Pending: 88
-- Overdue (at least 72 hours): 0
+- Overdue (at least 72 hours): 29
 - Approved/applied: 0
 - Rejected: 0
+
+## OVERDUE UNRESOLVED IDENTITIES
+
+These rows are old enough to require operator review before affected players can receive profile-backed analysis.
 
 ## Pending review queue
 
@@ -40,14 +44,14 @@ Updated: 2026-08-04T17:11:34.614682+00:00
 | Cocciaretto, Elisabetta | none | N/A | none | no_candidate | 3.0 d | 2026-08-01T17:56:25.326178+00:00 |
 | Putintseva, Yulia | none | N/A | none | no_candidate | 3.0 d | 2026-08-01T17:56:25.337792+00:00 |
 | Zhang, Shuai | none | N/A | none | no_candidate | 3.0 d | 2026-08-01T17:56:25.347040+00:00 |
-| Fucsovics, Marton | none | N/A | none | no_candidate | 2.1 d | 2026-08-02T14:25:38.114146+00:00 |
-| Moutet, Corentin | none | N/A | none | no_candidate | 2.1 d | 2026-08-02T14:25:38.115284+00:00 |
-| Rolland de Ravel, Cosme | none | N/A | none | no_candidate | 1.9 d | 2026-08-02T19:23:30.106361+00:00 |
-| Andreev, Adrian | none | N/A | none | no_candidate | 1.9 d | 2026-08-02T19:23:30.107828+00:00 |
-| Frech, Magdalena | none | N/A | none | no_candidate | 1.9 d | 2026-08-02T19:23:30.109130+00:00 |
-| Jeanjean, Leolia | none | N/A | none | no_candidate | 1.9 d | 2026-08-02T19:23:30.110450+00:00 |
-| Jones, Emerson | none | N/A | none | no_candidate | 1.9 d | 2026-08-02T19:23:30.111679+00:00 |
-| Tararudee, Lanlana | none | N/A | none | no_candidate | 1.9 d | 2026-08-02T19:23:30.113003+00:00 |
+| Fucsovics, Marton | none | N/A | none | no_candidate | 2.2 d | 2026-08-02T14:25:38.114146+00:00 |
+| Moutet, Corentin | none | N/A | none | no_candidate | 2.2 d | 2026-08-02T14:25:38.115284+00:00 |
+| Rolland de Ravel, Cosme | none | N/A | none | no_candidate | 2.0 d | 2026-08-02T19:23:30.106361+00:00 |
+| Andreev, Adrian | none | N/A | none | no_candidate | 2.0 d | 2026-08-02T19:23:30.107828+00:00 |
+| Frech, Magdalena | none | N/A | none | no_candidate | 2.0 d | 2026-08-02T19:23:30.109130+00:00 |
+| Jeanjean, Leolia | none | N/A | none | no_candidate | 2.0 d | 2026-08-02T19:23:30.110450+00:00 |
+| Jones, Emerson | none | N/A | none | no_candidate | 2.0 d | 2026-08-02T19:23:30.111679+00:00 |
+| Tararudee, Lanlana | none | N/A | none | no_candidate | 2.0 d | 2026-08-02T19:23:30.113003+00:00 |
 | Zheng, Michael | none | N/A | none | no_candidate | 1.9 d | 2026-08-02T20:18:39.949541+00:00 |
 | Kecmanovic, Miomir | none | N/A | none | no_candidate | 1.9 d | 2026-08-02T20:18:39.951167+00:00 |
 | Barsukov, Nikolai | none | N/A | none | no_candidate | 1.9 d | 2026-08-02T20:18:39.952425+00:00 |
@@ -74,8 +78,8 @@ Updated: 2026-08-04T17:11:34.614682+00:00
 | Jacquet, Kyrian | none | N/A | none | no_candidate | 1.9 d | 2026-08-02T20:18:39.979686+00:00 |
 | Bonzi, Benjamin | none | N/A | none | no_candidate | 1.9 d | 2026-08-02T20:18:39.981486+00:00 |
 | Hanfmann, Yannick | none | N/A | none | no_candidate | 1.9 d | 2026-08-02T20:18:39.982666+00:00 |
-| Shelbayh, Abdullah | Abedallah Shelbayh | 0.909 | none | low_confidence | 1.3 d | 2026-08-03T09:39:28.711625+00:00 |
-| Schoeman, Marcus | none | N/A | none | no_candidate | 1.1 d | 2026-08-03T14:16:06.021959+00:00 |
+| Shelbayh, Abdullah | Abedallah Shelbayh | 0.909 | none | low_confidence | 1.4 d | 2026-08-03T09:39:28.711625+00:00 |
+| Schoeman, Marcus | none | N/A | none | no_candidate | 1.2 d | 2026-08-03T14:16:06.021959+00:00 |
 | Filip Poklemba | none | N/A | none | no_candidate | 0.4 d | 2026-08-04T08:32:51.136473+00:00 |
 | Nikita Mashtakov | Mykyta Mashtakov | 0.800 | none | low_confidence | 0.4 d | 2026-08-04T08:32:51.351478+00:00 |
 | Sebastian Sec | Sebastian Eie | 0.833 | Sebastian Sorger (0.815); Sebastian Baez (0.800) | low_confidence | 0.4 d | 2026-08-04T08:32:51.551672+00:00 |
@@ -97,8 +101,8 @@ Updated: 2026-08-04T17:11:34.614682+00:00
 | Weir, Lexie | none | N/A | none | no_candidate | 0.4 d | 2026-08-04T08:32:55.167792+00:00 |
 | Patrick, Nicholas | Nicolas Parizzia | 0.733 | Nicholas Godsick (0.733) | low_confidence | 0.4 d | 2026-08-04T08:32:55.386666+00:00 |
 | McGloughlin, James | none | N/A | none | no_candidate | 0.4 d | 2026-08-04T08:32:55.621425+00:00 |
-| Alafia Ayeni | none | N/A | none | no_candidate | 0.1 d | 2026-08-04T13:48:01.186671+00:00 |
-| Barrera, Gabriella | Gabriella Price | 0.733 | none | low_confidence | 0.1 d | 2026-08-04T13:48:03.984448+00:00 |
+| Alafia Ayeni | none | N/A | none | no_candidate | 0.2 d | 2026-08-04T13:48:01.186671+00:00 |
+| Barrera, Gabriella | Gabriella Price | 0.733 | none | low_confidence | 0.2 d | 2026-08-04T13:48:03.984448+00:00 |
 
 ## Resolution procedure
 
