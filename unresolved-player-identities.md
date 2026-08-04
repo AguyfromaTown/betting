@@ -1,8 +1,8 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-04T07:40:46.054756+00:00
+Updated: 2026-08-04T08:34:07.038749+00:00
 
-- Pending: 65
+- Pending: 86
 - Overdue (at least 72 hours): 0
 - Approved/applied: 0
 - Rejected: 0
@@ -40,8 +40,8 @@ Updated: 2026-08-04T07:40:46.054756+00:00
 | Cocciaretto, Elisabetta | none | N/A | none | no_candidate | 2.6 d | 2026-08-01T17:56:25.326178+00:00 |
 | Putintseva, Yulia | none | N/A | none | no_candidate | 2.6 d | 2026-08-01T17:56:25.337792+00:00 |
 | Zhang, Shuai | none | N/A | none | no_candidate | 2.6 d | 2026-08-01T17:56:25.347040+00:00 |
-| Fucsovics, Marton | none | N/A | none | no_candidate | 1.7 d | 2026-08-02T14:25:38.114146+00:00 |
-| Moutet, Corentin | none | N/A | none | no_candidate | 1.7 d | 2026-08-02T14:25:38.115284+00:00 |
+| Fucsovics, Marton | none | N/A | none | no_candidate | 1.8 d | 2026-08-02T14:25:38.114146+00:00 |
+| Moutet, Corentin | none | N/A | none | no_candidate | 1.8 d | 2026-08-02T14:25:38.115284+00:00 |
 | Rolland de Ravel, Cosme | none | N/A | none | no_candidate | 1.5 d | 2026-08-02T19:23:30.106361+00:00 |
 | Andreev, Adrian | none | N/A | none | no_candidate | 1.5 d | 2026-08-02T19:23:30.107828+00:00 |
 | Frech, Magdalena | none | N/A | none | no_candidate | 1.5 d | 2026-08-02T19:23:30.109130+00:00 |
@@ -74,8 +74,29 @@ Updated: 2026-08-04T07:40:46.054756+00:00
 | Jacquet, Kyrian | none | N/A | none | no_candidate | 1.5 d | 2026-08-02T20:18:39.979686+00:00 |
 | Bonzi, Benjamin | none | N/A | none | no_candidate | 1.5 d | 2026-08-02T20:18:39.981486+00:00 |
 | Hanfmann, Yannick | none | N/A | none | no_candidate | 1.5 d | 2026-08-02T20:18:39.982666+00:00 |
-| Shelbayh, Abdullah | Abedallah Shelbayh | 0.909 | none | low_confidence | 0.9 d | 2026-08-03T09:39:28.711625+00:00 |
-| Schoeman, Marcus | none | N/A | none | no_candidate | 0.7 d | 2026-08-03T14:16:06.021959+00:00 |
+| Shelbayh, Abdullah | Abedallah Shelbayh | 0.909 | none | low_confidence | 1.0 d | 2026-08-03T09:39:28.711625+00:00 |
+| Schoeman, Marcus | none | N/A | none | no_candidate | 0.8 d | 2026-08-03T14:16:06.021959+00:00 |
+| Filip Poklemba | none | N/A | none | no_candidate | 0.0 d | 2026-08-04T08:32:51.136473+00:00 |
+| Nikita Mashtakov | Mykyta Mashtakov | 0.800 | none | low_confidence | 0.0 d | 2026-08-04T08:32:51.351478+00:00 |
+| Sebastian Sec | Sebastian Eie | 0.833 | Sebastian Sorger (0.815); Sebastian Baez (0.800) | low_confidence | 0.0 d | 2026-08-04T08:32:51.551672+00:00 |
+| Dominik Macej | Dominik Recek | 0.750 | none | low_confidence | 0.0 d | 2026-08-04T08:32:51.739671+00:00 |
+| Max Frohlich | none | N/A | none | no_candidate | 0.0 d | 2026-08-04T08:32:51.921878+00:00 |
+| Oliver Page | Oliver Tarvet | 0.727 | none | low_confidence | 0.0 d | 2026-08-04T08:32:52.098166+00:00 |
+| Knutson, Gabriela | Gabriela Andrea Knutson | 0.833 | Gabriel Evans (0.741) | low_confidence | 0.0 d | 2026-08-04T08:32:52.337962+00:00 |
+| Alexandrescou, Yannick Theodor | Yannick Alexandrescou | 0.851 | none | low_confidence | 0.0 d | 2026-08-04T08:32:52.654905+00:00 |
+| Dellien, Murkel | none | N/A | none | no_candidate | 0.0 d | 2026-08-04T08:32:52.852754+00:00 |
+| Nesterov, Pyotr | Petr Nesterov | 0.880 | none | low_confidence | 0.0 d | 2026-08-04T08:32:53.278825+00:00 |
+| Damm Jr, Martin | Martin Damm | 0.909 | Martina Marica (0.720) | low_confidence | 0.0 d | 2026-08-04T08:32:53.474192+00:00 |
+| Schafer, Brooke Lynn | none | N/A | none | no_candidate | 0.0 d | 2026-08-04T08:32:53.704730+00:00 |
+| Deem, AJ | none | N/A | none | no_candidate | 0.0 d | 2026-08-04T08:32:53.838326+00:00 |
+| Antonia Rivera | Antonia Vergara Rivera | 0.788 | Daniela Rivera (0.769); Antoni Fabre (0.750) | low_confidence | 0.0 d | 2026-08-04T08:32:54.249915+00:00 |
+| Moore, Emmie | none | N/A | none | no_candidate | 0.0 d | 2026-08-04T08:32:54.422887+00:00 |
+| Aronson, Stewart | none | N/A | none | no_candidate | 0.0 d | 2026-08-04T08:32:54.641629+00:00 |
+| Hilsen, Blake | none | N/A | none | no_candidate | 0.0 d | 2026-08-04T08:32:54.834416+00:00 |
+| Friend, Jay | none | N/A | none | no_candidate | 0.0 d | 2026-08-04T08:32:55.008922+00:00 |
+| Weir, Lexie | none | N/A | none | no_candidate | 0.0 d | 2026-08-04T08:32:55.167792+00:00 |
+| Patrick, Nicholas | Nicolas Parizzia | 0.733 | Nicholas Godsick (0.733) | low_confidence | 0.0 d | 2026-08-04T08:32:55.386666+00:00 |
+| McGloughlin, James | none | N/A | none | no_candidate | 0.0 d | 2026-08-04T08:32:55.621425+00:00 |
 
 ## Resolution procedure
 
