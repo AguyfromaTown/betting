@@ -17,6 +17,6 @@ Each challenger evaluated the same candidates in shadow mode and could not place
 
 | Policy | Decisions | Would authorize | Flat-unit ROI | Avg CLV | Brier |
 |---|---:|---:|---:|---:|---:|
-| threshold-conservative-v1 | 5 | 2 | 175.00% | 166.99% | 0.3136 |
-| threshold-permissive-v1 | 5 | 3 | 156.67% | 166.99% | 0.2978 |
-| threshold-standard-v1 | 5 | 2 | 175.00% | 166.99% | 0.3136 |
+| threshold-conservative-v1 | 6 | 2 | 175.00% | 166.99% | 0.3136 |
+| threshold-permissive-v1 | 6 | 4 | 92.50% | 166.99% | 0.2959 |
+| threshold-standard-v1 | 6 | 3 | 83.33% | 166.99% | 0.3058 |
