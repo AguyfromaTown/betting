@@ -1,7 +1,9 @@
 # Tennis Bet Lifecycle
 
-Updated: 2026-08-04T19:05:24.028663+00:00
+Updated: 2026-08-04T20:49:26.136262+00:00
 
 | Match | Pick | Status | Reason | Final odds | Final EV |
 |---|---|---|---|---:|---:|
-| Mario Gonzalez Fernandez vs Pavel Lagutin | Mario Gonzalez Fernandez | cancelled | match_started | — | — |
+| Zhang, Shuai vs Ostapenko, Jelena | Zhang, Shuai | cancelled | match_started | — | — |
+| Pedro Sakamoto vs Gustavo Ribeiro De Almeida | Pedro Sakamoto | cancelled | match_started | — | — |
+| Boscardin Dias, Pedro vs Pieri, Samuele | Boscardin Dias, Pedro | cancelled | match_started | — | — |
