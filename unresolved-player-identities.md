@@ -1,8 +1,8 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-04T21:20:52.464815+00:00
+Updated: 2026-08-04T21:23:14.905745+00:00
 
-- Pending: 88
+- Pending: 93
 - Overdue (at least 72 hours): 29
 - Approved/applied: 0
 - Rejected: 0
@@ -103,6 +103,11 @@ These rows are old enough to require operator review before affected players can
 | McGloughlin, James | none | N/A | none | no_candidate | 0.5 d | 2026-08-04T08:32:55.621425+00:00 |
 | Alafia Ayeni | none | N/A | none | no_candidate | 0.3 d | 2026-08-04T13:48:01.186671+00:00 |
 | Barrera, Gabriella | Gabriella Price | 0.733 | none | low_confidence | 0.3 d | 2026-08-04T13:48:03.984448+00:00 |
+| Francesca Pace | Francesca Jones | 0.741 | none | low_confidence | 0.0 d | 2026-08-04T21:23:03.294150+00:00 |
+| Margaux Maquet | none | N/A | none | no_candidate | 0.0 d | 2026-08-04T21:23:03.336433+00:00 |
+| Maxwell Exsted | none | N/A | none | no_candidate | 0.0 d | 2026-08-04T21:23:03.377214+00:00 |
+| Frey, Charles | Charles Chen | 0.727 | none | low_confidence | 0.0 d | 2026-08-04T21:23:03.415261+00:00 |
+| Kennedy, Thomas | none | N/A | none | no_candidate | 0.0 d | 2026-08-04T21:23:03.457687+00:00 |
 
 ## Resolution procedure
 

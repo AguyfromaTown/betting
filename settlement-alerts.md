@@ -1,6 +1,6 @@
 # Tennis Settlement Alerts
 
-Updated: 2026-08-04T21:20:52.438641+00:00
+Updated: 2026-08-04T21:22:44.233763+00:00
 Alert threshold: 48 hours after the match date ends.
 
 ## OVERDUE UNRESOLVED OUTCOMES
