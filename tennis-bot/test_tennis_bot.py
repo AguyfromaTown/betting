@@ -775,6 +775,18 @@ class TennisBotTests(unittest.TestCase):
             self.assertFalse(bot.SOURCE_HEALTH[-1]["stale"])
             bot.SOURCE_HEALTH.clear()
 
+    def test_external_cache_preserves_parallel_source_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "external-cache.json"
+            with patch.object(bot, "EXTERNAL_CACHE_FILE", cache):
+                with bot.ThreadPoolExecutor(max_workers=6) as executor:
+                    list(executor.map(
+                        lambda index: bot.cache_external_response("direct", f"https://source.test/{index}", str(index)),
+                        range(12),
+                    ))
+                payload = bot.load_external_cache()
+        self.assertEqual(len(payload["entries"]), 12)
+
     def test_stale_external_cache_is_used_only_after_provider_failure(self):
         bot.SOURCE_HEALTH.clear()
         with tempfile.TemporaryDirectory() as directory:
@@ -1631,7 +1643,7 @@ class TennisBotTests(unittest.TestCase):
                     "start_time": "2026-08-02T12:00:00+00:00"}]
 
         def public_fetch(url, **_kwargs):
-            return csv_text if url.endswith("atp_matches_2026.csv") else None
+            return csv_text if url.endswith("/2026.csv") else None
 
         with patch.object(bot, "fetch", side_effect=public_fetch), patch.object(bot, "DIAGNOSTIC_MODE", True):
             profiles = bot.build_public_tennis_profiles(matches)
@@ -1643,6 +1655,18 @@ class TennisBotTests(unittest.TestCase):
         self.assertGreater(darderi["hard_elo"], 1500)
         self.assertGreater(darderi["clay_elo"], 1500)
         self.assertEqual(darderi["_source_method"], "public_csv_local_elo")
+
+    def test_infotennis_catalog_replaces_static_archive_and_covers_both_tours(self):
+        sources = bot.infotennis_season_sources(2026, history_years=2)
+        urls = [url for _tour, _year, url in sources]
+        tours = {tour for tour, _year, _url in sources}
+        self.assertEqual(tours, {"ATP", "WTA"})
+        self.assertTrue(any(url.endswith("2026.csv") for url in urls))
+        self.assertTrue(any(url.endswith("2026_challenger.csv") for url in urls))
+        self.assertTrue(any(url.endswith("2026_wta.csv") for url in urls))
+        self.assertTrue(any("atp_quali/2026_atp_quali.csv" in url for url in urls))
+        self.assertTrue(any("ongoing_tourneys.csv" in url for url in urls))
+        self.assertFalse(any("tennis-sackmann-archive" in url for url in urls))
 
     def test_player_identity_alias_resolves_to_canonical_profile(self):
         profiles = {bot.normalize_player_name("Alexander Zverev"): {"name": "Alexander Zverev", "elo": 1900}}

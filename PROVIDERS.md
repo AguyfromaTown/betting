@@ -4,14 +4,14 @@ This document is the authoritative inventory of external and operator-maintained
 
 ## Public ATP/WTA profile and rating data
 
-Player profiles now come primarily from the maintained
-`Aneeshers/tennis-sackmann-archive` mirror of Jeff Sackmann's ATP/WTA datasets.
-The bot covers main tours, qualifying, Challengers, Futures and ITF, downloads
-three seasons at most once per 12-hour cache window, and calculates overall,
-hard, clay and grass Elo locally using only matches before the decision date.
-Tennis Abstract's protected leaderboard pages are an emergency fallback only.
-This avoids HTTP 403 failures and follows the original datasets' CC BY-NC-SA
-4.0 attribution, non-commercial and share-alike terms.
+Player profiles now come primarily through the bundled Infotennis collector,
+which catalogs TennisMyLife's free, MIT-licensed and daily-updated ATP/WTA CSV
+feeds. The bot covers main tours, qualifying, Challengers and ongoing events,
+downloads three seasons at most once per 12-hour cache window, and calculates
+overall, hard, clay and grass Elo locally using only matches before the decision
+date. The former static Sackmann archive is no longer queried. Tennis Abstract's
+protected leaderboard pages remain an emergency fallback only when every live
+CSV source is unavailable.
 
 ## Contract rules shared by network providers
 

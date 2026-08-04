@@ -19,6 +19,7 @@ import smtplib
 import statistics
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
 import zlib
@@ -35,6 +36,13 @@ from bs4 import BeautifulSoup
 from dateutil import tz as dateutil_tz
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+INFOTENNIS_ROOT = REPO_ROOT / "infotennis-main" / "infotennis-main"
+if INFOTENNIS_ROOT.exists() and str(INFOTENNIS_ROOT) not in sys.path:
+    sys.path.insert(0, str(INFOTENNIS_ROOT))
+try:
+    from infotennis.scrapers.public_data import season_sources as infotennis_season_sources
+except ImportError:
+    infotennis_season_sources = None
 BANKROLL_FILE = REPO_ROOT / "bankroll.txt"
 LOG_FILE = REPO_ROOT / "bets-log.csv"
 PAPER_LOG_FILE = REPO_ROOT / "paper-bets-log.csv"
@@ -52,6 +60,7 @@ SCHEMA_ALERT_FILE = REPO_ROOT / "provider-schema-alerts.md"
 MANUAL_KILL_SWITCH_FILE = REPO_ROOT / "kill-switch.json"
 RISK_CONFIG_FILE = REPO_ROOT / "risk-config.json"
 EXTERNAL_CACHE_FILE = REPO_ROOT / "external-cache.json"
+EXTERNAL_CACHE_LOCK = threading.RLock()
 PREDICTION_SNAPSHOTS_DIR = REPO_ROOT / "prediction-snapshots"
 BACKTEST_FILE = REPO_ROOT / "backtest-summary.md"
 PLAYER_ALIASES_FILE = REPO_ROOT / "player-aliases.csv"
@@ -550,16 +559,17 @@ def cache_external_response(namespace: str, url: str, content: str):
     raw = content.encode("utf-8")
     if not raw or len(raw) > MAX_CACHE_ENTRY_BYTES:
         return
-    payload = load_external_cache()
-    entries = payload["entries"]
-    key = external_cache_key(namespace, url)
-    entries[key] = {"namespace": namespace, "url": url, "cached_at": time.time(),
-                    "content": base64.b64encode(zlib.compress(raw, 9)).decode("ascii")}
-    if len(entries) > MAX_CACHE_ENTRIES:
-        oldest = sorted(entries, key=lambda item: float(entries[item].get("cached_at", 0)))
-        for stale_key in oldest[:len(entries) - MAX_CACHE_ENTRIES]:
-            entries.pop(stale_key, None)
-    atomic_write_text(EXTERNAL_CACHE_FILE, json.dumps(payload, separators=(",", ":")) + "\n")
+    with EXTERNAL_CACHE_LOCK:
+        payload = load_external_cache()
+        entries = payload["entries"]
+        key = external_cache_key(namespace, url)
+        entries[key] = {"namespace": namespace, "url": url, "cached_at": time.time(),
+                        "content": base64.b64encode(zlib.compress(raw, 9)).decode("ascii")}
+        if len(entries) > MAX_CACHE_ENTRIES:
+            oldest = sorted(entries, key=lambda item: float(entries[item].get("cached_at", 0)))
+            for stale_key in oldest[:len(entries) - MAX_CACHE_ENTRIES]:
+                entries.pop(stale_key, None)
+        atomic_write_text(EXTERNAL_CACHE_FILE, json.dumps(payload, separators=(",", ":")) + "\n")
 
 
 def atomic_write_text(path: Path, content: str, encoding: str = "utf-8"):
@@ -2466,17 +2476,10 @@ def build_public_tennis_profiles(matches: list[dict]) -> dict[str, dict]:
     valid_dates = [value for value in decision_dates if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value)]
     cutoff = max(valid_dates) if valid_dates else datetime.now(timezone.utc).strftime("%Y-%m-%d")
     year = int(cutoff[:4])
-    archive_root = "https://raw.githubusercontent.com/Aneeshers/tennis-sackmann-archive/main"
-    source_families = {
-        "ATP": ("atp_matches", "atp_matches_qual_chall", "atp_matches_futures"),
-        "WTA": ("wta_matches", "wta_matches_qual_itf"),
-    }
-    sources = [
-        (tour, season, f"{archive_root}/{tour.lower()}/{family}_{season}.csv")
-        for tour, families in source_families.items()
-        for season in range(year - 2, year + 1)
-        for family in families
-    ]
+    if infotennis_season_sources is None:
+        log("  Infotennis public-data collector unavailable")
+        return {}
+    sources = infotennis_season_sources(year, history_years=3)
     downloaded = []
     with ThreadPoolExecutor(max_workers=6) as executor:
         texts = list(executor.map(lambda item: fetch(item[2], cache_ttl=43_200, stale_if_error=604_800), sources))
@@ -3272,11 +3275,10 @@ def calculate_workload(history: list[dict], player: str, as_of: str, current_tou
 def fetch_recent_match_history(matches: list[dict], date_str: str) -> list[dict]:
     """Download compact current/previous season histories without paid API calls."""
     year = int(date_str[:4])
-    urls = [
-        f"https://raw.githubusercontent.com/Tennismylife/TML-Database/master/{year - 1}.csv",
-        f"https://raw.githubusercontent.com/Tennismylife/TML-Database/master/{year}.csv",
-        "https://raw.githubusercontent.com/36-SURE/2026/main/data/wta_matches_2021_2026.csv",
-    ]
+    if infotennis_season_sources is None:
+        log("  Infotennis public-data collector unavailable for recent form")
+        return []
+    urls = [item[2] for item in infotennis_season_sources(year, history_years=2)]
     history = []
     with ThreadPoolExecutor(max_workers=4) as executor:
         for url, text in zip(urls, executor.map(fetch, urls)):

@@ -1,5 +1,6 @@
 # Changelog
 
+- The uploaded Infotennis package is now the primary ATP/WTA player-data collector. Its new GitHub-compatible path uses daily-updated TennisMyLife main-tour, Challenger, qualifying and ongoing CSV feeds without Selenium or MySQL; the static Sackmann archive is no longer queried.
 - Tennis profiles and overall/surface Elo ratings now come primarily from a maintained archive of public ATP/WTA main-tour, qualifying, Challenger, Futures and ITF season CSVs and are calculated locally without future-match leakage. The HTTP-403-prone Tennis Abstract webpage is retained only as an emergency fallback.
 - Tennis discovery now defaults to decimal odds 1.50-3.00 in both scheduled/manual GitHub runs and direct command-line runs.
 - Stale tennis quote timestamps are no longer an automatic cancellation when the fresh revalidation response contains at least two bookmakers whose selected-player prices agree within 5%. The existing snapshot is reused, so the check adds no normal API calls; stale single-source or conflicting markets remain blocked.
