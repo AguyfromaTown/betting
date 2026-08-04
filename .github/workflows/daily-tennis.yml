@@ -29,6 +29,11 @@ on:
         required: false
         type: boolean
         default: false
+      force:
+        description: 'Run a fresh same-day discovery scan (existing picks remain deduplicated)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -116,6 +121,9 @@ jobs:
           fi
           if [ "${{ github.event.inputs.paper_trading }}" = "true" ]; then
             ARGS="$ARGS --paper-trading"
+          fi
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            ARGS="$ARGS --force"
           fi
           if [ "${{ github.event_name }}" = "schedule" ]; then
             ARGS="$ARGS --force"

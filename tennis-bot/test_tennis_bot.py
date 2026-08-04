@@ -1311,6 +1311,7 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("default: '3.00'", workflow)
         self.assertIn("github.event.inputs.odds_min || '1.50'", workflow)
         self.assertIn("github.event.inputs.odds_max || '3.00'", workflow)
+        self.assertIn('github.event.inputs.force', workflow)
 
     def test_paper_bet_log_is_isolated_from_real_bankroll_and_ledger(self):
         with tempfile.TemporaryDirectory() as directory:
