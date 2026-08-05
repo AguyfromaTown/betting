@@ -1,6 +1,6 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-05T04:59:55.530714+00:00
+Updated: 2026-08-05T05:30:51.124580+00:00
 
 - Pending: 93
 - Overdue (at least 72 hours): 29
@@ -101,8 +101,8 @@ These rows are old enough to require operator review before affected players can
 | Weir, Lexie | none | N/A | none | no_candidate | 0.9 d | 2026-08-04T08:32:55.167792+00:00 |
 | Patrick, Nicholas | Nicolas Parizzia | 0.733 | Nicholas Godsick (0.733) | low_confidence | 0.9 d | 2026-08-04T08:32:55.386666+00:00 |
 | McGloughlin, James | none | N/A | none | no_candidate | 0.9 d | 2026-08-04T08:32:55.621425+00:00 |
-| Alafia Ayeni | none | N/A | none | no_candidate | 0.6 d | 2026-08-04T13:48:01.186671+00:00 |
-| Barrera, Gabriella | Gabriella Price | 0.733 | none | low_confidence | 0.6 d | 2026-08-04T13:48:03.984448+00:00 |
+| Alafia Ayeni | none | N/A | none | no_candidate | 0.7 d | 2026-08-04T13:48:01.186671+00:00 |
+| Barrera, Gabriella | Gabriella Price | 0.733 | none | low_confidence | 0.7 d | 2026-08-04T13:48:03.984448+00:00 |
 | Francesca Pace | Francesca Jones | 0.741 | none | low_confidence | 0.3 d | 2026-08-04T21:23:03.294150+00:00 |
 | Margaux Maquet | none | N/A | none | no_candidate | 0.3 d | 2026-08-04T21:23:03.336433+00:00 |
 | Maxwell Exsted | none | N/A | none | no_candidate | 0.3 d | 2026-08-04T21:23:03.377214+00:00 |
