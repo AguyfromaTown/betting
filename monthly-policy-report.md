@@ -13,6 +13,7 @@ Recommendations are advisory and never alter live thresholds automatically.
 |---|---:|---:|---:|---:|
 | insufficient_bookmakers | 1 | -100.00% | N/A | 0.1875 |
 | match_started | 11 | -100.00% | N/A | N/A |
+| model_disagreement | 1 | -100.00% | N/A | 0.2083 |
 | stale_price | 5 | -100.00% | N/A | N/A |
 | uncertainty_adjusted_edge_too_low | 2 | 157.50% | 194.41% | 0.3349 |
 
@@ -20,6 +21,6 @@ Recommendations are advisory and never alter live thresholds automatically.
 
 | Policy | Thresholds | Evaluated | Would authorize | ROI | Avg CLV | Brier | Recommendation |
 |---|---|---:|---:|---:|---:|---:|---|
-| threshold-conservative-v1 | movement<=0.060;dispersion<=0.080;quality>=7;risk_ev>0.070 | 13 | 3 | 162.67% | 166.99% | 0.2986 | collecting data |
-| threshold-permissive-v1 | movement<=0.100;dispersion<=0.120;quality>=4;risk_ev>0.030 | 13 | 6 | 68.00% | 166.99% | 0.2747 | collecting data |
-| threshold-standard-v1 | movement<=0.100;dispersion<=0.120;quality>=5;risk_ev>0.050 | 13 | 5 | 57.60% | 166.99% | 0.2764 | collecting data |
+| threshold-conservative-v1 | movement<=0.060;dispersion<=0.080;quality>=7;risk_ev>0.070 | 14 | 3 | 162.67% | 166.99% | 0.2986 | collecting data |
+| threshold-permissive-v1 | movement<=0.100;dispersion<=0.120;quality>=4;risk_ev>0.030 | 14 | 6 | 68.00% | 166.99% | 0.2747 | collecting data |
+| threshold-standard-v1 | movement<=0.100;dispersion<=0.120;quality>=5;risk_ev>0.050 | 14 | 5 | 57.60% | 166.99% | 0.2764 | collecting data |
