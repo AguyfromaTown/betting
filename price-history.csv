@@ -35,3 +35,6 @@ TIMESTAMP,QUOTE_TIMESTAMP,DATE,EVENT_ID,MATCH,PICK,ODDS,BOOKMAKERS,DISPERSION,SO
 2026-08-04T21:23:14.458553+00:00,,2026-08-04,73255952,"Rakhimova, Kamilla vs Siniakova, Katerina","Rakhimova, Kamilla",2.620,1,0.000000,Bet365,pending,,,,1,2026-08-04T21:23:14.458553+00:00,0.000,False
 2026-08-04T21:23:14.458553+00:00,,2026-08-04,73255930,"Tauson, Clara vs Bartunkova, Nikola","Bartunkova, Nikola",2.000,2,0.015113,Unibet/Bet365,pending,,,,1,2026-08-04T21:23:14.458553+00:00,0.000,False
 2026-08-04T23:31:17.244029+00:00,,2026-08-04,73255930,"Tauson, Clara vs Bartunkova, Nikola","Bartunkova, Nikola",,0,,,,,,,1,2026-08-04T21:23:14.458553+00:00,128.046,True
+2026-08-05T08:32:51.222462+00:00,,2026-08-05,73252836,"Marozsan, Fabian vs Arnaldi, Matteo","Arnaldi, Matteo",2.300,2,0.000000,Unibet/Bet365,pending,,,,1,2026-08-05T08:32:51.222462+00:00,0.000,False
+2026-08-05T08:32:51.222462+00:00,,2026-08-05,73255244,"Simakin, Ilia vs Sun, Fajing","Sun, Fajing",2.620,2,0.046875,Unibet/Bet365,pending,,,,1,2026-08-05T08:32:51.222462+00:00,0.000,False
+2026-08-05T08:32:51.222462+00:00,,2026-08-05,73256332,"Lee, Carol Young Suh vs Falei, Aliona","Falei, Aliona",2.620,2,0.108652,Unibet/Bet365,pending,,,,1,2026-08-05T08:32:51.222462+00:00,0.000,False
