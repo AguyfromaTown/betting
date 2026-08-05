@@ -1,7 +1,7 @@
 # Tennis Bet Lifecycle
 
-Updated: 2026-08-05T14:44:53.878476+00:00
+Updated: 2026-08-05T16:28:13.362436+00:00
 
 | Match | Pick | Status | Reason | Final odds | Final EV |
 |---|---|---|---|---:|---:|
-| — | — | waiting | No candidates were ready in this run | — | — |
+| Buse, Ignacio vs Norrie, Cameron | Buse, Ignacio | cancelled | model_disagreement | — | — |
