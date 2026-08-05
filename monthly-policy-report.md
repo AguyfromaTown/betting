@@ -12,7 +12,7 @@ Recommendations are advisory and never alter live thresholds automatically.
 | Rule | Rejections | Flat-unit ROI | Avg CLV | Brier |
 |---|---:|---:|---:|---:|
 | insufficient_bookmakers | 1 | -100.00% | N/A | 0.1875 |
-| match_started | 9 | -100.00% | N/A | N/A |
+| match_started | 10 | -100.00% | N/A | N/A |
 | stale_price | 4 | -100.00% | N/A | N/A |
 | uncertainty_adjusted_edge_too_low | 2 | 157.50% | 194.41% | 0.3349 |
 
