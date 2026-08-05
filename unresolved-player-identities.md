@@ -1,6 +1,6 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-05T14:44:54.524793+00:00
+Updated: 2026-08-05T16:16:12.062080+00:00
 
 - Pending: 216
 - Overdue (at least 72 hours): 31
@@ -44,14 +44,14 @@ These rows are old enough to require operator review before affected players can
 | Cocciaretto, Elisabetta | none | N/A | none | no_candidate | 3.9 d | 2026-08-01T17:56:25.326178+00:00 |
 | Putintseva, Yulia | none | N/A | none | no_candidate | 3.9 d | 2026-08-01T17:56:25.337792+00:00 |
 | Zhang, Shuai | none | N/A | none | no_candidate | 3.9 d | 2026-08-01T17:56:25.347040+00:00 |
-| Fucsovics, Marton | none | N/A | none | no_candidate | 3.0 d | 2026-08-02T14:25:38.114146+00:00 |
-| Moutet, Corentin | none | N/A | none | no_candidate | 3.0 d | 2026-08-02T14:25:38.115284+00:00 |
-| Rolland de Ravel, Cosme | none | N/A | none | no_candidate | 2.8 d | 2026-08-02T19:23:30.106361+00:00 |
-| Andreev, Adrian | none | N/A | none | no_candidate | 2.8 d | 2026-08-02T19:23:30.107828+00:00 |
-| Frech, Magdalena | none | N/A | none | no_candidate | 2.8 d | 2026-08-02T19:23:30.109130+00:00 |
-| Jeanjean, Leolia | none | N/A | none | no_candidate | 2.8 d | 2026-08-02T19:23:30.110450+00:00 |
-| Jones, Emerson | none | N/A | none | no_candidate | 2.8 d | 2026-08-02T19:23:30.111679+00:00 |
-| Tararudee, Lanlana | none | N/A | none | no_candidate | 2.8 d | 2026-08-02T19:23:30.113003+00:00 |
+| Fucsovics, Marton | none | N/A | none | no_candidate | 3.1 d | 2026-08-02T14:25:38.114146+00:00 |
+| Moutet, Corentin | none | N/A | none | no_candidate | 3.1 d | 2026-08-02T14:25:38.115284+00:00 |
+| Rolland de Ravel, Cosme | none | N/A | none | no_candidate | 2.9 d | 2026-08-02T19:23:30.106361+00:00 |
+| Andreev, Adrian | none | N/A | none | no_candidate | 2.9 d | 2026-08-02T19:23:30.107828+00:00 |
+| Frech, Magdalena | none | N/A | none | no_candidate | 2.9 d | 2026-08-02T19:23:30.109130+00:00 |
+| Jeanjean, Leolia | none | N/A | none | no_candidate | 2.9 d | 2026-08-02T19:23:30.110450+00:00 |
+| Jones, Emerson | none | N/A | none | no_candidate | 2.9 d | 2026-08-02T19:23:30.111679+00:00 |
+| Tararudee, Lanlana | none | N/A | none | no_candidate | 2.9 d | 2026-08-02T19:23:30.113003+00:00 |
 | Zheng, Michael | none | N/A | none | no_candidate | 2.8 d | 2026-08-02T20:18:39.949541+00:00 |
 | Kecmanovic, Miomir | none | N/A | none | no_candidate | 2.8 d | 2026-08-02T20:18:39.951167+00:00 |
 | Barsukov, Nikolai | none | N/A | none | no_candidate | 2.8 d | 2026-08-02T20:18:39.952425+00:00 |
@@ -78,8 +78,8 @@ These rows are old enough to require operator review before affected players can
 | Jacquet, Kyrian | none | N/A | none | no_candidate | 2.8 d | 2026-08-02T20:18:39.979686+00:00 |
 | Bonzi, Benjamin | none | N/A | none | no_candidate | 2.8 d | 2026-08-02T20:18:39.981486+00:00 |
 | Hanfmann, Yannick | none | N/A | none | no_candidate | 2.8 d | 2026-08-02T20:18:39.982666+00:00 |
-| Shelbayh, Abdullah | Abedallah Shelbayh | 0.909 | none | low_confidence | 2.2 d | 2026-08-03T09:39:28.711625+00:00 |
-| Schoeman, Marcus | none | N/A | none | no_candidate | 2.0 d | 2026-08-03T14:16:06.021959+00:00 |
+| Shelbayh, Abdullah | Abedallah Shelbayh | 0.909 | none | low_confidence | 2.3 d | 2026-08-03T09:39:28.711625+00:00 |
+| Schoeman, Marcus | none | N/A | none | no_candidate | 2.1 d | 2026-08-03T14:16:06.021959+00:00 |
 | Filip Poklemba | none | N/A | none | no_candidate | 1.3 d | 2026-08-04T08:32:51.136473+00:00 |
 | Nikita Mashtakov | Mykyta Mashtakov | 0.800 | none | low_confidence | 1.3 d | 2026-08-04T08:32:51.351478+00:00 |
 | Sebastian Sec | Sebastian Eie | 0.833 | Sebastian Sorger (0.815); Sebastian Baez (0.800) | low_confidence | 1.3 d | 2026-08-04T08:32:51.551672+00:00 |
@@ -101,13 +101,13 @@ These rows are old enough to require operator review before affected players can
 | Weir, Lexie | none | N/A | none | no_candidate | 1.3 d | 2026-08-04T08:32:55.167792+00:00 |
 | Patrick, Nicholas | Nicolas Parizzia | 0.733 | Nicholas Godsick (0.733) | low_confidence | 1.3 d | 2026-08-04T08:32:55.386666+00:00 |
 | McGloughlin, James | none | N/A | none | no_candidate | 1.3 d | 2026-08-04T08:32:55.621425+00:00 |
-| Alafia Ayeni | none | N/A | none | no_candidate | 1.0 d | 2026-08-04T13:48:01.186671+00:00 |
-| Barrera, Gabriella | Gabriella Price | 0.733 | none | low_confidence | 1.0 d | 2026-08-04T13:48:03.984448+00:00 |
-| Francesca Pace | Francesca Jones | 0.741 | none | low_confidence | 0.7 d | 2026-08-04T21:23:03.294150+00:00 |
-| Margaux Maquet | none | N/A | none | no_candidate | 0.7 d | 2026-08-04T21:23:03.336433+00:00 |
-| Maxwell Exsted | none | N/A | none | no_candidate | 0.7 d | 2026-08-04T21:23:03.377214+00:00 |
-| Frey, Charles | Charles Chen | 0.727 | none | low_confidence | 0.7 d | 2026-08-04T21:23:03.415261+00:00 |
-| Kennedy, Thomas | none | N/A | none | no_candidate | 0.7 d | 2026-08-04T21:23:03.457687+00:00 |
+| Alafia Ayeni | none | N/A | none | no_candidate | 1.1 d | 2026-08-04T13:48:01.186671+00:00 |
+| Barrera, Gabriella | Gabriella Price | 0.733 | none | low_confidence | 1.1 d | 2026-08-04T13:48:03.984448+00:00 |
+| Francesca Pace | Francesca Jones | 0.741 | none | low_confidence | 0.8 d | 2026-08-04T21:23:03.294150+00:00 |
+| Margaux Maquet | none | N/A | none | no_candidate | 0.8 d | 2026-08-04T21:23:03.336433+00:00 |
+| Maxwell Exsted | none | N/A | none | no_candidate | 0.8 d | 2026-08-04T21:23:03.377214+00:00 |
+| Frey, Charles | Charles Chen | 0.727 | none | low_confidence | 0.8 d | 2026-08-04T21:23:03.415261+00:00 |
+| Kennedy, Thomas | none | N/A | none | no_candidate | 0.8 d | 2026-08-04T21:23:03.457687+00:00 |
 | Vito Dell'elba | none | N/A | none | no_candidate | 0.3 d | 2026-08-05T08:31:43.928225+00:00 |
 | Cezar Gabriel Papoe | none | N/A | none | no_candidate | 0.3 d | 2026-08-05T08:31:43.980740+00:00 |
 | Briana Szabo | none | N/A | none | no_candidate | 0.3 d | 2026-08-05T08:31:44.020516+00:00 |
@@ -219,18 +219,18 @@ These rows are old enough to require operator review before affected players can
 | Donnelly, Lucia | none | N/A | none | no_candidate | 0.3 d | 2026-08-05T08:31:49.309565+00:00 |
 | Carolyn Ansari | none | N/A | none | no_candidate | 0.3 d | 2026-08-05T08:31:49.354899+00:00 |
 | Kylie Collins | none | N/A | none | no_candidate | 0.3 d | 2026-08-05T08:31:49.396883+00:00 |
-| Rethin Pranav Senthil Kumar | none | N/A | none | no_candidate | 0.0 d | 2026-08-05T13:43:33.966800+00:00 |
-| Dan Brand | none | N/A | none | no_candidate | 0.0 d | 2026-08-05T13:43:34.000798+00:00 |
-| Yerassyl Yerdilda | none | N/A | none | no_candidate | 0.0 d | 2026-08-05T13:43:34.047337+00:00 |
-| Alexis Canter | Alexis Gautier | 0.800 | none | low_confidence | 0.0 d | 2026-08-05T13:43:34.090390+00:00 |
-| Eunchae Kim | none | N/A | none | no_candidate | 0.0 d | 2026-08-05T13:43:34.129449+00:00 |
-| Haruna Arakawa | none | N/A | none | no_candidate | 0.0 d | 2026-08-05T13:43:34.173814+00:00 |
-| Anna Bazderova | none | N/A | none | no_candidate | 0.0 d | 2026-08-05T13:43:34.218322+00:00 |
-| Radovan Michalik | none | N/A | none | no_candidate | 0.0 d | 2026-08-05T13:43:34.306900+00:00 |
-| Carla Giambelli | none | N/A | none | no_candidate | 0.0 d | 2026-08-05T13:43:34.467331+00:00 |
-| Venla Ahti | Vesa Ahti | 0.824 | none | low_confidence | 0.0 d | 2026-08-05T13:43:34.503601+00:00 |
-| Maximus Dussault | none | N/A | none | no_candidate | 0.0 d | 2026-08-05T13:43:35.529156+00:00 |
-| Brandon Carpico | none | N/A | none | no_candidate | 0.0 d | 2026-08-05T13:43:35.574137+00:00 |
+| Rethin Pranav Senthil Kumar | none | N/A | none | no_candidate | 0.1 d | 2026-08-05T13:43:33.966800+00:00 |
+| Dan Brand | none | N/A | none | no_candidate | 0.1 d | 2026-08-05T13:43:34.000798+00:00 |
+| Yerassyl Yerdilda | none | N/A | none | no_candidate | 0.1 d | 2026-08-05T13:43:34.047337+00:00 |
+| Alexis Canter | Alexis Gautier | 0.800 | none | low_confidence | 0.1 d | 2026-08-05T13:43:34.090390+00:00 |
+| Eunchae Kim | none | N/A | none | no_candidate | 0.1 d | 2026-08-05T13:43:34.129449+00:00 |
+| Haruna Arakawa | none | N/A | none | no_candidate | 0.1 d | 2026-08-05T13:43:34.173814+00:00 |
+| Anna Bazderova | none | N/A | none | no_candidate | 0.1 d | 2026-08-05T13:43:34.218322+00:00 |
+| Radovan Michalik | none | N/A | none | no_candidate | 0.1 d | 2026-08-05T13:43:34.306900+00:00 |
+| Carla Giambelli | none | N/A | none | no_candidate | 0.1 d | 2026-08-05T13:43:34.467331+00:00 |
+| Venla Ahti | Vesa Ahti | 0.824 | none | low_confidence | 0.1 d | 2026-08-05T13:43:34.503601+00:00 |
+| Maximus Dussault | none | N/A | none | no_candidate | 0.1 d | 2026-08-05T13:43:35.529156+00:00 |
+| Brandon Carpico | none | N/A | none | no_candidate | 0.1 d | 2026-08-05T13:43:35.574137+00:00 |
 
 ## Resolution procedure
 
