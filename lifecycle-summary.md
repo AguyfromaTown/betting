@@ -1,7 +1,9 @@
 # Tennis Bet Lifecycle
 
-Updated: 2026-08-05T18:04:47.981028+00:00
+Updated: 2026-08-05T20:05:21.648471+00:00
 
 | Match | Pick | Status | Reason | Final odds | Final EV |
 |---|---|---|---|---:|---:|
-| Marozsan, Fabian vs Arnaldi, Matteo | Arnaldi, Matteo | cancelled | stale_price | — | — |
+| Fearnley, Jacob vs Mensik, Jakub | Fearnley, Jacob | cancelled | price_outside_range | — | — |
+| Michelsen, Alex vs Cerundolo, Francisco | Cerundolo, Francisco | cancelled | insufficient_bookmakers | — | — |
+| Hurkacz, Hubert vs Tabilo, Alejandro | Tabilo, Alejandro | cancelled | match_started | — | — |
