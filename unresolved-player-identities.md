@@ -1,6 +1,6 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-06T05:11:14.406757+00:00
+Updated: 2026-08-06T05:33:36.644966+00:00
 
 - Pending: 222
 - Overdue (at least 72 hours): 63
@@ -101,8 +101,8 @@ These rows are old enough to require operator review before affected players can
 | Weir, Lexie | none | N/A | none | no_candidate | 1.9 d | 2026-08-04T08:32:55.167792+00:00 |
 | Patrick, Nicholas | Nicolas Parizzia | 0.733 | Nicholas Godsick (0.733) | low_confidence | 1.9 d | 2026-08-04T08:32:55.386666+00:00 |
 | McGloughlin, James | none | N/A | none | no_candidate | 1.9 d | 2026-08-04T08:32:55.621425+00:00 |
-| Alafia Ayeni | none | N/A | none | no_candidate | 1.6 d | 2026-08-04T13:48:01.186671+00:00 |
-| Barrera, Gabriella | Gabriella Price | 0.733 | none | low_confidence | 1.6 d | 2026-08-04T13:48:03.984448+00:00 |
+| Alafia Ayeni | none | N/A | none | no_candidate | 1.7 d | 2026-08-04T13:48:01.186671+00:00 |
+| Barrera, Gabriella | Gabriella Price | 0.733 | none | low_confidence | 1.7 d | 2026-08-04T13:48:03.984448+00:00 |
 | Francesca Pace | Francesca Jones | 0.741 | none | low_confidence | 1.3 d | 2026-08-04T21:23:03.294150+00:00 |
 | Margaux Maquet | none | N/A | none | no_candidate | 1.3 d | 2026-08-04T21:23:03.336433+00:00 |
 | Maxwell Exsted | none | N/A | none | no_candidate | 1.3 d | 2026-08-04T21:23:03.377214+00:00 |
@@ -219,18 +219,18 @@ These rows are old enough to require operator review before affected players can
 | Donnelly, Lucia | none | N/A | none | no_candidate | 0.9 d | 2026-08-05T08:31:49.309565+00:00 |
 | Carolyn Ansari | none | N/A | none | no_candidate | 0.9 d | 2026-08-05T08:31:49.354899+00:00 |
 | Kylie Collins | none | N/A | none | no_candidate | 0.9 d | 2026-08-05T08:31:49.396883+00:00 |
-| Rethin Pranav Senthil Kumar | none | N/A | none | no_candidate | 0.6 d | 2026-08-05T13:43:33.966800+00:00 |
-| Dan Brand | none | N/A | none | no_candidate | 0.6 d | 2026-08-05T13:43:34.000798+00:00 |
-| Yerassyl Yerdilda | none | N/A | none | no_candidate | 0.6 d | 2026-08-05T13:43:34.047337+00:00 |
-| Alexis Canter | Alexis Gautier | 0.800 | none | low_confidence | 0.6 d | 2026-08-05T13:43:34.090390+00:00 |
-| Eunchae Kim | none | N/A | none | no_candidate | 0.6 d | 2026-08-05T13:43:34.129449+00:00 |
-| Haruna Arakawa | none | N/A | none | no_candidate | 0.6 d | 2026-08-05T13:43:34.173814+00:00 |
-| Anna Bazderova | none | N/A | none | no_candidate | 0.6 d | 2026-08-05T13:43:34.218322+00:00 |
-| Radovan Michalik | none | N/A | none | no_candidate | 0.6 d | 2026-08-05T13:43:34.306900+00:00 |
-| Carla Giambelli | none | N/A | none | no_candidate | 0.6 d | 2026-08-05T13:43:34.467331+00:00 |
-| Venla Ahti | Vesa Ahti | 0.824 | none | low_confidence | 0.6 d | 2026-08-05T13:43:34.503601+00:00 |
-| Maximus Dussault | none | N/A | none | no_candidate | 0.6 d | 2026-08-05T13:43:35.529156+00:00 |
-| Brandon Carpico | none | N/A | none | no_candidate | 0.6 d | 2026-08-05T13:43:35.574137+00:00 |
+| Rethin Pranav Senthil Kumar | none | N/A | none | no_candidate | 0.7 d | 2026-08-05T13:43:33.966800+00:00 |
+| Dan Brand | none | N/A | none | no_candidate | 0.7 d | 2026-08-05T13:43:34.000798+00:00 |
+| Yerassyl Yerdilda | none | N/A | none | no_candidate | 0.7 d | 2026-08-05T13:43:34.047337+00:00 |
+| Alexis Canter | Alexis Gautier | 0.800 | none | low_confidence | 0.7 d | 2026-08-05T13:43:34.090390+00:00 |
+| Eunchae Kim | none | N/A | none | no_candidate | 0.7 d | 2026-08-05T13:43:34.129449+00:00 |
+| Haruna Arakawa | none | N/A | none | no_candidate | 0.7 d | 2026-08-05T13:43:34.173814+00:00 |
+| Anna Bazderova | none | N/A | none | no_candidate | 0.7 d | 2026-08-05T13:43:34.218322+00:00 |
+| Radovan Michalik | none | N/A | none | no_candidate | 0.7 d | 2026-08-05T13:43:34.306900+00:00 |
+| Carla Giambelli | none | N/A | none | no_candidate | 0.7 d | 2026-08-05T13:43:34.467331+00:00 |
+| Venla Ahti | Vesa Ahti | 0.824 | none | low_confidence | 0.7 d | 2026-08-05T13:43:34.503601+00:00 |
+| Maximus Dussault | none | N/A | none | no_candidate | 0.7 d | 2026-08-05T13:43:35.529156+00:00 |
+| Brandon Carpico | none | N/A | none | no_candidate | 0.7 d | 2026-08-05T13:43:35.574137+00:00 |
 | Annika Penickova | none | N/A | none | no_candidate | 0.4 d | 2026-08-05T19:35:39.608188+00:00 |
 | Carlota Moreno | none | N/A | none | no_candidate | 0.4 d | 2026-08-05T19:35:39.654176+00:00 |
 | Sam Landau | none | N/A | none | no_candidate | 0.4 d | 2026-08-05T19:35:39.774226+00:00 |
