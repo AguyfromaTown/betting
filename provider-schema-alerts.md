@@ -1,6 +1,6 @@
 # Provider Schema Health
 
-Updated: 2026-08-06T10:43:39.733793+00:00
+Updated: 2026-08-06T12:53:12.190982+00:00
 
 ## OK
 
