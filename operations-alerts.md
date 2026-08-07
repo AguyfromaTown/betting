@@ -2,9 +2,9 @@
 
 Date: `2026-08-06`
 
-- Active candidates: 1
+- Active candidates: 4
 - Authorized picks: 0
-- Rejections: 1
+- Rejections: 4
 - Rejection rate: 100.0%
 - Historical days: 4 (minimum 7)
 
