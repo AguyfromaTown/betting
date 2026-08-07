@@ -1,16 +1,16 @@
 # Tennis Settlement Alerts
 
-Updated: 2026-08-07T08:09:36.129805+00:00
+Updated: 2026-08-07T09:30:27.183717+00:00
 Alert threshold: 48 hours after the match date ends.
 
 ## OVERDUE UNRESOLVED OUTCOMES
 
 | Mode | Date | Match | Bet | Age |
 |---|---|---|---|---:|
-| live | 2026-07-29 | Landaluce vs Zheng | Landaluce | 200h |
-| live | 2026-07-29 | Gea vs Kwon | Gea | 200h |
-| live | 2026-07-30 | Gea, Arthur vs Zheng, Michael (ATP - Los Cabos, Mexico) | Gea, Arthur to win | 176h |
-| live | 2026-08-02 | Diallo, Gabriel vs Jacquet, Kyrian (ATP - Montreal, Canada) | Jacquet, Kyrian to win | 104h |
-| live | 2026-08-03 | Putintseva, Yulia vs Zhang, Shuai (WTA - Toronto, Canada) | Zhang, Shuai to win | 80h |
-| live | 2026-08-03 | Valentova, Tereza vs Townsend, Taylor (WTA - Toronto, Canada) | Townsend, Taylor to win | 80h |
-| live | 2026-08-04 | Cerundolo, Juan Manuel vs Medjedovic, Hamad (ATP - Montreal, Canada) | Cerundolo, Juan Manuel to win | 56h |
+| live | 2026-07-29 | Landaluce vs Zheng | Landaluce | 202h |
+| live | 2026-07-29 | Gea vs Kwon | Gea | 202h |
+| live | 2026-07-30 | Gea, Arthur vs Zheng, Michael (ATP - Los Cabos, Mexico) | Gea, Arthur to win | 178h |
+| live | 2026-08-02 | Diallo, Gabriel vs Jacquet, Kyrian (ATP - Montreal, Canada) | Jacquet, Kyrian to win | 106h |
+| live | 2026-08-03 | Putintseva, Yulia vs Zhang, Shuai (WTA - Toronto, Canada) | Zhang, Shuai to win | 82h |
+| live | 2026-08-03 | Valentova, Tereza vs Townsend, Taylor (WTA - Toronto, Canada) | Townsend, Taylor to win | 82h |
+| live | 2026-08-04 | Cerundolo, Juan Manuel vs Medjedovic, Hamad (ATP - Montreal, Canada) | Cerundolo, Juan Manuel to win | 58h |
