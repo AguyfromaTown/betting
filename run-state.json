@@ -1,11 +1,12 @@
 {
   "date": "2026-08-07",
-  "mode": "revalidation",
+  "mode": "daily",
   "status": "complete",
   "phase": "complete",
-  "started_at": "2026-08-07T12:06:36.426029+00:00",
-  "updated_at": "2026-08-07T12:06:46.378520+00:00",
+  "started_at": "2026-08-07T12:40:20.194595+00:00",
+  "updated_at": "2026-08-07T12:41:11.199785+00:00",
   "attempt": 1,
   "recovered_from_phase": "",
-  "completed_at": "2026-08-07T12:06:46.378520+00:00"
+  "detail": "116 verified matches",
+  "completed_at": "2026-08-07T12:41:11.199785+00:00"
 }
