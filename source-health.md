@@ -1,54 +1,54 @@
 # Tennis Source Health
 
-Updated: 2026-08-07T20:33:26.095558+00:00
+Updated: 2026-08-07T21:32:26.162968+00:00
 
 Fixture status: `not_run`
 
 | Source | Events | Success | Failure | Avg latency | p95 latency | Max latency | Cache | Stale |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| api.odds-api.io | 38 | 35 | 3 | 338.4 ms | 397.0 ms | 399.0 ms | 0 | 0 |
-| api.telegram.org | 1 | 1 | 0 | 409.0 ms | 409.0 ms | 409.0 ms | 0 | 0 |
+| api.odds-api.io | 38 | 35 | 3 | 232.4 ms | 300.0 ms | 306.0 ms | 0 | 0 |
+| api.telegram.org | 1 | 1 | 0 | 378.0 ms | 378.0 ms | 378.0 ms | 0 | 0 |
 
 ## Request events
 
 | Time | Source | Status | Mode | Latency | Cache age | Stale | Detail |
 |---|---|---|---|---:|---:|---|---|
-| 2026-08-07T20:33:13.098317+00:00 | api.odds-api.io | ok | network | 397 ms | N/A | no | loaded 2 selected bookmaker(s) for key 1 |
-| 2026-08-07T20:33:13.407277+00:00 | api.odds-api.io | ok | network | 309 ms | N/A | no | loaded 2 selected bookmaker(s) for key 2 |
-| 2026-08-07T20:33:13.727106+00:00 | api.odds-api.io | ok | network | 320 ms | N/A | no | loaded 2 selected bookmaker(s) for key 3 |
-| 2026-08-07T20:33:14.028945+00:00 | api.odds-api.io | failed | network | 302 ms | N/A | no | no selected bookmakers for key 4 |
-| 2026-08-07T20:33:14.337080+00:00 | api.odds-api.io | failed | network | 308 ms | N/A | no | no selected bookmakers for key 5 |
-| 2026-08-07T20:33:14.623064+00:00 | api.odds-api.io | failed | network | 285 ms | N/A | no | HTTP 429 key 1 |
-| 2026-08-07T20:33:14.945396+00:00 | api.odds-api.io | ok | network | 322 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:15.244228+00:00 | api.odds-api.io | ok | network | 298 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:15.551948+00:00 | api.odds-api.io | ok | network | 307 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:15.861640+00:00 | api.odds-api.io | ok | network | 309 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:16.175010+00:00 | api.odds-api.io | ok | network | 312 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:16.478013+00:00 | api.odds-api.io | ok | network | 302 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:16.791624+00:00 | api.odds-api.io | ok | network | 313 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:17.112333+00:00 | api.odds-api.io | ok | network | 319 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:17.465046+00:00 | api.odds-api.io | ok | network | 351 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:17.815024+00:00 | api.odds-api.io | ok | network | 349 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:18.214698+00:00 | api.odds-api.io | ok | network | 399 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:18.572844+00:00 | api.odds-api.io | ok | network | 357 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:18.932438+00:00 | api.odds-api.io | ok | network | 359 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:19.316161+00:00 | api.odds-api.io | ok | network | 383 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:19.685221+00:00 | api.odds-api.io | ok | network | 368 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:20.016292+00:00 | api.odds-api.io | ok | network | 330 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:20.345879+00:00 | api.odds-api.io | ok | network | 328 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:20.686378+00:00 | api.odds-api.io | ok | network | 339 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:21.032766+00:00 | api.odds-api.io | ok | network | 345 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:21.369298+00:00 | api.odds-api.io | ok | network | 336 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:21.703592+00:00 | api.odds-api.io | ok | network | 333 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:22.049932+00:00 | api.odds-api.io | ok | network | 345 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:22.395906+00:00 | api.odds-api.io | ok | network | 345 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:22.716109+00:00 | api.odds-api.io | ok | network | 319 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:23.059030+00:00 | api.odds-api.io | ok | network | 342 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:23.432053+00:00 | api.odds-api.io | ok | network | 372 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:23.775677+00:00 | api.odds-api.io | ok | network | 343 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:24.140364+00:00 | api.odds-api.io | ok | network | 364 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:24.522753+00:00 | api.odds-api.io | ok | network | 381 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:24.885444+00:00 | api.odds-api.io | ok | network | 362 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:25.231142+00:00 | api.odds-api.io | ok | network | 345 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:25.592345+00:00 | api.odds-api.io | ok | network | 360 ms | N/A | no | HTTP 200 key 2 |
-| 2026-08-07T20:33:26.093496+00:00 | api.telegram.org | ok | network | 409 ms | N/A | no | HTTP 200 |
+| 2026-08-07T21:32:17.098391+00:00 | api.odds-api.io | ok | network | 279 ms | N/A | no | loaded 2 selected bookmaker(s) for key 1 |
+| 2026-08-07T21:32:17.298427+00:00 | api.odds-api.io | ok | network | 200 ms | N/A | no | loaded 2 selected bookmaker(s) for key 2 |
+| 2026-08-07T21:32:17.493838+00:00 | api.odds-api.io | ok | network | 195 ms | N/A | no | loaded 2 selected bookmaker(s) for key 3 |
+| 2026-08-07T21:32:17.684875+00:00 | api.odds-api.io | failed | network | 191 ms | N/A | no | no selected bookmakers for key 4 |
+| 2026-08-07T21:32:17.868882+00:00 | api.odds-api.io | failed | network | 184 ms | N/A | no | no selected bookmakers for key 5 |
+| 2026-08-07T21:32:18.061907+00:00 | api.odds-api.io | failed | network | 192 ms | N/A | no | HTTP 429 key 1 |
+| 2026-08-07T21:32:18.248251+00:00 | api.odds-api.io | ok | network | 186 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:18.449181+00:00 | api.odds-api.io | ok | network | 200 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:18.667613+00:00 | api.odds-api.io | ok | network | 217 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:18.881489+00:00 | api.odds-api.io | ok | network | 213 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:19.086713+00:00 | api.odds-api.io | ok | network | 204 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:19.284632+00:00 | api.odds-api.io | ok | network | 197 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:19.487779+00:00 | api.odds-api.io | ok | network | 202 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:19.706492+00:00 | api.odds-api.io | ok | network | 218 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:20.014340+00:00 | api.odds-api.io | ok | network | 306 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:20.263777+00:00 | api.odds-api.io | ok | network | 248 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:20.486010+00:00 | api.odds-api.io | ok | network | 221 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:20.745271+00:00 | api.odds-api.io | ok | network | 258 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:21.012389+00:00 | api.odds-api.io | ok | network | 266 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:21.273147+00:00 | api.odds-api.io | ok | network | 260 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:21.504216+00:00 | api.odds-api.io | ok | network | 230 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:21.728625+00:00 | api.odds-api.io | ok | network | 223 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:21.959393+00:00 | api.odds-api.io | ok | network | 230 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:22.193521+00:00 | api.odds-api.io | ok | network | 233 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:22.418994+00:00 | api.odds-api.io | ok | network | 224 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:22.649467+00:00 | api.odds-api.io | ok | network | 229 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:22.888764+00:00 | api.odds-api.io | ok | network | 238 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:23.130933+00:00 | api.odds-api.io | ok | network | 241 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:23.364163+00:00 | api.odds-api.io | ok | network | 232 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:23.591496+00:00 | api.odds-api.io | ok | network | 226 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:23.841836+00:00 | api.odds-api.io | ok | network | 249 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:24.094256+00:00 | api.odds-api.io | ok | network | 251 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:24.380347+00:00 | api.odds-api.io | ok | network | 285 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:24.631460+00:00 | api.odds-api.io | ok | network | 250 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:24.889180+00:00 | api.odds-api.io | ok | network | 257 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:25.190204+00:00 | api.odds-api.io | ok | network | 300 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:25.476754+00:00 | api.odds-api.io | ok | network | 285 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:25.687534+00:00 | api.odds-api.io | ok | network | 210 ms | N/A | no | HTTP 200 key 2 |
+| 2026-08-07T21:32:26.161016+00:00 | api.telegram.org | ok | network | 378 ms | N/A | no | HTTP 200 |
