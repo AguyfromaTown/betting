@@ -3,10 +3,10 @@
   "mode": "daily",
   "status": "complete",
   "phase": "complete",
-  "started_at": "2026-08-06T13:41:21.307728+00:00",
-  "updated_at": "2026-08-06T13:42:06.374493+00:00",
+  "started_at": "2026-08-06T23:59:45.574935+00:00",
+  "updated_at": "2026-08-07T00:00:07.479423+00:00",
   "attempt": 1,
   "recovered_from_phase": "",
-  "detail": "125 verified matches",
-  "completed_at": "2026-08-06T13:42:06.374493+00:00"
+  "detail": "22 verified matches",
+  "completed_at": "2026-08-07T00:00:07.479423+00:00"
 }
