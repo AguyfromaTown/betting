@@ -11,7 +11,7 @@
 - Shadow challenger log loss: N/A
 - Shadow challenger ECE (10 bins): N/A
 - Average CLV: N/A
-- Settled counterfactual decisions: 81
+- Settled counterfactual decisions: 83
 
 ## Calibration
 
