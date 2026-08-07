@@ -11,7 +11,7 @@ Counterfactual metrics show what happened to candidates rejected by each rule; t
 | model_disagreement | 1 | -100.00% | N/A | 0.2083 |
 | price_outside_range | 1 | -100.00% | N/A | 0.1760 |
 | stale_price | 6 | -100.00% | N/A | N/A |
-| uncertainty_adjusted_edge_too_low | 2 | 157.50% | 194.41% | 0.3349 |
+| uncertainty_adjusted_edge_too_low | 3 | 71.67% | 59.56% | 0.3077 |
 
 ## Simultaneous threshold challengers
 
@@ -19,6 +19,6 @@ Each challenger evaluated the same candidates in shadow mode and could not place
 
 | Policy | Decisions | Would authorize | Flat-unit ROI | Avg CLV | Brier |
 |---|---:|---:|---:|---:|---:|
-| threshold-conservative-v1 | 17 | 3 | 162.67% | 166.99% | 0.2986 |
-| threshold-permissive-v1 | 17 | 6 | 68.00% | 166.99% | 0.2747 |
-| threshold-standard-v1 | 17 | 5 | 57.60% | 166.99% | 0.2764 |
+| threshold-conservative-v1 | 18 | 3 | 162.67% | 166.99% | 0.2986 |
+| threshold-permissive-v1 | 18 | 6 | 68.00% | 166.99% | 0.2747 |
+| threshold-standard-v1 | 18 | 5 | 57.60% | 166.99% | 0.2764 |
