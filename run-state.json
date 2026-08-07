@@ -3,9 +3,9 @@
   "mode": "revalidation",
   "status": "complete",
   "phase": "complete",
-  "started_at": "2026-08-07T16:44:57.982192+00:00",
-  "updated_at": "2026-08-07T16:45:20.469722+00:00",
+  "started_at": "2026-08-07T17:42:57.900006+00:00",
+  "updated_at": "2026-08-07T17:43:04.795095+00:00",
   "attempt": 1,
   "recovered_from_phase": "",
-  "completed_at": "2026-08-07T16:45:20.469722+00:00"
+  "completed_at": "2026-08-07T17:43:04.795095+00:00"
 }
