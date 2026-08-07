@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-08-07T23:07:20.189522+00:00",
+  "generated_at": "2026-08-07T23:56:29.971014+00:00",
   "date": "2026-08-07",
-  "mode": "settlement",
+  "mode": "revalidation",
   "deliveries": [
     {
       "channel": "telegram",
