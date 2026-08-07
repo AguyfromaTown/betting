@@ -1,6 +1,6 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-07T03:44:33.421451+00:00
+Updated: 2026-08-07T04:36:45.619598+00:00
 
 - Pending: 273
 - Overdue (at least 72 hours): 65
@@ -46,12 +46,12 @@ These rows are old enough to require operator review before affected players can
 | Zhang, Shuai | none | N/A | none | no_candidate | 5.4 d | 2026-08-01T17:56:25.347040+00:00 |
 | Fucsovics, Marton | none | N/A | none | no_candidate | 4.6 d | 2026-08-02T14:25:38.114146+00:00 |
 | Moutet, Corentin | none | N/A | none | no_candidate | 4.6 d | 2026-08-02T14:25:38.115284+00:00 |
-| Rolland de Ravel, Cosme | none | N/A | none | no_candidate | 4.3 d | 2026-08-02T19:23:30.106361+00:00 |
-| Andreev, Adrian | none | N/A | none | no_candidate | 4.3 d | 2026-08-02T19:23:30.107828+00:00 |
-| Frech, Magdalena | none | N/A | none | no_candidate | 4.3 d | 2026-08-02T19:23:30.109130+00:00 |
-| Jeanjean, Leolia | none | N/A | none | no_candidate | 4.3 d | 2026-08-02T19:23:30.110450+00:00 |
-| Jones, Emerson | none | N/A | none | no_candidate | 4.3 d | 2026-08-02T19:23:30.111679+00:00 |
-| Tararudee, Lanlana | none | N/A | none | no_candidate | 4.3 d | 2026-08-02T19:23:30.113003+00:00 |
+| Rolland de Ravel, Cosme | none | N/A | none | no_candidate | 4.4 d | 2026-08-02T19:23:30.106361+00:00 |
+| Andreev, Adrian | none | N/A | none | no_candidate | 4.4 d | 2026-08-02T19:23:30.107828+00:00 |
+| Frech, Magdalena | none | N/A | none | no_candidate | 4.4 d | 2026-08-02T19:23:30.109130+00:00 |
+| Jeanjean, Leolia | none | N/A | none | no_candidate | 4.4 d | 2026-08-02T19:23:30.110450+00:00 |
+| Jones, Emerson | none | N/A | none | no_candidate | 4.4 d | 2026-08-02T19:23:30.111679+00:00 |
+| Tararudee, Lanlana | none | N/A | none | no_candidate | 4.4 d | 2026-08-02T19:23:30.113003+00:00 |
 | Zheng, Michael | none | N/A | none | no_candidate | 4.3 d | 2026-08-02T20:18:39.949541+00:00 |
 | Kecmanovic, Miomir | none | N/A | none | no_candidate | 4.3 d | 2026-08-02T20:18:39.951167+00:00 |
 | Barsukov, Nikolai | none | N/A | none | no_candidate | 4.3 d | 2026-08-02T20:18:39.952425+00:00 |
@@ -231,12 +231,12 @@ These rows are old enough to require operator review before affected players can
 | Venla Ahti | Vesa Ahti | 0.824 | none | low_confidence | 1.6 d | 2026-08-05T13:43:34.503601+00:00 |
 | Maximus Dussault | none | N/A | none | no_candidate | 1.6 d | 2026-08-05T13:43:35.529156+00:00 |
 | Brandon Carpico | none | N/A | none | no_candidate | 1.6 d | 2026-08-05T13:43:35.574137+00:00 |
-| Annika Penickova | none | N/A | none | no_candidate | 1.3 d | 2026-08-05T19:35:39.608188+00:00 |
-| Carlota Moreno | none | N/A | none | no_candidate | 1.3 d | 2026-08-05T19:35:39.654176+00:00 |
-| Sam Landau | none | N/A | none | no_candidate | 1.3 d | 2026-08-05T19:35:39.774226+00:00 |
-| Eva Korysheva | none | N/A | none | no_candidate | 1.3 d | 2026-08-05T19:35:39.899276+00:00 |
-| Kisa Yoshioka | none | N/A | none | no_candidate | 1.3 d | 2026-08-05T19:35:39.941020+00:00 |
-| Egor Pleshivtsev | none | N/A | none | no_candidate | 1.3 d | 2026-08-05T19:35:39.986214+00:00 |
+| Annika Penickova | none | N/A | none | no_candidate | 1.4 d | 2026-08-05T19:35:39.608188+00:00 |
+| Carlota Moreno | none | N/A | none | no_candidate | 1.4 d | 2026-08-05T19:35:39.654176+00:00 |
+| Sam Landau | none | N/A | none | no_candidate | 1.4 d | 2026-08-05T19:35:39.774226+00:00 |
+| Eva Korysheva | none | N/A | none | no_candidate | 1.4 d | 2026-08-05T19:35:39.899276+00:00 |
+| Kisa Yoshioka | none | N/A | none | no_candidate | 1.4 d | 2026-08-05T19:35:39.941020+00:00 |
+| Egor Pleshivtsev | none | N/A | none | no_candidate | 1.4 d | 2026-08-05T19:35:39.986214+00:00 |
 | Robert Guna | none | N/A | none | no_candidate | 0.8 d | 2026-08-06T08:32:20.240356+00:00 |
 | Francesco Ferrari | Francesco Forti | 0.800 | Franco Ferreiro (0.733) | low_confidence | 0.8 d | 2026-08-06T08:32:20.290499+00:00 |
 | Niklas Guttau | none | N/A | none | no_candidate | 0.8 d | 2026-08-06T08:32:20.364438+00:00 |
