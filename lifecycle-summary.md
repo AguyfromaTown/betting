@@ -1,7 +1,7 @@
 # Tennis Bet Lifecycle
 
-Updated: 2026-08-07T15:49:14.192991+00:00
+Updated: 2026-08-07T16:45:08.389058+00:00
 
 | Match | Pick | Status | Reason | Final odds | Final EV |
 |---|---|---|---|---:|---:|
-| Griekspoor, Tallon vs Arnaldi, Matteo | Arnaldi, Matteo | cancelled | extreme_price_movement | — | — |
+| Van de Zandschulp, Botic vs Hurkacz, Hubert | Van de Zandschulp, Botic | cancelled | insufficient_bookmakers | — | — |
