@@ -2,10 +2,10 @@
 
 Date: `2026-08-08`
 
-- Active candidates: 5
+- Active candidates: 6
 - Authorized picks: 4
-- Rejections: 1
-- Rejection rate: 20.0%
+- Rejections: 2
+- Rejection rate: 33.3%
 - Historical days: 6 (minimum 7)
 
 ## COLLECTING BASELINE
