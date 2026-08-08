@@ -1,7 +1,7 @@
 # Tennis Bet Lifecycle
 
-Updated: 2026-08-08T14:25:21.549911+00:00
+Updated: 2026-08-08T14:56:58.340938+00:00
 
 | Match | Pick | Status | Reason | Final odds | Final EV |
 |---|---|---|---|---:|---:|
-| — | — | waiting | No candidates were ready in this run | — | — |
+| Kostyuk, Marta vs Swiatek, Iga | Kostyuk, Marta | authorized | pre_match_validated | 2.200 | 13.1% |
