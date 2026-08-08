@@ -1,18 +1,26 @@
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 coverage.xml
 coverage-report.txt
 htmlcov/
 .env
+.env.*
+!.env.example
 *.egg-info/
 dist/
 build/
 .venv/
 venv/
-
 random-forest/
 *.zip
 
-random-forest/
-*.zip
+# Local editor and operating-system metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
