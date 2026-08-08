@@ -1,6 +1,6 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-08T18:22:38.049894+00:00
+Updated: 2026-08-08T18:26:38.686721+00:00
 
 - Pending: 317
 - Overdue (at least 72 hours): 216
@@ -231,12 +231,12 @@ These rows are old enough to require operator review before affected players can
 | Venla Ahti | Vesa Ahti | 0.824 | none | low_confidence | 3.2 d | 2026-08-05T13:43:34.503601+00:00 |
 | Maximus Dussault | none | N/A | none | no_candidate | 3.2 d | 2026-08-05T13:43:35.529156+00:00 |
 | Brandon Carpico | none | N/A | none | no_candidate | 3.2 d | 2026-08-05T13:43:35.574137+00:00 |
-| Annika Penickova | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T19:35:39.608188+00:00 |
-| Carlota Moreno | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T19:35:39.654176+00:00 |
-| Sam Landau | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T19:35:39.774226+00:00 |
-| Eva Korysheva | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T19:35:39.899276+00:00 |
-| Kisa Yoshioka | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T19:35:39.941020+00:00 |
-| Egor Pleshivtsev | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T19:35:39.986214+00:00 |
+| Annika Penickova | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T19:35:39.608188+00:00 |
+| Carlota Moreno | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T19:35:39.654176+00:00 |
+| Sam Landau | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T19:35:39.774226+00:00 |
+| Eva Korysheva | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T19:35:39.899276+00:00 |
+| Kisa Yoshioka | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T19:35:39.941020+00:00 |
+| Egor Pleshivtsev | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T19:35:39.986214+00:00 |
 | Robert Guna | none | N/A | none | no_candidate | 2.4 d | 2026-08-06T08:32:20.240356+00:00 |
 | Francesco Ferrari | Francesco Forti | 0.800 | Franco Ferreiro (0.733) | low_confidence | 2.4 d | 2026-08-06T08:32:20.290499+00:00 |
 | Niklas Guttau | none | N/A | none | no_candidate | 2.4 d | 2026-08-06T08:32:20.364438+00:00 |
