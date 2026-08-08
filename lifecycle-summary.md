@@ -1,7 +1,7 @@
 # Tennis Bet Lifecycle
 
-Updated: 2026-08-08T18:26:37.695333+00:00
+Updated: 2026-08-08T18:38:33.444183+00:00
 
 | Match | Pick | Status | Reason | Final odds | Final EV |
 |---|---|---|---|---:|---:|
-| — | — | waiting | No candidates were ready in this run | — | — |
+| Johnson, Spencer vs Ilagan, Andre | Ilagan, Andre | cancelled | uncertainty_adjusted_edge_too_low | — | — |
