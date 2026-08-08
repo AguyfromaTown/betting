@@ -1,6 +1,6 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-08T15:55:48.584103+00:00
+Updated: 2026-08-08T16:25:29.799825+00:00
 
 - Pending: 317
 - Overdue (at least 72 hours): 216
@@ -231,12 +231,12 @@ These rows are old enough to require operator review before affected players can
 | Venla Ahti | Vesa Ahti | 0.824 | none | low_confidence | 3.1 d | 2026-08-05T13:43:34.503601+00:00 |
 | Maximus Dussault | none | N/A | none | no_candidate | 3.1 d | 2026-08-05T13:43:35.529156+00:00 |
 | Brandon Carpico | none | N/A | none | no_candidate | 3.1 d | 2026-08-05T13:43:35.574137+00:00 |
-| Annika Penickova | none | N/A | none | no_candidate | 2.8 d | 2026-08-05T19:35:39.608188+00:00 |
-| Carlota Moreno | none | N/A | none | no_candidate | 2.8 d | 2026-08-05T19:35:39.654176+00:00 |
-| Sam Landau | none | N/A | none | no_candidate | 2.8 d | 2026-08-05T19:35:39.774226+00:00 |
-| Eva Korysheva | none | N/A | none | no_candidate | 2.8 d | 2026-08-05T19:35:39.899276+00:00 |
-| Kisa Yoshioka | none | N/A | none | no_candidate | 2.8 d | 2026-08-05T19:35:39.941020+00:00 |
-| Egor Pleshivtsev | none | N/A | none | no_candidate | 2.8 d | 2026-08-05T19:35:39.986214+00:00 |
+| Annika Penickova | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T19:35:39.608188+00:00 |
+| Carlota Moreno | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T19:35:39.654176+00:00 |
+| Sam Landau | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T19:35:39.774226+00:00 |
+| Eva Korysheva | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T19:35:39.899276+00:00 |
+| Kisa Yoshioka | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T19:35:39.941020+00:00 |
+| Egor Pleshivtsev | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T19:35:39.986214+00:00 |
 | Robert Guna | none | N/A | none | no_candidate | 2.3 d | 2026-08-06T08:32:20.240356+00:00 |
 | Francesco Ferrari | Francesco Forti | 0.800 | Franco Ferreiro (0.733) | low_confidence | 2.3 d | 2026-08-06T08:32:20.290499+00:00 |
 | Niklas Guttau | none | N/A | none | no_candidate | 2.3 d | 2026-08-06T08:32:20.364438+00:00 |
@@ -314,24 +314,24 @@ These rows are old enough to require operator review before affected players can
 | Laura Hietaranta | none | N/A | none | no_candidate | 0.4 d | 2026-08-08T06:47:44.222671+00:00 |
 | Lucciana Perez Alarcon | none | N/A | none | no_candidate | 0.4 d | 2026-08-08T06:47:44.599692+00:00 |
 | Victoria Bosio | Victoria Mboko | 0.846 | Victoria Osuigwe (0.786) | low_confidence | 0.4 d | 2026-08-08T06:47:44.638824+00:00 |
-| Spurling, Nischal | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:45.254043+00:00 |
-| Yang, Robert | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:45.290216+00:00 |
-| Duong, David | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:45.325055+00:00 |
-| Snell, Holland | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:45.364405+00:00 |
-| Chung, Justin | Justin Engel | 0.727 | none | low_confidence | 0.1 d | 2026-08-08T12:26:45.476266+00:00 |
-| Bushuev, Pavel | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:45.515113+00:00 |
-| Alvarez, Marco | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:45.592856+00:00 |
-| Clark, Miles | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:45.661910+00:00 |
-| Bergeson, Sage | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:45.700958+00:00 |
-| Kiss, Camille | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:45.752107+00:00 |
-| Hawkins, Hudson | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:45.804290+00:00 |
-| Bluestein, Chelsea | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:45.986728+00:00 |
-| Seversen, Michael | Michael Geerts | 0.786 | Michael Vrbensky (0.733) | low_confidence | 0.1 d | 2026-08-08T12:26:46.049951+00:00 |
-| Djakouris, Antreas | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:46.098103+00:00 |
-| Gyuro, Ellie | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:46.130598+00:00 |
-| Samel Druz, Camilia | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:46.182666+00:00 |
-| Anderson, Blake | Kevin Anderson | 0.769 | Blake Bayldon (0.720) | low_confidence | 0.1 d | 2026-08-08T12:26:46.278636+00:00 |
-| Hakopian, George | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:46.358198+00:00 |
+| Spurling, Nischal | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:45.254043+00:00 |
+| Yang, Robert | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:45.290216+00:00 |
+| Duong, David | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:45.325055+00:00 |
+| Snell, Holland | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:45.364405+00:00 |
+| Chung, Justin | Justin Engel | 0.727 | none | low_confidence | 0.2 d | 2026-08-08T12:26:45.476266+00:00 |
+| Bushuev, Pavel | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:45.515113+00:00 |
+| Alvarez, Marco | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:45.592856+00:00 |
+| Clark, Miles | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:45.661910+00:00 |
+| Bergeson, Sage | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:45.700958+00:00 |
+| Kiss, Camille | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:45.752107+00:00 |
+| Hawkins, Hudson | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:45.804290+00:00 |
+| Bluestein, Chelsea | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:45.986728+00:00 |
+| Seversen, Michael | Michael Geerts | 0.786 | Michael Vrbensky (0.733) | low_confidence | 0.2 d | 2026-08-08T12:26:46.049951+00:00 |
+| Djakouris, Antreas | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:46.098103+00:00 |
+| Gyuro, Ellie | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:46.130598+00:00 |
+| Samel Druz, Camilia | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:46.182666+00:00 |
+| Anderson, Blake | Kevin Anderson | 0.769 | Blake Bayldon (0.720) | low_confidence | 0.2 d | 2026-08-08T12:26:46.278636+00:00 |
+| Hakopian, George | none | N/A | none | no_candidate | 0.2 d | 2026-08-08T12:26:46.358198+00:00 |
 
 ## Resolution procedure
 
