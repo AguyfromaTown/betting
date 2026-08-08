@@ -1,7 +1,7 @@
 # Tennis Bet Lifecycle
 
-Updated: 2026-08-08T11:32:42.518845+00:00
+Updated: 2026-08-08T12:33:09.857903+00:00
 
 | Match | Pick | Status | Reason | Final odds | Final EV |
 |---|---|---|---|---:|---:|
-| — | — | waiting | No candidates were ready in this run | — | — |
+| Gentzsch, Tom vs Piros, Zsombor | Gentzsch, Tom | authorized | pre_match_validated | 2.550 | 14.8% |

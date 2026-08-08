@@ -1,6 +1,6 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-08T12:27:06.168720+00:00
+Updated: 2026-08-08T12:33:22.196977+00:00
 
 - Pending: 317
 - Overdue (at least 72 hours): 204
@@ -219,18 +219,18 @@ These rows are old enough to require operator review before affected players can
 | Donnelly, Lucia | none | N/A | none | no_candidate | 3.2 d | 2026-08-05T08:31:49.309565+00:00 |
 | Carolyn Ansari | none | N/A | none | no_candidate | 3.2 d | 2026-08-05T08:31:49.354899+00:00 |
 | Kylie Collins | none | N/A | none | no_candidate | 3.2 d | 2026-08-05T08:31:49.396883+00:00 |
-| Rethin Pranav Senthil Kumar | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T13:43:33.966800+00:00 |
-| Dan Brand | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T13:43:34.000798+00:00 |
-| Yerassyl Yerdilda | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T13:43:34.047337+00:00 |
-| Alexis Canter | Alexis Gautier | 0.800 | none | low_confidence | 2.9 d | 2026-08-05T13:43:34.090390+00:00 |
-| Eunchae Kim | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T13:43:34.129449+00:00 |
-| Haruna Arakawa | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T13:43:34.173814+00:00 |
-| Anna Bazderova | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T13:43:34.218322+00:00 |
-| Radovan Michalik | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T13:43:34.306900+00:00 |
-| Carla Giambelli | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T13:43:34.467331+00:00 |
-| Venla Ahti | Vesa Ahti | 0.824 | none | low_confidence | 2.9 d | 2026-08-05T13:43:34.503601+00:00 |
-| Maximus Dussault | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T13:43:35.529156+00:00 |
-| Brandon Carpico | none | N/A | none | no_candidate | 2.9 d | 2026-08-05T13:43:35.574137+00:00 |
+| Rethin Pranav Senthil Kumar | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T13:43:33.966800+00:00 |
+| Dan Brand | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T13:43:34.000798+00:00 |
+| Yerassyl Yerdilda | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T13:43:34.047337+00:00 |
+| Alexis Canter | Alexis Gautier | 0.800 | none | low_confidence | 3.0 d | 2026-08-05T13:43:34.090390+00:00 |
+| Eunchae Kim | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T13:43:34.129449+00:00 |
+| Haruna Arakawa | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T13:43:34.173814+00:00 |
+| Anna Bazderova | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T13:43:34.218322+00:00 |
+| Radovan Michalik | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T13:43:34.306900+00:00 |
+| Carla Giambelli | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T13:43:34.467331+00:00 |
+| Venla Ahti | Vesa Ahti | 0.824 | none | low_confidence | 3.0 d | 2026-08-05T13:43:34.503601+00:00 |
+| Maximus Dussault | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T13:43:35.529156+00:00 |
+| Brandon Carpico | none | N/A | none | no_candidate | 3.0 d | 2026-08-05T13:43:35.574137+00:00 |
 | Annika Penickova | none | N/A | none | no_candidate | 2.7 d | 2026-08-05T19:35:39.608188+00:00 |
 | Carlota Moreno | none | N/A | none | no_candidate | 2.7 d | 2026-08-05T19:35:39.654176+00:00 |
 | Sam Landau | none | N/A | none | no_candidate | 2.7 d | 2026-08-05T19:35:39.774226+00:00 |
@@ -278,16 +278,16 @@ These rows are old enough to require operator review before affected players can
 | Carmen Andreea Herea | none | N/A | none | no_candidate | 2.2 d | 2026-08-06T08:32:23.164825+00:00 |
 | Kristina Penickova | Kristina Liutova | 0.750 | none | low_confidence | 2.2 d | 2026-08-06T08:32:23.217335+00:00 |
 | Benjamin Pietri | none | N/A | none | no_candidate | 2.2 d | 2026-08-06T08:32:23.308545+00:00 |
-| Nicolas Robert | Nicolas Jarry | 0.720 | Nicolas Baena (0.720) | low_confidence | 1.9 d | 2026-08-06T13:41:34.024775+00:00 |
-| Carles Rojas | none | N/A | none | no_candidate | 1.9 d | 2026-08-06T13:41:34.066848+00:00 |
-| Cordova, Francesco | Francesco Forti | 0.733 | none | low_confidence | 1.9 d | 2026-08-06T13:41:34.204124+00:00 |
-| Josefina Estevez | none | N/A | none | no_candidate | 1.9 d | 2026-08-06T13:41:34.429621+00:00 |
-| Fernanda Labrana | none | N/A | none | no_candidate | 1.9 d | 2026-08-06T13:41:34.478565+00:00 |
-| Outcalt, Natalie | none | N/A | none | no_candidate | 1.9 d | 2026-08-06T13:41:34.603514+00:00 |
-| David Fix | David Goffin | 0.737 | none | low_confidence | 1.9 d | 2026-08-06T13:41:35.095538+00:00 |
-| Boyce, Alana | none | N/A | none | no_candidate | 1.9 d | 2026-08-06T13:41:35.322973+00:00 |
-| Fairclough, Lily | none | N/A | none | no_candidate | 1.9 d | 2026-08-06T13:41:35.452599+00:00 |
-| Yan, Yilin | none | N/A | none | no_candidate | 1.9 d | 2026-08-06T13:41:35.485888+00:00 |
+| Nicolas Robert | Nicolas Jarry | 0.720 | Nicolas Baena (0.720) | low_confidence | 2.0 d | 2026-08-06T13:41:34.024775+00:00 |
+| Carles Rojas | none | N/A | none | no_candidate | 2.0 d | 2026-08-06T13:41:34.066848+00:00 |
+| Cordova, Francesco | Francesco Forti | 0.733 | none | low_confidence | 2.0 d | 2026-08-06T13:41:34.204124+00:00 |
+| Josefina Estevez | none | N/A | none | no_candidate | 2.0 d | 2026-08-06T13:41:34.429621+00:00 |
+| Fernanda Labrana | none | N/A | none | no_candidate | 2.0 d | 2026-08-06T13:41:34.478565+00:00 |
+| Outcalt, Natalie | none | N/A | none | no_candidate | 2.0 d | 2026-08-06T13:41:34.603514+00:00 |
+| David Fix | David Goffin | 0.737 | none | low_confidence | 2.0 d | 2026-08-06T13:41:35.095538+00:00 |
+| Boyce, Alana | none | N/A | none | no_candidate | 2.0 d | 2026-08-06T13:41:35.322973+00:00 |
+| Fairclough, Lily | none | N/A | none | no_candidate | 2.0 d | 2026-08-06T13:41:35.452599+00:00 |
+| Yan, Yilin | none | N/A | none | no_candidate | 2.0 d | 2026-08-06T13:41:35.485888+00:00 |
 | Cheuk Ying Shek | none | N/A | none | no_candidate | 1.2 d | 2026-08-07T07:11:42.452105+00:00 |
 | Gaeul Jang | none | N/A | none | no_candidate | 1.2 d | 2026-08-07T07:11:42.489719+00:00 |
 | Aleksa Pisaric | none | N/A | none | no_candidate | 1.2 d | 2026-08-07T07:11:42.579752+00:00 |
