@@ -1,5 +1,6 @@
 # Changelog
 
+- Settlement now grades every verified prediction-audit row, including rejected, watchlist and cancelled decisions; complementary player outcomes, conservative retirement/walkover voids, available CLV, and result sources are persisted without affecting bankroll.
 - Parallelized independent result-provider and per-date scoreboard downloads and enabled dependency caching across recurring GitHub workflows, reducing settlement latency and repeated package downloads without changing verification requirements.
 - Added automatic multi-source result verification: missing Odds-API.io outcomes can now settle from completed ESPN or TennisExplorer score evidence with conservative shortened-name matching and Infotennis corroboration; conflicts, archive-only evidence, and ambiguous retirements remain unresolved, and each result records its verification sources.
 - Pre-match authorization now opens 180 minutes before scheduled start and newly staged candidates receive an immediate revalidation pass, preventing delayed GitHub schedules from turning valid candidates into `match_started` cancellations without allowing live bets.

@@ -1376,6 +1376,35 @@ class TennisBotTests(unittest.TestCase):
             self.assertEqual((rows[0]["RESULT"], rows[0]["RETURN"]), ("W", "6.00"))
             self.assertEqual(rows[0]["RESULT_SOURCES"], "TennisExplorer")
 
+    def test_prediction_audit_settles_both_sides_without_touching_bankroll(self):
+        event = {"id": "7", "date": "2026-08-01T12:00Z", "home": "Player One",
+                 "away": "Player Two", "scores": {"home": 2, "away": 0},
+                 "status": "settled", "result_source": "Odds-API.io"}
+        rows = [
+            {"DATE": "2026-08-01", "MATCH": "Player One vs Player Two", "PICK": "Player One",
+             "OPENING_ODDS": "2.00", "RESULT": "", "CLOSING_ODDS": "", "CLV": "", "RESULT_SOURCES": ""},
+            {"DATE": "2026-08-01", "MATCH": "Player One vs Player Two", "PICK": "Player Two",
+             "OPENING_ODDS": "1.80", "RESULT": "", "CLOSING_ODDS": "", "CLV": "", "RESULT_SOURCES": ""},
+        ]
+        headers = list(rows[0])
+        with tempfile.TemporaryDirectory() as directory, patch.object(bot, "AUDIT_FILE", Path(directory) / "audit.csv"):
+            settled = bot.settle_prediction_audit_rows(rows, headers, [event], [], {"7": (1.90, 2.00)})
+            _, saved = bot.read_csv_rows(bot.AUDIT_FILE)
+        self.assertEqual(settled, 2)
+        self.assertEqual([row["RESULT"] for row in saved], ["W", "L"])
+        self.assertEqual([row["RESULT_SOURCES"] for row in saved], ["Odds-API.io", "Odds-API.io"])
+        self.assertEqual(saved[0]["CLV"], f"{2.00 / 1.90 - 1:.6f}")
+
+    def test_prediction_audit_treats_retirement_as_void(self):
+        event = {"date": "2026-08-01T12:00Z", "home": "A", "away": "B",
+                 "winner": "A", "scores": {"home": 1, "away": 0}, "retired": True,
+                 "result_source": "Odds-API.io"}
+        rows = [{"DATE": "2026-08-01", "MATCH": "A vs B", "PICK": "A", "RESULT": ""}]
+        with tempfile.TemporaryDirectory() as directory, patch.object(bot, "AUDIT_FILE", Path(directory) / "audit.csv"):
+            settled = bot.settle_prediction_audit_rows(rows, list(rows[0]), [event], [], {})
+        self.assertEqual(settled, 1)
+        self.assertEqual(rows[0]["RESULT"], "V")
+
     def test_refresh_discovery_excludes_processed_picks_but_keeps_new_ones(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

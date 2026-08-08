@@ -113,7 +113,7 @@ Optional Telegram and SMTP delivery runs after core state is saved. Delivery fai
 | `pending-bets.csv` | Daily generation and revalidation | Candidate lifecycle: staged, authorized, or cancelled |
 | `bets-log.csv` | Revalidation and settlement | Live authorized bets and verified outcomes |
 | `paper-bets-log.csv` | Paper authorization and settlement | Simulated bets isolated from real bankroll |
-| `predictions-log.csv` | Daily model and settlement | Immutable decision-time features plus later result/CLV fields |
+| `predictions-log.csv` | Daily model and settlement | Immutable decision-time features plus verified outcomes, result sources and available CLV for every evaluated selection |
 | `counterfactual-log.csv` | Policy evaluation and settlement | Active/shadow decisions and hypothetical outcomes |
 | `bankroll-transactions.csv` | Authorization and settlement | Hash-linked debit/credit ledger |
 | `bankroll.txt` | Reconciliation | Current real balance derived from financial lifecycle |

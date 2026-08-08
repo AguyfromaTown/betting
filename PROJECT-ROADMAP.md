@@ -153,6 +153,7 @@ Status conventions:
 - [x] Detect common retirement and walkover indicators.
 - [x] Make retirement settlement rules configurable per bookmaker.
 - [x] Store closing odds and CLV when available.
+- [x] Resolve verified outcomes for every audited prediction, including rejected and watchlist rows.
 - [x] Retry unresolved outcomes on later scheduled runs.
 - [x] Alert when an outcome remains unresolved beyond a configured period.
 - [x] Reconcile every return against an immutable transaction ledger.

@@ -5018,7 +5018,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
         "EV", "SCORE", "EVIDENCE", "QUALITY_SCORE", "QUALITY_GRADE",
         "TOUR", "SURFACE", "BOOKMAKERS", "FIXTURE_SOURCES", "SECONDARY_FIXTURE_CONFIRMED",
         "DECISION", "REASON", "RESULT",
-        "CLOSING_ODDS", "CLV",
+        "CLOSING_ODDS", "CLV", "RESULT_SOURCES",
     ]
     if AUDIT_FILE.exists() and AUDIT_FILE.stat().st_size:
         with open(AUDIT_FILE, newline="", encoding="utf-8") as handle:
@@ -5167,7 +5167,7 @@ def append_prediction_audit(date_str, matches, recommendations, authorized, auth
                 match.get("surface") or "Unknown", match.get("bookmaker_count") or 0,
                 ";".join(match.get("fixture_sources") or ["Odds-API.io"]),
                 match.get("secondary_fixture_confirmed", False),
-                decision, reason, "", "", "",
+                decision, reason, "", "", "", "",
             ])
     if not rows:
         return
@@ -5378,6 +5378,50 @@ def select_verified_result(row: dict, primary_events: list[dict], fallback_event
     return verified
 
 
+def settle_prediction_audit_rows(audit_rows: list[dict], audit_headers: list[str],
+                                 primary_events: list[dict], fallback_events: list[dict],
+                                 closing_by_id: dict[str, tuple[float | None, float | None]]) -> int:
+    """Grade every evaluated prediction from verified results without financial effects."""
+    settled = 0
+    for row in audit_rows:
+        if row.get("RESULT", "").strip():
+            continue
+        event = select_verified_result(row, primary_events, fallback_events)
+        if not event:
+            continue
+        row["RESULT_SOURCES"] = ";".join(event.get("verification_sources") or [])
+        if tennis_void_reason(event) or tennis_retirement_detected(event):
+            row.update({"RESULT": "V", "CLOSING_ODDS": "", "CLV": ""})
+            settled += 1
+            continue
+        scores = event.get("scores") or {}
+        try:
+            home_score, away_score = float(scores["home"]), float(scores["away"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        pick = str(row.get("PICK") or "")
+        home_pick = player_names_equivalent(pick, str(event.get("home") or ""))
+        away_pick = player_names_equivalent(pick, str(event.get("away") or ""))
+        if not (home_pick or away_pick) or home_score == away_score:
+            continue
+        won = (home_pick and home_score > away_score) or (away_pick and away_score > home_score)
+        row["RESULT"] = "W" if won else "L"
+        closing_pair = closing_by_id.get(str(event.get("id")), (None, None))
+        closing = closing_pair[0] if home_pick else closing_pair[1]
+        if closing:
+            row["CLOSING_ODDS"] = f"{closing:.3f}"
+            try:
+                opening = float(row.get("OPENING_ODDS") or 0)
+            except (TypeError, ValueError):
+                opening = 0
+            row["CLV"] = f"{opening / closing - 1:.6f}" if opening else ""
+        settled += 1
+    if settled:
+        atomic_write_csv(AUDIT_FILE, audit_headers, audit_rows)
+        log(f"Settled {settled} prediction audit row(s) from verified results")
+    return settled
+
+
 def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
     """Settle finished tennis bets and add bookmaker returns to bankroll."""
     if not api_keys:
@@ -5397,7 +5441,15 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
     if POLICY_FILE.exists() and POLICY_FILE.stat().st_size:
         with POLICY_FILE.open(newline="", encoding="utf-8") as handle:
             policy_rows = list(csv.DictReader(handle))
-    dates = sorted({r.get("DATE", "") for r in rows + paper_rows + policy_rows if not r.get("RESULT", "").strip() and r.get("DATE")})
+    audit_headers, audit_rows = read_csv_rows(AUDIT_FILE)
+    if audit_headers and "RESULT_SOURCES" not in audit_headers:
+        backup_state_for_migration(AUDIT_FILE, list(audit_headers), list(audit_headers) + ["RESULT_SOURCES"])
+        audit_headers.append("RESULT_SOURCES")
+        for row in audit_rows:
+            row.setdefault("RESULT_SOURCES", "")
+    unresolved_collections = rows + paper_rows + policy_rows + audit_rows
+    dates = sorted({r.get("DATE", "") for r in unresolved_collections
+                    if not r.get("RESULT", "").strip() and r.get("DATE")})
     if not dates:
         save_settlement_alerts(rows, paper_rows)
         return 0
@@ -5417,7 +5469,7 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
                     event.setdefault("result_source", "Odds-API.io")
                     events.append(event)
     unresolved_rows = []
-    for row in rows + paper_rows + policy_rows:
+    for row in unresolved_collections:
         if row.get("RESULT", "").strip():
             continue
         lookup_row = row
@@ -5562,6 +5614,7 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
     if policy_settled:
         atomic_write_csv(POLICY_FILE, POLICY_HEADERS, policy_rows)
         log(f"Settled {policy_settled} counterfactual policy decision(s)")
+    settle_prediction_audit_rows(audit_rows, list(audit_headers or []), events, fallback_events, closing_by_id)
     save_settlement_alerts(rows, paper_rows)
     return settled + paper_settled
 
