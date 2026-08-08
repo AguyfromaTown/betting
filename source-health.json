@@ -1,847 +1,367 @@
 {
-  "generated_at": "2026-08-08T13:40:29.836656+00:00",
-  "fixture_status": "ok",
+  "generated_at": "2026-08-08T14:25:22.146580+00:00",
+  "fixture_status": "not_run",
   "requests": [
     {
       "source": "api.odds-api.io",
       "ok": true,
       "detail": "loaded 2 selected bookmaker(s) for key 1",
-      "latency_ms": 255,
+      "latency_ms": 510,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:12.707455+00:00"
+      "timestamp": "2026-08-08T14:25:09.871778+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
       "detail": "loaded 2 selected bookmaker(s) for key 2",
-      "latency_ms": 214,
+      "latency_ms": 300,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:12.921199+00:00"
+      "timestamp": "2026-08-08T14:25:10.172247+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
       "detail": "loaded 2 selected bookmaker(s) for key 3",
-      "latency_ms": 193,
+      "latency_ms": 297,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:13.114245+00:00"
+      "timestamp": "2026-08-08T14:25:10.468852+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": false,
       "detail": "no selected bookmakers for key 4",
-      "latency_ms": 196,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:13.310428+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": false,
-      "detail": "no selected bookmakers for key 5",
-      "latency_ms": 190,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:13.500220+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 200,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:13.701013+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 199,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:13.900814+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 201,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:14.102402+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 413,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:14.516410+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 180,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:14.697257+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 184,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:14.882302+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 187,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:15.070290+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 198,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:15.269411+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 206,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:15.476325+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 261,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:15.738681+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 256,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:15.995724+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 252,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:16.249308+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 248,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:16.498148+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 241,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:16.740134+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 309,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:17.049647+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
       "latency_ms": 291,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:17.341391+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 262,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:17.604526+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 217,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:17.822917+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 266,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:18.089454+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 263,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:18.353024+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 228,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:18.581883+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 285,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:18.868215+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 274,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:19.142735+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 285,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:19.429121+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 284,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:19.714627+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 299,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:20.014220+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 280,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:20.294892+00:00"
-    },
-    {
-      "source": "site.api.espn.com",
-      "ok": false,
-      "detail": "HTTPError",
-      "latency_ms": 46,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:20.422585+00:00"
-    },
-    {
-      "source": "site.api.espn.com",
-      "ok": false,
-      "detail": "HTTPError",
-      "latency_ms": 41,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:20.464481+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 227,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:20.692773+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "loaded 2 selected bookmaker(s) for key 1",
-      "latency_ms": 190,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:20.886240+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "loaded 2 selected bookmaker(s) for key 2",
-      "latency_ms": 192,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:21.078087+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": true,
-      "detail": "loaded 2 selected bookmaker(s) for key 3",
-      "latency_ms": 181,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:21.259427+00:00"
-    },
-    {
-      "source": "api.odds-api.io",
-      "ok": false,
-      "detail": "no selected bookmakers for key 4",
-      "latency_ms": 180,
-      "mode": "network",
-      "cache_age_seconds": null,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:21.439622+00:00"
+      "timestamp": "2026-08-08T14:25:10.759669+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": false,
       "detail": "no selected bookmakers for key 5",
-      "latency_ms": 181,
+      "latency_ms": 401,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:21.621081+00:00"
+      "timestamp": "2026-08-08T14:25:11.161160+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
       "detail": "HTTP 200 key 1",
-      "latency_ms": 220,
+      "latency_ms": 326,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:21.841756+00:00"
+      "timestamp": "2026-08-08T14:25:11.487873+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
       "detail": "HTTP 200 key 1",
-      "latency_ms": 196,
+      "latency_ms": 292,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:22.038480+00:00"
+      "timestamp": "2026-08-08T14:25:11.780431+00:00"
+    },
+    {
+      "source": "api.odds-api.io",
+      "ok": false,
+      "detail": "HTTP 429 key 1",
+      "latency_ms": 283,
+      "mode": "network",
+      "cache_age_seconds": null,
+      "stale": false,
+      "timestamp": "2026-08-08T14:25:12.064129+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 190,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 305,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:22.229553+00:00"
+      "timestamp": "2026-08-08T14:25:12.369292+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 187,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 391,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:22.417405+00:00"
+      "timestamp": "2026-08-08T14:25:12.760741+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 254,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 367,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:22.671748+00:00"
+      "timestamp": "2026-08-08T14:25:13.128820+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 299,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 327,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:22.971013+00:00"
+      "timestamp": "2026-08-08T14:25:13.456251+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 278,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 296,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:23.249778+00:00"
+      "timestamp": "2026-08-08T14:25:13.753083+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 265,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 311,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:23.515922+00:00"
+      "timestamp": "2026-08-08T14:25:14.065141+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 398,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 333,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:23.915025+00:00"
+      "timestamp": "2026-08-08T14:25:14.399172+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 299,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 339,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:24.215580+00:00"
+      "timestamp": "2026-08-08T14:25:14.739374+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 229,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 362,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:24.445496+00:00"
+      "timestamp": "2026-08-08T14:25:15.102587+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 223,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 504,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:24.669831+00:00"
+      "timestamp": "2026-08-08T14:25:15.607687+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 251,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 357,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:24.922076+00:00"
+      "timestamp": "2026-08-08T14:25:15.965243+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 277,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 346,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:25.200567+00:00"
+      "timestamp": "2026-08-08T14:25:16.312083+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 269,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 416,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:25.471057+00:00"
+      "timestamp": "2026-08-08T14:25:16.729048+00:00"
     },
     {
       "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200 key 1",
-      "latency_ms": 235,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 471,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:25.707502+00:00"
+      "timestamp": "2026-08-08T14:25:17.201246+00:00"
     },
     {
-      "source": "stats.tennismylife.org",
+      "source": "api.odds-api.io",
       "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 31,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24764.2,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.742193+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 33,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24764.0,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.744128+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 48,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24763.8,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.758759+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 53,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24764.1,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.763686+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 25,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24763.4,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.769043+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 31,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24763.3,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.780181+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 14,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24763.0,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.783604+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 48,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24763.7,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.789323+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 54,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24764.1,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.794406+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 36,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24762.8,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.800165+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 17,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24762.9,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.800263+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 11,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24762.7,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.800467+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 11,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24762.6,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.805650+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 26,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24763.0,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.805817+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "fresh cache hit",
-      "latency_ms": 47,
-      "mode": "fresh_cache",
-      "cache_age_seconds": 24762.9,
-      "stale": false,
-      "timestamp": "2026-08-08T13:40:25.805977+00:00"
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "ok": true,
-      "detail": "HTTP 200",
-      "latency_ms": 1073,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 336,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:27.616294+00:00"
+      "timestamp": "2026-08-08T14:25:17.538762+00:00"
     },
     {
-      "source": "stats.tennismylife.org",
+      "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200",
-      "latency_ms": 1172,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 339,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:27.714684+00:00"
+      "timestamp": "2026-08-08T14:25:17.878340+00:00"
     },
     {
-      "source": "stats.tennismylife.org",
+      "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200",
-      "latency_ms": 1193,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 348,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:27.737681+00:00"
+      "timestamp": "2026-08-08T14:25:18.227670+00:00"
     },
     {
-      "source": "stats.tennismylife.org",
+      "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200",
-      "latency_ms": 1417,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 351,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:27.958392+00:00"
+      "timestamp": "2026-08-08T14:25:18.579287+00:00"
     },
     {
-      "source": "stats.tennismylife.org",
+      "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200",
-      "latency_ms": 756,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 357,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:28.494605+00:00"
+      "timestamp": "2026-08-08T14:25:18.937761+00:00"
     },
     {
-      "source": "stats.tennismylife.org",
+      "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200",
-      "latency_ms": 983,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 329,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:28.600654+00:00"
+      "timestamp": "2026-08-08T14:25:19.267967+00:00"
     },
     {
-      "source": "stats.tennismylife.org",
+      "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200",
-      "latency_ms": 1063,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 339,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:28.788805+00:00"
+      "timestamp": "2026-08-08T14:25:19.607825+00:00"
     },
     {
-      "source": "stats.tennismylife.org",
+      "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200",
-      "latency_ms": 864,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 372,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:28.833376+00:00"
+      "timestamp": "2026-08-08T14:25:19.981388+00:00"
     },
     {
-      "source": "stats.tennismylife.org",
+      "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200",
-      "latency_ms": 383,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 365,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:29.184059+00:00"
+      "timestamp": "2026-08-08T14:25:20.347340+00:00"
     },
     {
-      "source": "stats.tennismylife.org",
+      "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200",
-      "latency_ms": 590,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 440,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:29.196811+00:00"
+      "timestamp": "2026-08-08T14:25:20.788872+00:00"
     },
     {
-      "source": "stats.tennismylife.org",
+      "source": "api.odds-api.io",
       "ok": true,
-      "detail": "HTTP 200",
-      "latency_ms": 706,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 370,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:29.201311+00:00"
+      "timestamp": "2026-08-08T14:25:21.159690+00:00"
+    },
+    {
+      "source": "api.odds-api.io",
+      "ok": true,
+      "detail": "HTTP 200 key 2",
+      "latency_ms": 326,
+      "mode": "network",
+      "cache_age_seconds": null,
+      "stale": false,
+      "timestamp": "2026-08-08T14:25:21.487401+00:00"
     },
     {
       "source": "api.telegram.org",
       "ok": true,
       "detail": "HTTP 200",
-      "latency_ms": 367,
+      "latency_ms": 560,
       "mode": "network",
       "cache_age_seconds": null,
       "stale": false,
-      "timestamp": "2026-08-08T13:40:29.834662+00:00"
+      "timestamp": "2026-08-08T14:25:22.144274+00:00"
     }
   ],
   "summary": [
     {
       "source": "api.odds-api.io",
-      "events": 54,
-      "successes": 50,
-      "failures": 4,
-      "average_latency_ms": 241.4,
-      "p95_latency_ms": 309.0,
-      "maximum_latency_ms": 413.0,
+      "events": 34,
+      "successes": 31,
+      "failures": 3,
+      "average_latency_ms": 355.8,
+      "p95_latency_ms": 504.0,
+      "maximum_latency_ms": 510.0,
       "stale_responses": 0,
       "cache_responses": 0
     },
@@ -850,414 +370,252 @@
       "events": 1,
       "successes": 1,
       "failures": 0,
-      "average_latency_ms": 367.0,
-      "p95_latency_ms": 367.0,
-      "maximum_latency_ms": 367.0,
+      "average_latency_ms": 560.0,
+      "p95_latency_ms": 560.0,
+      "maximum_latency_ms": 560.0,
       "stale_responses": 0,
       "cache_responses": 0
-    },
-    {
-      "source": "site.api.espn.com",
-      "events": 2,
-      "successes": 0,
-      "failures": 2,
-      "average_latency_ms": 43.5,
-      "p95_latency_ms": 46.0,
-      "maximum_latency_ms": 46.0,
-      "stale_responses": 0,
-      "cache_responses": 0
-    },
-    {
-      "source": "stats.tennismylife.org",
-      "events": 26,
-      "successes": 26,
-      "failures": 0,
-      "average_latency_ms": 411.0,
-      "p95_latency_ms": 1193.0,
-      "maximum_latency_ms": 1417.0,
-      "stale_responses": 0,
-      "cache_responses": 15
     }
   ],
-  "failures": 6,
+  "failures": 3,
   "stale_responses": 0,
   "api_quota": [
     {
       "provider": "Odds-API.io",
       "key": "key-1",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:12.707403+00:00",
+      "timestamp": "2026-08-08T14:25:09.871724+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
       "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:12.920984+00:00",
+      "timestamp": "2026-08-08T14:25:10.171998+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
       "key": "key-3",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:13.114031+00:00",
+      "timestamp": "2026-08-08T14:25:10.468637+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
       "key": "key-4",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:13.310224+00:00",
+      "timestamp": "2026-08-08T14:25:10.759454+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
       "key": "key-5",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:13.499993+00:00",
+      "timestamp": "2026-08-08T14:25:11.160951+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
       "key": "key-1",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:13.700988+00:00",
+      "timestamp": "2026-08-08T14:25:11.487849+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
       "key": "key-1",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:13.900786+00:00",
+      "timestamp": "2026-08-08T14:25:11.780412+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
       "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:14.102372+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:14.516389+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:14.697232+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:14.882278+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:15.070265+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:15.269393+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:15.476301+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:15.738648+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:15.995699+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:16.249283+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:16.498126+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:16.740110+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:17.049623+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:17.341368+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:17.604501+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:17.822899+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:18.089431+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:18.352997+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:18.581860+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:18.868193+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:19.142710+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:19.429099+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:19.714604+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:20.014198+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:20.294867+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:20.692752+00:00",
-      "metrics": {}
-    },
-    {
-      "provider": "Odds-API.io",
-      "key": "key-1",
-      "status": 200,
-      "timestamp": "2026-08-08T13:40:20.886193+00:00",
+      "status": 429,
+      "timestamp": "2026-08-08T14:25:12.064115+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
       "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:21.077847+00:00",
+      "timestamp": "2026-08-08T14:25:12.369274+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-3",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:21.259236+00:00",
+      "timestamp": "2026-08-08T14:25:12.760725+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-4",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:21.439519+00:00",
+      "timestamp": "2026-08-08T14:25:13.128802+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-5",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:21.620847+00:00",
+      "timestamp": "2026-08-08T14:25:13.456233+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:21.841740+00:00",
+      "timestamp": "2026-08-08T14:25:13.753064+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:22.038466+00:00",
+      "timestamp": "2026-08-08T14:25:14.065120+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:22.229535+00:00",
+      "timestamp": "2026-08-08T14:25:14.399157+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:22.417388+00:00",
+      "timestamp": "2026-08-08T14:25:14.739357+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:22.671734+00:00",
+      "timestamp": "2026-08-08T14:25:15.102569+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:22.970994+00:00",
+      "timestamp": "2026-08-08T14:25:15.607664+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:23.249757+00:00",
+      "timestamp": "2026-08-08T14:25:15.965224+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:23.515901+00:00",
+      "timestamp": "2026-08-08T14:25:16.312066+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:23.915004+00:00",
+      "timestamp": "2026-08-08T14:25:16.729024+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:24.215561+00:00",
+      "timestamp": "2026-08-08T14:25:17.201180+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:24.445478+00:00",
+      "timestamp": "2026-08-08T14:25:17.538743+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:24.669816+00:00",
+      "timestamp": "2026-08-08T14:25:17.878319+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:24.922060+00:00",
+      "timestamp": "2026-08-08T14:25:18.227653+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:25.200549+00:00",
+      "timestamp": "2026-08-08T14:25:18.579265+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:25.471045+00:00",
+      "timestamp": "2026-08-08T14:25:18.937740+00:00",
       "metrics": {}
     },
     {
       "provider": "Odds-API.io",
-      "key": "key-1",
+      "key": "key-2",
       "status": 200,
-      "timestamp": "2026-08-08T13:40:25.707483+00:00",
+      "timestamp": "2026-08-08T14:25:19.267945+00:00",
+      "metrics": {}
+    },
+    {
+      "provider": "Odds-API.io",
+      "key": "key-2",
+      "status": 200,
+      "timestamp": "2026-08-08T14:25:19.607801+00:00",
+      "metrics": {}
+    },
+    {
+      "provider": "Odds-API.io",
+      "key": "key-2",
+      "status": 200,
+      "timestamp": "2026-08-08T14:25:19.981365+00:00",
+      "metrics": {}
+    },
+    {
+      "provider": "Odds-API.io",
+      "key": "key-2",
+      "status": 200,
+      "timestamp": "2026-08-08T14:25:20.347319+00:00",
+      "metrics": {}
+    },
+    {
+      "provider": "Odds-API.io",
+      "key": "key-2",
+      "status": 200,
+      "timestamp": "2026-08-08T14:25:20.788849+00:00",
+      "metrics": {}
+    },
+    {
+      "provider": "Odds-API.io",
+      "key": "key-2",
+      "status": 200,
+      "timestamp": "2026-08-08T14:25:21.159663+00:00",
+      "metrics": {}
+    },
+    {
+      "provider": "Odds-API.io",
+      "key": "key-2",
+      "status": 200,
+      "timestamp": "2026-08-08T14:25:21.487379+00:00",
       "metrics": {}
     }
   ],
