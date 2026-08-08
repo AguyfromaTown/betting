@@ -1224,7 +1224,8 @@ class TennisBotTests(unittest.TestCase):
     def test_match_time_state_controls_authorization_window(self):
         from datetime import datetime, timezone
         now = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
-        self.assertEqual(bot.match_time_state("2026-08-01T14:00:00Z", now), "waiting")
+        self.assertEqual(bot.match_time_state("2026-08-01T15:01:00Z", now), "waiting")
+        self.assertEqual(bot.match_time_state("2026-08-01T14:59:00Z", now), "ready")
         self.assertEqual(bot.match_time_state("2026-08-01T13:00:00Z", now), "ready")
         self.assertEqual(bot.match_time_state("2026-08-01T11:00:00Z", now), "passed")
 

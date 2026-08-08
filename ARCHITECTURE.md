@@ -88,7 +88,7 @@ AI estimates are not accepted as model probabilities. Parsed narrative candidate
 
 Validation checks odds bounds, evidence quality, model reliability, EV after uncertainty, physical status, market quality, duplicate identity, and safety-stop state. Portfolio selection then applies tournament correlation, opposite-selection, bet-count, daily exposure, and tour exposure caps.
 
-Accepted daily candidates are written to `pending-bets.csv`, not the live bet log. Revalidation checks start/status, opponent, surface, bookmaker count, price movement, price freshness, dispersion, and final risk-adjusted EV. Only an authorized revalidation can write a live bet and debit bankroll.
+Accepted daily candidates are written to `pending-bets.csv`, not the live bet log. Newly staged near-term candidates receive an immediate pre-match check, while the scheduled workflow begins rechecking waiting candidates inside a 180-minute window. Revalidation checks start/status, opponent, surface, bookmaker count, price movement, price freshness, dispersion, and final risk-adjusted EV. A match more than five minutes past its scheduled start remains ineligible. Only an authorized revalidation can write a live bet and debit bankroll.
 
 Every active and shadow policy decision is recorded in `counterfactual-log.csv`. Shadow decisions never place bets or change bankroll.
 

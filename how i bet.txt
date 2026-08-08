@@ -17,7 +17,8 @@ hard maximums, and the minimum authorized stake is 0.5% of bankroll:
   No Bet (everything else)           → 0% of bankroll
 
 Daily discovery only stages a candidate. No stake is logged or deducted until
-the scheduled workflow rechecks it within 90 minutes of match time. Odds, EV,
+the discovery workflow immediately checks newly staged near-term candidates, and
+the scheduled workflow rechecks waiting candidates within 180 minutes of match time. Odds, EV,
 bookmaker coverage, surface and model agreement must still pass. Withdrawals,
 walkovers are treated as void/refunded rather than model losses. Retirement settlement follows
 the actual selected bookmaker recorded with the bet and the policy in risk-config.json. The safe

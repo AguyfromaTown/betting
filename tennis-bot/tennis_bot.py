@@ -115,6 +115,7 @@ KELLY_FRACTION = 0.25
 MIN_STAKE_RATE = 0.005
 MAX_PRICE_MOVEMENT = 0.10
 MAX_PRICE_AGE_MINUTES = 15
+PREMATCH_REVALIDATION_WINDOW_MINUTES = 180
 MAX_BOOKMAKER_DISPERSION = 0.12
 STALE_PRICE_CONFIRMATION_BOOKMAKERS = 2
 STALE_PRICE_CONFIRMATION_DISPERSION = 0.05
@@ -205,7 +206,7 @@ def build_notification_message(date_str: str, mode: str) -> str:
         elif pending_rows:
             decision = (
                 f"WAITING: {len(pending_rows)} candidate(s) are still more than "
-                "90 minutes from match time."
+                f"{PREMATCH_REVALIDATION_WINDOW_MINUTES} minutes from match time."
             )
         else:
             decision = "NO ACTION: There are no candidates awaiting a pre-match check."
@@ -5804,7 +5805,11 @@ def update_audit_lifecycle(date_str: str, pick: str, decision: str, reason: str,
         atomic_write_csv(AUDIT_FILE, list(headers or []), rows)
 
 
-def match_time_state(value: str, now: datetime, window_minutes: int = 90) -> str:
+def match_time_state(
+    value: str,
+    now: datetime,
+    window_minutes: int = PREMATCH_REVALIDATION_WINDOW_MINUTES,
+) -> str:
     if not value:
         return "missing"
     try:
@@ -6631,13 +6636,12 @@ def finalize_analysis(
     authorized, block_reason = apply_manual_kill_switch(authorized, PAPER_TRADING_MODE)
     append_prediction_audit(date_str, matches, recommendations, authorized, block_reason)
     save_rollback_state()
-    stage_pending_bets(date_str, authorized, odds_min, odds_max)
+    staged_count = stage_pending_bets(date_str, authorized, odds_min, odds_max)
 
     final_report = add_validation_summary(report, len(candidates), authorized)
     save_report(date_str, final_report)
     generate_performance_summary()
-    log("=== Done ===")
-    print("\n" + final_report)
+    return final_report, staged_count
 
 
 def run_diagnostic(date_str: str, odds_min: float, odds_max: float, api_keys: list[str]) -> dict:
@@ -6828,7 +6832,7 @@ def main():
         report = build_deterministic_report(
             date_str, qualified, statistical_candidates
         )
-    finalize_analysis(
+    final_report, staged_count = finalize_analysis(
         date_str,
         report,
         qualified,
@@ -6837,9 +6841,21 @@ def main():
         odds_max,
         statistical_candidates,
     )
+    if staged_count:
+        log(
+            f"Immediately revalidating {staged_count} newly staged candidate(s) "
+            "that are close enough to match time"
+        )
+        authorized_count, cancelled_count = revalidate_pending_bets(odds_api_keys)
+        log(
+            "Immediate pre-match check complete: "
+            f"{authorized_count} authorized, {cancelled_count} cancelled"
+        )
     update_run_state("complete", "complete")
     deliver_optional_notifications(date_str, mode)
     save_source_health()
+    log("=== Done ===")
+    print("\n" + final_report)
 
 
 if __name__ == "__main__":

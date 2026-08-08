@@ -102,7 +102,7 @@ Status conventions:
 ## Decision policy
 
 - [x] Stage candidates without deducting bankroll.
-- [x] Revalidate candidates within 90 minutes of match time.
+- [x] Immediately revalidate newly staged near-term candidates and recheck waiting candidates within 180 minutes of match time.
 - [x] Cancel started, live, settled or changed-status events.
 - [x] Detect withdrawals, walkovers, retirements, postponements and suspensions.
 - [x] Cancel surface and opponent mismatches.
