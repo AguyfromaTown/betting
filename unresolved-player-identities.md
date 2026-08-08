@@ -1,8 +1,8 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-08T06:39:24.236992+00:00
+Updated: 2026-08-08T06:48:08.525901+00:00
 
-- Pending: 295
+- Pending: 299
 - Overdue (at least 72 hours): 93
 - Approved/applied: 0
 - Rejected: 0
@@ -310,6 +310,10 @@ These rows are old enough to require operator review before affected players can
 | Dana Guzman | Juan-Pablo Guzman | 0.720 | none | low_confidence | 1.0 d | 2026-08-07T07:11:44.741882+00:00 |
 | Wojcik, Monika | none | N/A | none | no_candidate | 1.0 d | 2026-08-07T07:11:44.962156+00:00 |
 | Angelina Voloshchuk | none | N/A | none | no_candidate | 1.0 d | 2026-08-07T07:11:45.238152+00:00 |
+| Felitsata Dorofeeva-Rybas | none | N/A | none | no_candidate | 0.0 d | 2026-08-08T06:47:43.898584+00:00 |
+| Laura Hietaranta | none | N/A | none | no_candidate | 0.0 d | 2026-08-08T06:47:44.222671+00:00 |
+| Lucciana Perez Alarcon | none | N/A | none | no_candidate | 0.0 d | 2026-08-08T06:47:44.599692+00:00 |
+| Victoria Bosio | Victoria Mboko | 0.846 | Victoria Osuigwe (0.786) | low_confidence | 0.0 d | 2026-08-08T06:47:44.638824+00:00 |
 
 ## Resolution procedure
 
