@@ -1,16 +1,16 @@
 # Tennis Bot Performance
 
-- Settled bets: 2
-- Win rate: 0.0%
-- Profit/loss: €-2.76
-- ROI: -100.00%
-- Brier score: N/A
-- Log loss: N/A
-- Expected calibration error (10 bins): N/A
+- Settled bets: 11
+- Win rate: 45.5%
+- Profit/loss: €0.81
+- ROI: 5.99%
+- Brier score: 0.2492
+- Log loss: 0.6915
+- Expected calibration error (10 bins): 5.28%
 - Shadow challenger Brier: N/A
 - Shadow challenger log loss: N/A
 - Shadow challenger ECE (10 bins): N/A
-- Average CLV: N/A
+- Average CLV: 146.79%
 - Settled counterfactual decisions: 119
 
 ## Calibration
