@@ -173,6 +173,7 @@ Status conventions:
 - [x] Rotate keys only on authentication/quota failures.
 - [x] Add exponential retry delays for transient errors.
 - [x] Add provider-specific circuit breakers.
+- [x] Parallelize independent provider collection and cache recurring workflow dependencies.
 - [x] Continue with deterministic Python output when Groq is unavailable.
 - [x] Keep AI output non-authoritative for probabilities and staking.
 - [x] Add automated model/policy rollback.

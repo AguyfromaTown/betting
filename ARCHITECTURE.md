@@ -153,6 +153,8 @@ The following are architecture requirements, not optional behavior:
 | `revalidate-tennis.yml` | Every 30 minutes/manual | Tests and near-start authorization/cancellation |
 | `settle-tennis.yml` | 02:30, 14:30 and 22:30 UTC/manual | Tests, verified settlement and reconciliation |
 | `tennis-quality.yml` | Relevant pushes/PRs/manual | Unit/integration tests and required coverage |
+
+Recurring workflows reuse a dependency cache keyed by `requirements-test.txt`. Result-only settlement downloads independent providers and dated scoreboards concurrently; provider trust, identity matching, and conflict rules are applied only after all evidence is normalized.
 | `secret-scan.yml` | Push/PR/weekly/manual | Full-history secret detection |
 | `dependency-audit.yml` | Dependency changes/weekly/manual | Strict known-vulnerability audit |
 

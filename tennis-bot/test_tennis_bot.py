@@ -1417,6 +1417,14 @@ class TennisBotTests(unittest.TestCase):
         self.assertIn("github.event.inputs.odds_max || '3.00'", workflow)
         self.assertIn('github.event.inputs.force', workflow)
 
+    def test_recurring_workflows_cache_python_dependencies(self):
+        workflows = MODULE_PATH.parent.parent / ".github" / "workflows"
+        for name in ("daily-tennis.yml", "revalidate-tennis.yml", "settle-tennis.yml", "maintenance-review.yml"):
+            with self.subTest(workflow=name):
+                text = (workflows / name).read_text(encoding="utf-8")
+                self.assertIn("cache: pip", text)
+                self.assertIn("cache-dependency-path: tennis-bot/requirements-test.txt", text)
+
     def test_paper_bet_log_is_isolated_from_real_bankroll_and_ledger(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

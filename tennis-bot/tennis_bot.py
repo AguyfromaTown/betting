@@ -1913,11 +1913,17 @@ def parse_espn_results(payload, date_str: str, tour: str) -> list[dict]:
 def fetch_espn_result_evidence(dates: list[str]) -> list[dict]:
     """Fetch keyless completed-result evidence from ESPN."""
     results = []
-    for date_str in dates:
-        compact_date = date_str.replace("-", "")
-        for tour in ("atp", "wta"):
-            url = f"https://site.api.espn.com/apis/site/v2/sports/tennis/{tour}/scoreboard"
-            payload = fetch_json(url, {"dates": compact_date}, {"User-Agent": "Mozilla/5.0"})
+    requests_to_make = [
+        (date_str, tour, f"https://site.api.espn.com/apis/site/v2/sports/tennis/{tour}/scoreboard")
+        for date_str in dates for tour in ("atp", "wta")
+    ]
+    def download(item):
+        date_str, tour, url = item
+        return date_str, tour, fetch_json(
+            url, {"dates": date_str.replace("-", "")}, {"User-Agent": "Mozilla/5.0"}
+        )
+    with ThreadPoolExecutor(max_workers=min(6, len(requests_to_make) or 1)) as executor:
+        for date_str, tour, payload in executor.map(download, requests_to_make):
             if payload is not None:
                 results.extend(parse_espn_results(payload, date_str, tour))
     return results
@@ -1998,12 +2004,16 @@ def parse_tennisexplorer_results(html: str, date_str: str) -> list[dict]:
 def fetch_tennisexplorer_result_evidence(dates: list[str]) -> list[dict]:
     """Fetch dated TennisExplorer pages once per unresolved match day."""
     results = []
+    requests_to_make = []
     for date_str in dates:
         year, month, day = date_str.split("-")
         url = f"https://www.tennisexplorer.com/results/?type=all&year={year}&month={month}&day={day}"
-        html = fetch(url, cache_ttl=10_800, stale_if_error=172_800)
-        if html:
-            results.extend(parse_tennisexplorer_results(html, date_str))
+        requests_to_make.append((date_str, url))
+    with ThreadPoolExecutor(max_workers=min(6, len(requests_to_make) or 1)) as executor:
+        texts = executor.map(lambda item: fetch(item[1], cache_ttl=10_800, stale_if_error=172_800), requests_to_make)
+        for (date_str, _url), html in zip(requests_to_make, texts):
+            if html:
+                results.extend(parse_tennisexplorer_results(html, date_str))
     return results
 
 
@@ -5420,9 +5430,11 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
     fallback_events = []
     if fallback_dates:
         log(f"  Primary result feed missed {len(unresolved_rows)} outcome(s); checking independent result sources")
-        fallback_events = (fetch_espn_result_evidence(fallback_dates)
-                           + fetch_tennisexplorer_result_evidence(fallback_dates)
-                           + fetch_archive_result_evidence(fallback_dates))
+        collectors = (fetch_espn_result_evidence, fetch_tennisexplorer_result_evidence,
+                      fetch_archive_result_evidence)
+        with ThreadPoolExecutor(max_workers=len(collectors)) as executor:
+            collected = list(executor.map(lambda collector: collector(fallback_dates), collectors))
+        fallback_events = [event for provider_events in collected for event in provider_events]
         log(f"  Loaded {len(fallback_events)} independent result evidence record(s)")
     closing_by_id = {}
     event_ids = [str(event.get("id")) for event in events if event.get("id")]

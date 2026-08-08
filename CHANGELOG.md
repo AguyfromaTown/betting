@@ -1,5 +1,6 @@
 # Changelog
 
+- Parallelized independent result-provider and per-date scoreboard downloads and enabled dependency caching across recurring GitHub workflows, reducing settlement latency and repeated package downloads without changing verification requirements.
 - Added automatic multi-source result verification: missing Odds-API.io outcomes can now settle from completed ESPN or TennisExplorer score evidence with conservative shortened-name matching and Infotennis corroboration; conflicts, archive-only evidence, and ambiguous retirements remain unresolved, and each result records its verification sources.
 - Pre-match authorization now opens 180 minutes before scheduled start and newly staged candidates receive an immediate revalidation pass, preventing delayed GitHub schedules from turning valid candidates into `match_started` cancellations without allowing live bets.
 - Manual Daily Tennis Picks runs now expose a safe force-refresh input for same-day discovery; selection-level deduplication still prevents previously processed picks from being staged twice.
