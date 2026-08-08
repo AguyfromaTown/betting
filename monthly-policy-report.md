@@ -23,6 +23,6 @@ Recommendations are advisory and never alter live thresholds automatically.
 
 | Policy | Thresholds | Evaluated | Would authorize | ROI | Avg CLV | Brier | Recommendation |
 |---|---|---:|---:|---:|---:|---:|---|
-| threshold-conservative-v1 | movement<=0.060;dispersion<=0.080;quality>=7;risk_ev>0.070 | 25 | 4 | 97.00% | 166.99% | 0.2699 | collecting data |
-| threshold-permissive-v1 | movement<=0.100;dispersion<=0.120;quality>=4;risk_ev>0.030 | 25 | 9 | 12.00% | 39.76% | 0.2474 | collecting data |
-| threshold-standard-v1 | movement<=0.100;dispersion<=0.120;quality>=5;risk_ev>0.050 | 25 | 7 | 12.57% | 39.76% | 0.2537 | collecting data |
+| threshold-conservative-v1 | movement<=0.060;dispersion<=0.080;quality>=7;risk_ev>0.070 | 26 | 5 | 108.60% | 158.50% | 0.2764 | collecting data |
+| threshold-permissive-v1 | movement<=0.100;dispersion<=0.120;quality>=4;risk_ev>0.030 | 26 | 10 | 26.30% | 76.50% | 0.2529 | collecting data |
+| threshold-standard-v1 | movement<=0.100;dispersion<=0.120;quality>=5;risk_ev>0.050 | 26 | 8 | 30.37% | 76.50% | 0.2598 | collecting data |
