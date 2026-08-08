@@ -1,6 +1,6 @@
 # Unresolved Tennis Player Identities
 
-Updated: 2026-08-08T14:59:12.791251+00:00
+Updated: 2026-08-08T15:26:41.112008+00:00
 
 - Pending: 317
 - Overdue (at least 72 hours): 216
@@ -101,13 +101,13 @@ These rows are old enough to require operator review before affected players can
 | Weir, Lexie | none | N/A | none | no_candidate | 4.3 d | 2026-08-04T08:32:55.167792+00:00 |
 | Patrick, Nicholas | Nicolas Parizzia | 0.733 | Nicholas Godsick (0.733) | low_confidence | 4.3 d | 2026-08-04T08:32:55.386666+00:00 |
 | McGloughlin, James | none | N/A | none | no_candidate | 4.3 d | 2026-08-04T08:32:55.621425+00:00 |
-| Alafia Ayeni | none | N/A | none | no_candidate | 4.0 d | 2026-08-04T13:48:01.186671+00:00 |
-| Barrera, Gabriella | Gabriella Price | 0.733 | none | low_confidence | 4.0 d | 2026-08-04T13:48:03.984448+00:00 |
-| Francesca Pace | Francesca Jones | 0.741 | none | low_confidence | 3.7 d | 2026-08-04T21:23:03.294150+00:00 |
-| Margaux Maquet | none | N/A | none | no_candidate | 3.7 d | 2026-08-04T21:23:03.336433+00:00 |
-| Maxwell Exsted | none | N/A | none | no_candidate | 3.7 d | 2026-08-04T21:23:03.377214+00:00 |
-| Frey, Charles | Charles Chen | 0.727 | none | low_confidence | 3.7 d | 2026-08-04T21:23:03.415261+00:00 |
-| Kennedy, Thomas | none | N/A | none | no_candidate | 3.7 d | 2026-08-04T21:23:03.457687+00:00 |
+| Alafia Ayeni | none | N/A | none | no_candidate | 4.1 d | 2026-08-04T13:48:01.186671+00:00 |
+| Barrera, Gabriella | Gabriella Price | 0.733 | none | low_confidence | 4.1 d | 2026-08-04T13:48:03.984448+00:00 |
+| Francesca Pace | Francesca Jones | 0.741 | none | low_confidence | 3.8 d | 2026-08-04T21:23:03.294150+00:00 |
+| Margaux Maquet | none | N/A | none | no_candidate | 3.8 d | 2026-08-04T21:23:03.336433+00:00 |
+| Maxwell Exsted | none | N/A | none | no_candidate | 3.8 d | 2026-08-04T21:23:03.377214+00:00 |
+| Frey, Charles | Charles Chen | 0.727 | none | low_confidence | 3.8 d | 2026-08-04T21:23:03.415261+00:00 |
+| Kennedy, Thomas | none | N/A | none | no_candidate | 3.8 d | 2026-08-04T21:23:03.457687+00:00 |
 | Vito Dell'elba | none | N/A | none | no_candidate | 3.3 d | 2026-08-05T08:31:43.928225+00:00 |
 | Cezar Gabriel Papoe | none | N/A | none | no_candidate | 3.3 d | 2026-08-05T08:31:43.980740+00:00 |
 | Briana Szabo | none | N/A | none | no_candidate | 3.3 d | 2026-08-05T08:31:44.020516+00:00 |
@@ -310,10 +310,10 @@ These rows are old enough to require operator review before affected players can
 | Dana Guzman | Juan-Pablo Guzman | 0.720 | none | low_confidence | 1.3 d | 2026-08-07T07:11:44.741882+00:00 |
 | Wojcik, Monika | none | N/A | none | no_candidate | 1.3 d | 2026-08-07T07:11:44.962156+00:00 |
 | Angelina Voloshchuk | none | N/A | none | no_candidate | 1.3 d | 2026-08-07T07:11:45.238152+00:00 |
-| Felitsata Dorofeeva-Rybas | none | N/A | none | no_candidate | 0.3 d | 2026-08-08T06:47:43.898584+00:00 |
-| Laura Hietaranta | none | N/A | none | no_candidate | 0.3 d | 2026-08-08T06:47:44.222671+00:00 |
-| Lucciana Perez Alarcon | none | N/A | none | no_candidate | 0.3 d | 2026-08-08T06:47:44.599692+00:00 |
-| Victoria Bosio | Victoria Mboko | 0.846 | Victoria Osuigwe (0.786) | low_confidence | 0.3 d | 2026-08-08T06:47:44.638824+00:00 |
+| Felitsata Dorofeeva-Rybas | none | N/A | none | no_candidate | 0.4 d | 2026-08-08T06:47:43.898584+00:00 |
+| Laura Hietaranta | none | N/A | none | no_candidate | 0.4 d | 2026-08-08T06:47:44.222671+00:00 |
+| Lucciana Perez Alarcon | none | N/A | none | no_candidate | 0.4 d | 2026-08-08T06:47:44.599692+00:00 |
+| Victoria Bosio | Victoria Mboko | 0.846 | Victoria Osuigwe (0.786) | low_confidence | 0.4 d | 2026-08-08T06:47:44.638824+00:00 |
 | Spurling, Nischal | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:45.254043+00:00 |
 | Yang, Robert | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:45.290216+00:00 |
 | Duong, David | none | N/A | none | no_candidate | 0.1 d | 2026-08-08T12:26:45.325055+00:00 |
