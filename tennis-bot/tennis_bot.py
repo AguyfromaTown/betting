@@ -5422,7 +5422,11 @@ def settle_prediction_audit_rows(audit_rows: list[dict], audit_headers: list[str
     return settled
 
 
-def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
+def settle_pending_bets(
+    api_keys: list[str],
+    include_real: bool = True,
+    include_prediction_audit: bool = False,
+) -> int:
     """Settle finished tennis bets and add bookmaker returns to bankroll."""
     if not api_keys:
         return 0
@@ -5441,12 +5445,14 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
     if POLICY_FILE.exists() and POLICY_FILE.stat().st_size:
         with POLICY_FILE.open(newline="", encoding="utf-8") as handle:
             policy_rows = list(csv.DictReader(handle))
-    audit_headers, audit_rows = read_csv_rows(AUDIT_FILE)
-    if audit_headers and "RESULT_SOURCES" not in audit_headers:
-        backup_state_for_migration(AUDIT_FILE, list(audit_headers), list(audit_headers) + ["RESULT_SOURCES"])
-        audit_headers.append("RESULT_SOURCES")
-        for row in audit_rows:
-            row.setdefault("RESULT_SOURCES", "")
+    audit_headers, audit_rows = ([], [])
+    if include_prediction_audit:
+        audit_headers, audit_rows = read_csv_rows(AUDIT_FILE)
+        if audit_headers and "RESULT_SOURCES" not in audit_headers:
+            backup_state_for_migration(AUDIT_FILE, list(audit_headers), list(audit_headers) + ["RESULT_SOURCES"])
+            audit_headers.append("RESULT_SOURCES")
+            for row in audit_rows:
+                row.setdefault("RESULT_SOURCES", "")
     unresolved_collections = rows + paper_rows + policy_rows + audit_rows
     dates = sorted({r.get("DATE", "") for r in unresolved_collections
                     if not r.get("RESULT", "").strip() and r.get("DATE")})
@@ -5614,7 +5620,8 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
     if policy_settled:
         atomic_write_csv(POLICY_FILE, POLICY_HEADERS, policy_rows)
         log(f"Settled {policy_settled} counterfactual policy decision(s)")
-    settle_prediction_audit_rows(audit_rows, list(audit_headers or []), events, fallback_events, closing_by_id)
+    if include_prediction_audit:
+        settle_prediction_audit_rows(audit_rows, list(audit_headers or []), events, fallback_events, closing_by_id)
     save_settlement_alerts(rows, paper_rows)
     return settled + paper_settled
 
@@ -7065,7 +7072,11 @@ def main():
         return
     mode = "settlement" if args.settle_only else "revalidation" if args.revalidate_only else "paper_daily" if args.paper_trading else "daily"
     begin_run_state(date_str, mode)
-    settle_pending_bets(odds_api_keys, include_real=not args.paper_trading)
+    settle_pending_bets(
+        odds_api_keys,
+        include_real=not args.paper_trading,
+        include_prediction_audit=True,
+    )
     update_run_state("settlement_complete")
     generate_performance_summary()
     save_source_health()
