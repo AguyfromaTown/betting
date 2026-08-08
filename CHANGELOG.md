@@ -1,5 +1,6 @@
 # Changelog
 
+- Added automatic multi-source result verification: missing Odds-API.io outcomes can now settle from completed ESPN or TennisExplorer score evidence with conservative shortened-name matching and Infotennis corroboration; conflicts, archive-only evidence, and ambiguous retirements remain unresolved, and each result records its verification sources.
 - Pre-match authorization now opens 180 minutes before scheduled start and newly staged candidates receive an immediate revalidation pass, preventing delayed GitHub schedules from turning valid candidates into `match_started` cancellations without allowing live bets.
 - Manual Daily Tennis Picks runs now expose a safe force-refresh input for same-day discovery; selection-level deduplication still prevents previously processed picks from being staged twice.
 - The uploaded Infotennis package is now the primary ATP/WTA player-data collector. Its new GitHub-compatible path uses daily-updated TennisMyLife main-tour, Challenger, qualifying and ongoing CSV feeds without Selenium or MySQL; the static Sackmann archive is no longer queried.

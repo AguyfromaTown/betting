@@ -52,7 +52,7 @@ The executable is `tennis-bot/tennis_bot.py`. Its modes share the same state and
 | Daily | default | Yes | Optional | Stages only | Collect, model, validate and stage candidates |
 | Paper daily | `--paper-trading` | Yes | Optional | Paper ledger only | Exercise the full lifecycle without real bankroll changes |
 | Revalidation | `--revalidate-only` | Yes | No | May authorize and deduct | Refresh near-start prices/status and authorize or cancel staged candidates |
-| Settlement | `--settle-only` | Yes | No | May credit/reconcile | Resolve authorized bets from verified results |
+| Settlement | `--settle-only` | Yes | No | May credit/reconcile | Resolve authorized bets from primary results or exact two-source fallback consensus |
 | Backtest | `--backtest-only` | No | No | None | Rebuild performance and policy reports from recorded ledgers |
 | Diagnostic | `--diagnostic` | Yes | No | None | Test collection/model coverage with no writes, stakes, AI, or settlement |
 

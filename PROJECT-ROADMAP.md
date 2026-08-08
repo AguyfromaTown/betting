@@ -157,6 +157,8 @@ Status conventions:
 - [x] Alert when an outcome remains unresolved beyond a configured period.
 - [x] Reconcile every return against an immutable transaction ledger.
 - [x] Never infer an outcome when verified scores are unavailable.
+- [x] Verify missing primary outcomes through completed ESPN/TennisExplorer evidence with Infotennis corroboration and conflict detection.
+- [x] Persist the sources used for every automatic result decision.
 
 ## Reliability and recovery
 

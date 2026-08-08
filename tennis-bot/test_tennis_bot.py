@@ -406,6 +406,75 @@ class TennisBotTests(unittest.TestCase):
         self.assertEqual(fixtures[0]["event_id"], "espn:atp:42")
         self.assertEqual(fixtures[0]["status"], "pre")
 
+    def test_espn_completed_result_is_normalized_for_settlement(self):
+        payload = {"events": [{"name": "ATP Test", "groupings": [{
+            "grouping": {"slug": "mens-singles"}, "competitions": [{
+                "id": "44", "startDate": "2026-08-01T12:00Z",
+                "status": {"type": {"state": "post", "completed": True}},
+                "competitors": [
+                    {"athlete": {"displayName": "Player One"}, "winner": True, "score": "2"},
+                    {"athlete": {"displayName": "Player Two"}, "winner": False, "score": "0"},
+                ],
+            }]}]}]}
+        results = bot.parse_espn_results(payload, "2026-08-01", "atp")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["winner"], "Player One")
+        self.assertEqual(results[0]["scores"], {"home": 2.0, "away": 0.0})
+
+    def test_two_independent_result_sources_can_verify_missing_primary_event(self):
+        row = {"DATE": "2026-08-01", "MATCH": "Player One vs Player Two (ATP)"}
+        fallback = [
+            {"date": "2026-08-01T12:00Z", "home": "Player One", "away": "Player Two",
+             "winner": "Player One", "scores": {"home": 2, "away": 0}, "result_source": "ESPN"},
+            {"date": "2026-08-01T00:00Z", "home": "Player One", "away": "Player Two",
+             "winner": "Player One", "scores": {"home": 1, "away": 0}, "result_source": "Infotennis archive"},
+        ]
+        verified = bot.select_verified_result(row, [], fallback)
+        self.assertEqual(verified["verification_sources"], ["ESPN", "Infotennis archive"])
+        self.assertEqual(bot.result_event_outcome(verified), "one:p")
+
+    def test_completed_espn_result_matches_shortened_stored_names(self):
+        row = {"DATE": "2026-07-29", "MATCH": "Landaluce vs Zheng"}
+        event = {"date": "2026-07-29T06:35Z", "home": "Martin Landaluce", "away": "Michael Zheng",
+                 "winner": "Michael Zheng", "scores": {"home": 0, "away": 1}, "result_source": "ESPN"}
+        verified = bot.select_verified_result(row, [], [event])
+        self.assertIsNotNone(verified)
+        self.assertEqual(verified["verification_sources"], ["ESPN"])
+
+    def test_result_identity_does_not_confuse_same_surname_initials(self):
+        row = {"DATE": "2026-08-01", "MATCH": "Wang, Xinyu vs Wang, Xiyu"}
+        wrong_event = {"date": "2026-08-01T12:00Z", "home": "Xiyu Wang", "away": "Yafan Wang",
+                       "winner": "Xiyu Wang", "scores": {"home": 2, "away": 0}, "result_source": "ESPN"}
+        self.assertFalse(bot.result_event_matches(row, wrong_event))
+
+    def test_archive_only_result_is_not_enough_to_settle(self):
+        row = {"DATE": "2026-08-01", "MATCH": "Player One vs Player Two"}
+        archive = {"date": "2026-08-01T00:00Z", "home": "Player One", "away": "Player Two",
+                   "winner": "Player One", "scores": {"home": 1, "away": 0},
+                   "result_source": "Infotennis archive"}
+        self.assertIsNone(bot.select_verified_result(row, [], [archive]))
+
+    def test_tennisexplorer_parser_supports_abbreviated_itf_names(self):
+        html = """
+        <table><tr id="r7"><td class="t-name">Bouzige M.</td><td class="result">2</td></tr>
+        <tr id="r7b"><td class="t-name">Hazawa S.</td><td class="result">0</td></tr></table>
+        """
+        events = bot.parse_tennisexplorer_results(html, "2026-07-31")
+        row = {"DATE": "2026-07-31", "MATCH": "Shinji Hazawa vs Moerani Bouzige"}
+        verified = bot.select_verified_result(row, [], events)
+        self.assertEqual(verified["winner"], "Bouzige M.")
+        self.assertTrue(bot.player_names_equivalent("Moerani Bouzige", verified["winner"]))
+
+    def test_conflicting_result_sources_leave_match_unresolved(self):
+        row = {"DATE": "2026-08-01", "MATCH": "Player One vs Player Two"}
+        fallback = [
+            {"date": "2026-08-01T12:00Z", "home": "Player One", "away": "Player Two",
+             "winner": "Player One", "scores": {"home": 2, "away": 0}, "result_source": "ESPN"},
+            {"date": "2026-08-01T00:00Z", "home": "Player Two", "away": "Player One",
+             "winner": "Player Two", "scores": {"home": 1, "away": 0}, "result_source": "Infotennis archive"},
+        ]
+        self.assertIsNone(bot.select_verified_result(row, [], fallback))
+
     def test_independent_fixture_cross_check_is_order_insensitive(self):
         primary = [
             {"player1": "Zheng, Michael", "player2": "Arthur Gea"},
@@ -1272,6 +1341,40 @@ class TennisBotTests(unittest.TestCase):
             self.assertEqual(rows[0]["RESULT"], "W")
             self.assertEqual(rows[0]["RETURN"], "6.00")
             self.assertEqual(bankroll_path.read_text(), "103.00")
+
+    def test_settlement_uses_completed_scoreboard_when_primary_omits_event(self):
+        fallback = {
+            "date": "2026-07-31T00:00:00Z", "home": "Becroft I.", "away": "Matsuda R.",
+            "winner": "Becroft I.", "scores": {"home": 2, "away": 0},
+            "status": "settled", "result_source": "TennisExplorer",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); log_path = root / "bets.csv"; bankroll = root / "bankroll.txt"
+            log_path.write_text(
+                "DATE,MATCH,BET,ODDS,STAKE,RESULT,RETURN,STARTING BALANCE\n"
+                "2026-07-31,Ryuki Matsuda vs Isaac Becroft,Isaac Becroft to win,2.00,3.00,,,100.00\n",
+                encoding="utf-8",
+            )
+            bankroll.write_text("97.00", encoding="utf-8")
+            with (
+                patch.object(bot, "LOG_FILE", log_path),
+                patch.object(bot, "PAPER_LOG_FILE", root / "paper.csv"),
+                patch.object(bot, "BANKROLL_FILE", bankroll),
+                patch.object(bot, "TRANSACTION_FILE", root / "ledger.csv"),
+                patch.object(bot, "POLICY_FILE", root / "policy.csv"),
+                patch.object(bot, "SETTLEMENT_ALERT_FILE", root / "alerts.md"),
+                patch.object(bot, "fetch_odds_json", return_value=([], 0)),
+                patch.object(bot, "fetch_selected_bookmakers", return_value={}),
+                patch.object(bot, "fetch_espn_result_evidence", return_value=[]),
+                patch.object(bot, "fetch_tennisexplorer_result_evidence", return_value=[fallback]),
+                patch.object(bot, "fetch_archive_result_evidence", return_value=[]),
+                patch.object(bot, "update_audit_result"),
+            ):
+                settled = bot.settle_pending_bets(["key"])
+            _, rows = bot.read_csv_rows(log_path)
+            self.assertEqual(settled, 1)
+            self.assertEqual((rows[0]["RESULT"], rows[0]["RETURN"]), ("W", "6.00"))
+            self.assertEqual(rows[0]["RESULT_SOURCES"], "TennisExplorer")
 
     def test_refresh_discovery_excludes_processed_picks_but_keeps_new_ones(self):
         with tempfile.TemporaryDirectory() as directory:

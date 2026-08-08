@@ -79,7 +79,7 @@ TRANSACTION_HEADERS = ["ID", "TIMESTAMP", "TYPE", "REFERENCE", "AMOUNT", "BALANC
 BET_HEADERS = [
     "DATE", "MATCH", "BET", "ODDS", "BOOKMAKER", "STAKE", "RESULT", "RETURN", "STARTING BALANCE",
     "SETTLEMENT_RULE", "MODEL_VERSION", "MODEL_PROBABILITY", "EV", "GRADE", "EVENT_ID", "TOUR", "SURFACE",
-    "AUTHORIZED_AT", "CLOSING_ODDS", "CLV", "BRIER_SCORE",
+    "AUTHORIZED_AT", "CLOSING_ODDS", "CLV", "BRIER_SCORE", "RESULT_SOURCES",
 ]
 REPORTS_DIR = REPO_ROOT / "reports"
 REQUEST_TIMEOUT = 30
@@ -1091,7 +1091,7 @@ def fetch_reader(target_url: str, cache_ttl: int = 0, stale_if_error: int = 0) -
     return None
 
 
-def fetch_json(url: str, params: dict | None = None):
+def fetch_json(url: str, params: dict | None = None, headers: dict | None = None):
     """Fetch JSON while keeping API keys out of log output."""
     provider = url.split("/")[2]
     if not allow_provider_request(provider):
@@ -1099,7 +1099,7 @@ def fetch_json(url: str, params: dict | None = None):
     for attempt in range(MAX_TRANSIENT_RETRIES + 1):
         started = time.monotonic()
         try:
-            response = requests.get(url, params=params, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
+            response = requests.get(url, params=params, headers=headers or REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
             if response.status_code in TRANSIENT_HTTP_STATUSES and attempt < MAX_TRANSIENT_RETRIES:
                 record_source_health(provider, False, f"HTTP {response.status_code} retry {attempt + 1}", started)
                 wait_before_retry(url.split("/")[2], attempt, response); continue
@@ -1850,6 +1850,161 @@ def fetch_secondary_fixtures(date_str: str) -> list[dict]:
             fixtures.extend(parse_espn_scoreboard(payload, date_str, tour))
     log(f"  Found {len(fixtures)} independent fixtures from ESPN")
     return fixtures
+
+
+def parse_espn_results(payload, date_str: str, tour: str) -> list[dict]:
+    """Normalize completed ESPN singles matches into settlement evidence."""
+    events = normalize_provider_collection(payload, "ESPN", f"/{tour}/scoreboard-results")
+    results = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        for grouping in event.get("groupings") or []:
+            grouping_meta = grouping.get("grouping") or {} if isinstance(grouping, dict) else {}
+            if "singles" not in str(grouping_meta.get("slug") or grouping_meta.get("displayName") or "").casefold():
+                continue
+            for competition in grouping.get("competitions") or []:
+                if not isinstance(competition, dict):
+                    continue
+                played = str(competition.get("startDate") or competition.get("date") or "")
+                status = competition.get("status") or {}
+                status_type = status.get("type") if isinstance(status, dict) else {}
+                completed = bool(status_type.get("completed")) if isinstance(status_type, dict) else False
+                state = str(status_type.get("state") or "") if isinstance(status_type, dict) else ""
+                if not played.startswith(date_str) or (not completed and state.casefold() not in {"post", "final"}):
+                    continue
+                competitors = competition.get("competitors") or []
+                if not isinstance(competitors, list) or len(competitors) != 2:
+                    continue
+                normalized = []
+                for competitor in competitors:
+                    athlete = competitor.get("athlete") if isinstance(competitor, dict) else None
+                    name = athlete.get("displayName") if isinstance(athlete, dict) else None
+                    if not name:
+                        break
+                    winner_value = competitor.get("winner")
+                    won = winner_value is True or str(winner_value).casefold() == "true"
+                    try:
+                        score = float(competitor.get("score"))
+                    except (TypeError, ValueError):
+                        score = None
+                    normalized.append((str(name).strip(), won, score))
+                if len(normalized) != 2:
+                    continue
+                if normalized[0][1] == normalized[1][1]:
+                    if normalized[0][2] is None or normalized[1][2] is None or normalized[0][2] == normalized[1][2]:
+                        continue
+                    winner_index = 0 if normalized[0][2] > normalized[1][2] else 1
+                else:
+                    winner_index = 0 if normalized[0][1] else 1
+                scores = {
+                    "home": normalized[0][2] if normalized[0][2] is not None else (1 if winner_index == 0 else 0),
+                    "away": normalized[1][2] if normalized[1][2] is not None else (1 if winner_index == 1 else 0),
+                }
+                results.append({
+                    "id": f"espn:{tour}:{competition.get('id', '')}", "date": played,
+                    "home": normalized[0][0], "away": normalized[1][0], "scores": scores,
+                    "winner": normalized[winner_index][0], "status": "settled",
+                    "result_source": "ESPN",
+                })
+    return results
+
+
+def fetch_espn_result_evidence(dates: list[str]) -> list[dict]:
+    """Fetch keyless completed-result evidence from ESPN."""
+    results = []
+    for date_str in dates:
+        compact_date = date_str.replace("-", "")
+        for tour in ("atp", "wta"):
+            url = f"https://site.api.espn.com/apis/site/v2/sports/tennis/{tour}/scoreboard"
+            payload = fetch_json(url, {"dates": compact_date}, {"User-Agent": "Mozilla/5.0"})
+            if payload is not None:
+                results.extend(parse_espn_results(payload, date_str, tour))
+    return results
+
+
+def fetch_archive_result_evidence(dates: list[str]) -> list[dict]:
+    """Fetch completed-result evidence from the maintained Infotennis CSV feeds."""
+    if not dates or infotennis_season_sources is None:
+        return []
+    wanted_dates = {date.replace("-", "") for date in dates}
+    years = sorted({int(date[:4]) for date in dates})
+    sources = []
+    for year in years:
+        sources.extend(infotennis_season_sources(year, history_years=1))
+    unique_urls = list(dict.fromkeys(item[2] for item in sources))
+    results = []
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        texts = list(executor.map(lambda url: fetch(url, cache_ttl=10_800, stale_if_error=172_800), unique_urls))
+    for url, content in zip(unique_urls, texts):
+        if not content:
+            continue
+        for row in csv.DictReader(io.StringIO(content)):
+            raw_date = str(row.get("tourney_date") or "")
+            winner, loser = str(row.get("winner_name") or "").strip(), str(row.get("loser_name") or "").strip()
+            if raw_date not in wanted_dates or not winner or not loser:
+                continue
+            score = str(row.get("score") or "")
+            results.append({
+                "id": f"archive:{hashlib.sha256((url + raw_date + winner + loser).encode()).hexdigest()[:16]}",
+                "date": f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}T00:00:00Z",
+                "home": winner, "away": loser, "winner": winner,
+                "scores": {"home": 1, "away": 0}, "score": score,
+                "status": "settled", "retired": "RET" in score.upper(),
+                "walkover": any(flag in score.upper() for flag in ("W/O", "WO")),
+                "result_source": "Infotennis archive", "result_source_url": url,
+            })
+    return results
+
+
+def parse_tennisexplorer_results(html: str, date_str: str) -> list[dict]:
+    """Parse completed singles result pairs from a dated TennisExplorer page."""
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    results = []
+    for first in soup.select("tr[id]:not([id$='b'])"):
+        row_id = str(first.get("id") or "")
+        second = soup.find("tr", id=f"{row_id}b")
+        if not row_id or second is None:
+            continue
+        names, set_scores = [], []
+        valid = True
+        for row in (first, second):
+            name_cell, result_cell = row.select_one("td.t-name"), row.select_one("td.result")
+            if name_cell is None or result_cell is None:
+                valid = False
+                break
+            try:
+                match_score = float(result_cell.get_text(" ", strip=True))
+            except ValueError:
+                valid = False
+                break
+            names.append(name_cell.get_text(" ", strip=True))
+            set_scores.append(match_score)
+        if not valid or len(names) != 2 or set_scores[0] == set_scores[1]:
+            continue
+        winner_index = 0 if set_scores[0] > set_scores[1] else 1
+        results.append({
+            "id": f"tennisexplorer:{date_str}:{row_id}", "date": f"{date_str}T00:00:00Z",
+            "home": names[0], "away": names[1],
+            "scores": {"home": set_scores[0], "away": set_scores[1]},
+            "winner": names[winner_index], "status": "settled",
+            "result_source": "TennisExplorer",
+        })
+    return results
+
+
+def fetch_tennisexplorer_result_evidence(dates: list[str]) -> list[dict]:
+    """Fetch dated TennisExplorer pages once per unresolved match day."""
+    results = []
+    for date_str in dates:
+        year, month, day = date_str.split("-")
+        url = f"https://www.tennisexplorer.com/results/?type=all&year={year}&month={month}&day={day}"
+        html = fetch(url, cache_ttl=10_800, stale_if_error=172_800)
+        if html:
+            results.extend(parse_tennisexplorer_results(html, date_str))
+    return results
 
 
 def cross_check_fixture_sources(matches: list[dict], secondary: list[dict]) -> list[dict]:
@@ -5120,6 +5275,99 @@ def save_settlement_alerts(real_rows: list[dict], paper_rows: list[dict], now: d
     return len(overdue)
 
 
+def player_name_signature(player: str) -> tuple[str, str]:
+    cleaned = unicodedata.normalize("NFKD", str(player)).encode("ascii", "ignore").decode().casefold()
+    tokens = re.findall(r"[a-z0-9]+", cleaned)
+    if not tokens:
+        return "", ""
+    surname_first = "," in str(player) or (len(tokens) > 1 and len(tokens[-1]) <= 2)
+    family = tokens[0] if surname_first else tokens[-1]
+    given = tokens[1] if surname_first and len(tokens) > 1 else tokens[0] if len(tokens) > 1 else ""
+    return family, given[:1]
+
+
+def player_family_token(player: str) -> str:
+    return player_name_signature(player)[0]
+
+
+def player_names_equivalent(left: str, right: str) -> bool:
+    if normalize_player_name(left) == normalize_player_name(right):
+        return True
+    (left_family, left_initial), (right_family, right_initial) = (
+        player_name_signature(left), player_name_signature(right)
+    )
+    return bool(len(left_family) >= 3 and left_family == right_family
+                and (not left_initial or not right_initial or left_initial == right_initial))
+
+
+def result_event_matches(row: dict, event: dict) -> bool:
+    """Require exact date and an order-independent player pair."""
+    if not str(event.get("date") or "").startswith(str(row.get("DATE") or "")):
+        return False
+    raw_label = str(row.get("MATCH") or "")
+    sides = re.split(r"\s+vs\.?\s+", raw_label, maxsplit=1, flags=re.I)
+    if len(sides) != 2:
+        return False
+    recorded_home = sides[0].strip()
+    recorded_away = re.sub(r"\s+\([^)]*\)\s*$", "", sides[1]).strip()
+    home, away = str(event.get("home") or ""), str(event.get("away") or "")
+    direct = player_names_equivalent(recorded_home, home) and player_names_equivalent(recorded_away, away)
+    reversed_pair = player_names_equivalent(recorded_home, away) and player_names_equivalent(recorded_away, home)
+    return bool(home and away and (direct or reversed_pair))
+
+
+def result_event_outcome(event: dict) -> str | None:
+    """Return canonical winner identity or VOID for usable result evidence."""
+    if tennis_void_reason(event) and not tennis_retirement_detected(event):
+        return "VOID"
+    winner_family, winner_initial = player_name_signature(str(event.get("winner") or ""))
+    if winner_family:
+        return f"{winner_family}:{winner_initial}"
+    scores = event.get("scores") or {}
+    try:
+        home_score, away_score = float(scores["home"]), float(scores["away"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if home_score == away_score:
+        return None
+    family, initial = player_name_signature(str(event.get("home") if home_score > away_score else event.get("away")))
+    return f"{family}:{initial}" if family else None
+
+
+def select_verified_result(row: dict, primary_events: list[dict], fallback_events: list[dict]) -> dict | None:
+    """Select authoritative primary/scoreboard evidence with conflict checks.
+
+    Odds-API.io remains the primary settlement authority. Completed ESPN and
+    TennisExplorer scoreboards are authoritative fallbacks, while the maintained
+    Infotennis archive corroborates them. Any contradictory evidence fails closed.
+    """
+    primary = next((event for event in primary_events if result_event_matches(row, event)
+                    and result_event_outcome(event)), None)
+    if primary:
+        verified = dict(primary)
+        verified["verification_sources"] = ["Odds-API.io"]
+        return verified
+    matches = [event for event in fallback_events if result_event_matches(row, event)]
+    if any(tennis_retirement_detected(event) for event in matches):
+        return None
+    by_source = {}
+    for event in matches:
+        outcome = result_event_outcome(event)
+        source = str(event.get("result_source") or "").strip()
+        if outcome and source:
+            by_source[source] = (outcome, event)
+    outcomes = {item[0] for item in by_source.values()}
+    if len(outcomes) > 1:
+        log(f"  Conflicting result sources for {row.get('MATCH', 'unknown match')}; leaving unresolved")
+        return None
+    authoritative_fallbacks = {"ESPN", "TennisExplorer"}
+    if not outcomes or (not authoritative_fallbacks.intersection(by_source) and len(by_source) < 2):
+        return None
+    verified = dict(next(iter(by_source.values()))[1])
+    verified["verification_sources"] = sorted(by_source)
+    return verified
+
+
 def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
     """Settle finished tennis bets and add bookmaker returns to bankroll."""
     if not api_keys:
@@ -5153,7 +5401,29 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
             api_keys, key_index,
         )
         if isinstance(payload, list):
-            events.extend(payload)
+            for event in payload:
+                if isinstance(event, dict):
+                    event = dict(event)
+                    event.setdefault("result_source", "Odds-API.io")
+                    events.append(event)
+    unresolved_rows = []
+    for row in rows + paper_rows + policy_rows:
+        if row.get("RESULT", "").strip():
+            continue
+        lookup_row = row
+        if not row.get("MATCH") and (row.get("PLAYER1") or row.get("PLAYER2")):
+            lookup_row = dict(row)
+            lookup_row["MATCH"] = f"{row.get('PLAYER1', '')} vs {row.get('PLAYER2', '')}"
+        if not any(result_event_matches(lookup_row, event) and result_event_outcome(event) for event in events):
+            unresolved_rows.append(lookup_row)
+    fallback_dates = sorted({row.get("DATE", "") for row in unresolved_rows if row.get("DATE")})
+    fallback_events = []
+    if fallback_dates:
+        log(f"  Primary result feed missed {len(unresolved_rows)} outcome(s); checking independent result sources")
+        fallback_events = (fetch_espn_result_evidence(fallback_dates)
+                           + fetch_tennisexplorer_result_evidence(fallback_dates)
+                           + fetch_archive_result_evidence(fallback_dates))
+        log(f"  Loaded {len(fallback_events)} independent result evidence record(s)")
     closing_by_id = {}
     event_ids = [str(event.get("id")) for event in events if event.get("id")]
     for start in range(0, len(event_ids), 10):
@@ -5173,13 +5443,12 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
     for row, is_paper in [(item, False) for item in rows] + [(item, True) for item in paper_rows]:
         if row.get("RESULT", "").strip():
             continue
-        label = normalize_player_name(row.get("MATCH", ""))
-        pick = normalize_player_name(re.sub(r"\s+to win\s*$", "", row.get("BET", ""), flags=re.I))
-        event = next((e for e in events if str(e.get("date", "")).startswith(row.get("DATE", ""))
-                      and normalize_player_name(str(e.get("home", ""))) in label
-                      and normalize_player_name(str(e.get("away", ""))) in label), None)
+        raw_pick = re.sub(r"\s+to win\s*$", "", row.get("BET", ""), flags=re.I)
+        pick = normalize_player_name(raw_pick)
+        event = select_verified_result(row, events, fallback_events)
         if not event:
             continue
+        row["RESULT_SOURCES"] = ";".join(event.get("verification_sources") or [])
         bookmaker = row.get("BOOKMAKER", "")
         retirement = tennis_retirement_detected(event)
         settlement_rule = "standard_completed_match"
@@ -5203,8 +5472,8 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
             home_score, away_score = float(scores["home"]), float(scores["away"])
         except (KeyError, TypeError, ValueError):
             continue
-        home_pick = pick == normalize_player_name(str(event.get("home", "")))
-        away_pick = pick == normalize_player_name(str(event.get("away", "")))
+        home_pick = player_names_equivalent(raw_pick, str(event.get("home", "")))
+        away_pick = player_names_equivalent(raw_pick, str(event.get("away", "")))
         if not (home_pick or away_pick) or home_score == away_score:
             continue
         won = (home_pick and home_score > away_score) or (away_pick and away_score > home_score)
@@ -5237,10 +5506,9 @@ def settle_pending_bets(api_keys: list[str], include_real: bool = True) -> int:
     policy_settled = 0
     for row in policy_rows:
         if row.get("RESULT"): continue
-        event = next((event for event in events if (row.get("EVENT_ID") and str(event.get("id")) == row["EVENT_ID"]) or
-                      (str(event.get("date", "")).startswith(row.get("DATE", "")) and
-                       {normalize_player_name(str(event.get("home", ""))), normalize_player_name(str(event.get("away", "")))} ==
-                       {normalize_player_name(row.get("PLAYER1", "")), normalize_player_name(row.get("PLAYER2", ""))})), None)
+        policy_match = dict(row)
+        policy_match["MATCH"] = f"{row.get('PLAYER1', '')} vs {row.get('PLAYER2', '')}"
+        event = select_verified_result(policy_match, events, fallback_events)
         if not event: continue
         bookmaker = row.get("BOOKMAKER", "")
         retirement = tennis_retirement_detected(event)
@@ -6457,7 +6725,7 @@ def log_bets(
         "MODEL_VERSION": row["model_version"], "MODEL_PROBABILITY": row["model_probability"],
         "EV": row["ev"], "GRADE": row["grade"], "EVENT_ID": row["event_id"],
         "TOUR": row["tour"], "SURFACE": row["surface"], "AUTHORIZED_AT": row["authorized_at"],
-        "CLOSING_ODDS": "", "CLV": "", "BRIER_SCORE": "",
+        "CLOSING_ODDS": "", "CLV": "", "BRIER_SCORE": "", "RESULT_SOURCES": "",
     } for row in rows_to_append)
     write_bet_log(target_log, existing_rows)
 

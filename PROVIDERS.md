@@ -29,9 +29,10 @@ CSV source is unavailable.
 | Provider | Role | Authentication | Production authority | Fallback |
 |---|---|---|---|---|
 | Odds-API.io | Fixtures, bookmaker moneylines, status, results and closing prices | `ODDS_API_KEY[_2..5]` | Primary fixture/price/result provider | Key rotation; no invented fixture fallback |
-| ESPN scoreboard | Independent ATP/WTA fixture corroboration | None | Confirmation only | Missing confirmation reduces evidence; it does not replace prices |
+| ESPN scoreboard | Independent ATP/WTA fixtures and completed results | None | Fixture confirmation and authoritative result fallback | TennisExplorer and Infotennis conflict checks |
+| TennisExplorer | Dated ATP/WTA/Challenger/ITF completed scores | None | Authoritative result fallback only | ESPN and Infotennis conflict checks |
 | Tennis Abstract | ATP/WTA Elo, surface Elo, rank and age | None | Player rating evidence | Jina Reader, then bounded cache |
-| TML Database | Recent ATP-style match history and statistics | None | Historical feature evidence | Other season/history files; missing rows remain missing |
+| TML Database | Recent match history, statistics and result corroboration | None | Historical features; non-authoritative settlement corroboration | Other season/history files; missing rows remain missing |
 | 36-SURE dataset | WTA historical match supplement | None | Historical feature evidence | TML files where coverage overlaps |
 | Oddspedia HTML | Opportunistic odds lookup for an unpriced fixture | None | Low-trust discovery only | None; later authorization still requires full market controls |
 | ATP Tour/WTA websites | Legacy HTML fixture helper parsers | None | Not in the production fixture path | None |
@@ -293,7 +294,9 @@ On `401`, `403`, or `429`, the next configured Groq key is tried. Transient stat
 
 ## Settlement contract
 
-Settlement uses Odds-API.io events with `status=settled`. An event is eligible only when its date and normalized home/away identities match the recorded bet. Standard completion requires numeric `scores.home` and `scores.away` with a non-tied result. Retirement/walkover/void indicators are interpreted through explicit functions and the bookmaker policy in `risk-config.json`. If no event, scores, identity match, or valid rule exists, the bet remains unresolved.
+Settlement first uses Odds-API.io events with `status=settled`. If that feed omits a recorded match, the verifier queries completed ESPN scoreboards, dated TennisExplorer results, and the maintained Infotennis ATP/WTA result feeds. Completed ESPN or TennisExplorer score evidence is authoritative after exact date and conservative full-name/surname identity matching. Infotennis corroborates those feeds but cannot settle alone; two non-authoritative sources may settle only by exact agreement. Any conflict, archive-only result, ambiguous retirement, or identity mismatch remains unresolved. The sources used to grade each bet are stored in `RESULT_SOURCES`.
+
+Standard primary completion requires numeric `scores.home` and `scores.away` with a non-tied result. Retirement/walkover/void indicators are interpreted through explicit functions and the bookmaker policy in `risk-config.json`. Fallback retirement evidence remains unresolved because provider winner flags do not prove that a bookmaker's action threshold was satisfied.
 
 Closing prices come from `/v3/odds/multi` and are stored only when a matching side price exists. Missing closing prices leave CLV blank; they are never converted to zero.
 
